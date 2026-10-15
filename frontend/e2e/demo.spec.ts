@@ -14,7 +14,8 @@ async function openDemo(page: Page) {
   const rig = await res.json();
   created.push(rig.id);
   await page.goto(`/rigs/${rig.id}`);
-  await expect(page.getByRole("tab", { name: "board" })).toBeVisible();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(page.getByRole("tab", { name: "board" })).toBeVisible({ timeout: 15_000 });
 }
 
 test.afterEach(async ({ page }) => {

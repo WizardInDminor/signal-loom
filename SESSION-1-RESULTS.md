@@ -23,14 +23,14 @@ A working local-first rig design application:
   message counts/limits, ML10X preset chains with firmware gate); exports with explicit
   evidence levels; device library with provenance display and custom profiles.
 - **Docs**: `README.md`, `ARCHITECTURE.md`, `docs/research.md` (+ raw notes), this file.
-- **Quality gates**: 46 pytest tests, 9 Playwright scenarios, ruff, eslint, tsc, `next build`,
+- **Quality gates**: 47 pytest tests, 9 Playwright scenarios, ruff, eslint, tsc, `next build`,
   GitHub Actions workflow running all of them.
 
 ## Verification evidence (from this session)
 
 | Check | Result |
 |---|---|
-| `backend: pytest -q` | 46 passed (includes fixture round-trip tests against real MC8 editor exports downloaded locally; those two tests skip in CI unless `scripts/fetch-fixtures.sh` is run) |
+| `backend: pytest -q` | 47 passed (includes fixture round-trip tests against real MC8 editor exports downloaded locally; those two tests skip in CI unless `scripts/fetch-fixtures.sh` is run) |
 | `backend: ruff check` / `ruff format --check` | clean |
 | `frontend: npm run lint` / `npm run typecheck` / `npm run build` | clean; build produces `/`, `/catalog`, `/rigs/[id]` |
 | `frontend: npm run test:e2e` (backend :8000 + frontend :3000, Chromium) | 9 passed |
@@ -96,7 +96,9 @@ Legend: **verified** (automated or directly observed), **implemented-unverified*
 4. **Device specs with third-party-only evidence**: Sunset dimensions, BigSky MX bypass CC 102
    and bank mapping (BigSky family, not the MX manual), Plumes jack list. All flagged in the UI.
 5. **No human usability test** beyond the automated browser path and screenshot review.
-6. **CI not yet observed green** (first run occurs when the branch is pushed).
+6. **CI**: the first run exposed a real bug (one SQLite connection shared across the request
+   thread pool caused intermittent 500s under the UI's parallel requests); fixed with
+   per-thread connections and a regression test. Green status is tracked on the PR.
 7. Deferred (P2/P3): Advanced-mode graph editor, cable bill of materials beyond the manifest,
    setlist mode, image overlays, MC8 expression presets / bank messages / non-PC-CC message
    types, allBanks export, live MIDI.

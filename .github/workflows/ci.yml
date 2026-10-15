@@ -2,6 +2,7 @@ name: ci
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 jobs:
@@ -65,4 +66,4 @@ jobs:
           for i in $(seq 1 60); do curl -sf localhost:3000/ > /dev/null && break; sleep 1; done
       - run: cd frontend && npm run test:e2e
       - if: failure()
-        run: tail -50 /tmp/backend.log /tmp/frontend.log || true
+        run: tail -n 50 /tmp/backend.log /tmp/frontend.log || true

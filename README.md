@@ -59,7 +59,7 @@ and `SIGNAL_LOOM_NO_DEMO=1` to skip the demo rig. API docs: <http://127.0.0.1:80
 ## Test, lint, build
 
 ```bash
-# Backend: 46 unit/integration tests + lint
+# Backend: 47 unit/integration tests + lint
 cd backend && .venv/bin/pytest -q && .venv/bin/ruff check app tests && .venv/bin/ruff format --check app tests
 
 # Optional: fixture validation against real MC8 editor exports (downloads two public files,

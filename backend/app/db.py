@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -23,38 +24,67 @@ def default_db_path() -> Path:
 
 
 class Database:
+    """One SQLite file, one connection per thread.
+
+    FastAPI runs sync endpoints in a thread pool and the UI fires several requests at once,
+    so a single shared connection would interleave cursors across threads. Each thread lazily
+    opens its own connection (WAL mode lets readers and a writer coexist); ``close()`` closes
+    them all. A file path is required: ``:memory:`` would give every thread a different DB.
+    """
+
     def __init__(self, path: Path | str):
         self.path = Path(path)
-        if str(self.path) != ":memory:":
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(self.path), check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA foreign_keys = ON")
-        self._conn.execute("PRAGMA journal_mode = WAL") if str(self.path) != ":memory:" else None
+        if str(self.path) == ":memory:":
+            raise ValueError("Database needs a file path; per-thread connections cannot share :memory:")
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._local = threading.local()
+        self._all: list[sqlite3.Connection] = []
+        self._lock = threading.Lock()
 
-    @contextmanager
-    def tx(self) -> Iterator[sqlite3.Connection]:
-        try:
-            yield self._conn
-            self._conn.commit()
-        except Exception:
-            self._conn.rollback()
-            raise
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(str(self.path), check_same_thread=False, timeout=30)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA journal_mode = WAL")
+        return conn
 
     @property
     def conn(self) -> sqlite3.Connection:
-        return self._conn
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            conn = self._connect()
+            self._local.conn = conn
+            with self._lock:
+                self._all.append(conn)
+        return conn
+
+    @contextmanager
+    def tx(self) -> Iterator[sqlite3.Connection]:
+        conn = self.conn
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
 
     def close(self) -> None:
-        self._conn.close()
+        with self._lock:
+            conns, self._all = self._all, []
+        for c in conns:
+            try:
+                c.close()
+            except sqlite3.ProgrammingError:
+                pass  # closed from another thread already
+        self._local = threading.local()
 
     # -- migrations -----------------------------------------------------------------
     def applied_versions(self) -> list[int]:
-        self._conn.execute(
+        self.conn.execute(
             "CREATE TABLE IF NOT EXISTS schema_migrations ("
             "version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL)"
         )
-        rows = self._conn.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()
+        rows = self.conn.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()
         return [r[0] for r in rows]
 
     def migrate(self) -> list[str]:
