@@ -86,7 +86,7 @@ export function EvidenceBadge({ evidence }: { evidence: string }) {
 export function ErrorBanner({ message, onClose }: { message: string | null; onClose?: () => void }) {
   if (!message) return null;
   return (
-    <div role="alert" className="bg-red-50 border border-red-200 text-red-800 text-sm px-3 py-2 flex items-center gap-2">
+    <div role="alert" data-testid="error-banner" className="bg-red-50 border border-red-200 text-red-800 text-sm px-3 py-2 flex items-center gap-2">
       <span className="flex-1">{message}</span>
       {onClose && (
         <Button variant="ghost" onClick={onClose} aria-label="Dismiss error">
