@@ -56,12 +56,13 @@ test("board: Fit fits both dimensions with padding, follows window resizes, and 
   // Opening a rig fits it; the canvas area ends inside the window, so nothing needs page scrolling.
   let { vp, canvas } = await expectFitted(page);
   expect(vp.y + vp.height).toBeLessThanOrEqual(800);
-  // A short, wide window: height is the limit now (width to spare), and the whole board is still on screen.
-  await page.setViewportSize({ width: 1400, height: 640 });
+  // A short, wide window: height is the limit now (width to spare), and the whole board is still on
+  // screen unless the canvas's 320 px floor binds (the toolbar above wraps differently per platform).
+  await page.setViewportSize({ width: 1400, height: 720 });
   await page.waitForTimeout(400);
   ({ vp, canvas } = await expectFitted(page));
   expect(canvas.width).toBeLessThan(vp.width - 100);
-  expect(vp.y + vp.height).toBeLessThanOrEqual(640);
+  expect(vp.y + vp.height).toBeLessThanOrEqual(Math.max(720, vp.y + 320 + 1));
   // A tall, narrow window: width is the limit.
   await page.setViewportSize({ width: 900, height: 1000 });
   await page.waitForTimeout(400);

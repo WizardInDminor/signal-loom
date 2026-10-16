@@ -47,7 +47,7 @@ Two processes, two terminals (or `scripts/dev.sh` which starts both):
 
 ```bash
 # Terminal 1 — API on http://127.0.0.1:8000 (creates backend/data/signal_loom.sqlite3 on first run)
-cd backend && .venv/bin/uvicorn app.main:app --reload --port 8000
+cd backend && .venv/bin/uvicorn app.main:app --reload --port 8000 --timeout-keep-alive 75
 
 # Terminal 2 — UI on http://localhost:3000 (proxies /api/* to the backend)
 cd frontend && npm run dev
@@ -58,6 +58,11 @@ hand-authored device catalog and creates two example rigs: the **mono demo** (ML
 Plumes + Sunset + BigSky MX, three scenes) and the **stereo demo** (mono drives in ML10X loops
 A/B, the BigSky MX as a stereo pair in loop C, Output Tip/Ring to two amps, Advanced presets). Set `SIGNAL_LOOM_DB=/path/to/file.sqlite3` to use another database
 and `SIGNAL_LOOM_NO_DEMO=1` to skip the demo rig. API docs: <http://127.0.0.1:8000/docs>.
+
+The `--timeout-keep-alive 75` keeps the backend's idle connections open longer than the
+frontend's proxy keeps them (about 4 s), so a reused connection is never closed by the server at
+the moment it is reused; without it the browser occasionally sees a spurious "Internal Server
+Error" from the proxy under load (CI, many tabs).
 
 ## Test, lint, build
 

@@ -319,7 +319,9 @@ test("pictures: cancelled and replaced uploads are reclaimed; the library offers
   await expect(editor).toBeVisible({ timeout: 15_000 });
   await editor.getByTestId("crop-save").click();
   await expect(editor).toHaveCount(0, { timeout: 15_000 });
-  await expect.poll(async () => (await page.request.get(`/api/assets/images/${first}`)).status()).toBe(404);
+  // Polled through the Next proxy: a dropped socket under parallel CI workers must retry, not fail the poll.
+  const statusOf = async (url: string) => { try { return (await page.request.get(url)).status(); } catch { return -1; } };
+  await expect.poll(() => statusOf(`/api/assets/images/${first}`), { timeout: 15_000 }).toBe(404);
   await expect.poll(() => assetCount(page)).toBe(baseline + 1);
   // An orphan created outside the editor shows up in the library's cleanup panel and can be removed there.
   const unusedBefore = ((await (await page.request.get("/api/assets/images")).json()) as { referenced: boolean }[]).filter((a) => !a.referenced).length;

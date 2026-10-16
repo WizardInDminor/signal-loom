@@ -12,12 +12,19 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(path: string, init?: RequestInit, attempt = 0): Promise<T> {
   let res: Response;
+  const idempotent = !init?.method || init.method === "GET";
   try {
     res = await fetch(path, { headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) }, ...init });
   } catch {
+    // A dropped connection on a read is retried once; writes are never repeated blindly.
+    if (idempotent && attempt === 0) { await new Promise((r) => setTimeout(r, 200)); return request<T>(path, init, 1); }
     throw new ApiError(0, "Cannot reach the Signal Loom backend. Is it running on port 8000?");
+  }
+  // The dev/prod proxy answers a reset backend socket with a bare 500; a read may be retried once.
+  if (res.status >= 502 || (res.status === 500 && !(res.headers.get("content-type") ?? "").includes("json"))) {
+    if (idempotent && attempt === 0) { await new Promise((r) => setTimeout(r, 200)); return request<T>(path, init, 1); }
   }
   if (!res.ok) {
     let detail: unknown = res.statusText;
