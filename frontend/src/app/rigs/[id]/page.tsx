@@ -16,12 +16,22 @@ type Tab = (typeof TABS)[number];
 
 export default function RigPage() {
   const { id } = useParams<{ id: string }>();
-  const { rig, analysis, loading, error, saving, dirty, conflict, load, clearError, update, flush } = useRigStore();
+  const { rig, analysis, loading, error, saving, dirty, conflict, load, clearError, update, flush, undo, redo } = useRigStore();
   const [tab, setTab] = useState<Tab>("board");
 
   useEffect(() => {
     if (id) void load(id);
   }, [id, load]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      if ((e.target as HTMLElement)?.tagName?.match(/INPUT|TEXTAREA|SELECT/)) return;
+      if (e.key.toLowerCase() === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
+      else if ((e.key.toLowerCase() === "z" && e.shiftKey) || e.key.toLowerCase() === "y") { e.preventDefault(); redo(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [undo, redo]);
   useEffect(() => {
     const onUnload = () => flush();
     window.addEventListener("pagehide", onUnload);

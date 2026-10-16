@@ -50,6 +50,8 @@ export const api = {
     exportStatus: (id: string) => request<ExportStatus>(`/api/rigs/${id}/exports/status`),
     mc8Bank: (id: string, bank: number) => request<{ filename: string; evidence_level: string; warning: string; self_check: { ok: boolean; problems: string[]; hash_matches: boolean | null }; dump: unknown }>(`/api/rigs/${id}/exports/mc8-bank/${bank}`),
     inspectMc8: (text: string) => request<{ ok: boolean; problems: string[]; dump_type: string | null; device_model: number | null; hash_matches: boolean | null; banks: { bank_number: number | null; bank_name: string; used_presets: { position: string; short_name: string; message_count: number; types: string[] }[] }[] }>("/api/rigs/inspect/mc8-backup", { method: "POST", body: text }),
+    importMc8Bank: (id: string, text: string, replace = false) => request<{ rig: Rig; bank_number: number; imported_presets: number; skipped: { position: string; slot: number; type_code: number; type_name: string }[] }>(`/api/rigs/${id}/import/mc8-bank${replace ? "?replace=1" : ""}`, { method: "POST", body: text }),
+    diffBackups: (a: string, b: string) => request<{ ok: boolean; problems: string[]; same_model: boolean | null; device_model: number | null; changes: { path: string[]; label: string; change: string; before: unknown; after: unknown }[]; summary: { total: number; by_kind: Record<string, number>; truncated: boolean; touched: string[] }; metadata_differences: Record<string, { a: unknown; b: unknown }> }>("/api/rigs/inspect/backup-diff", { method: "POST", body: JSON.stringify({ a, b }) }),
     inspectMl10x: (text: string) => request<{ ok: boolean; problems: string[]; midi_channel: number | null; device_id: number | null; connectors: { id: number; name: string; short_name: string; trails: boolean }[]; presets: { bank: number; number: number; global_number: number; name: string; advanced_mode: boolean }[]; settings: Record<string, unknown> }>("/api/rigs/inspect/ml10x-backup", { method: "POST", body: text }),
   },
   catalog: {
@@ -61,12 +63,18 @@ export const api = {
       return request<DeviceProfile[]>(`/api/catalog/devices${qs ? `?${qs}` : ""}`);
     },
     get: (id: string) => request<DeviceProfile>(`/api/catalog/devices/${id}`),
-    create: (p: DeviceProfile) => request<DeviceProfile>("/api/catalog/devices", { method: "POST", body: JSON.stringify(p) }),
-    update: (p: DeviceProfile) => request<DeviceProfile>(`/api/catalog/devices/${p.id}`, { method: "PUT", body: JSON.stringify(p) }),
+    create: (p: DeviceProfile) => request<DeviceProfile>("/api/catalog/devices", { method: "POST", body: JSON.stringify(profileBody(p)) }),
+    update: (p: DeviceProfile) => request<DeviceProfile>(`/api/catalog/devices/${p.id}`, { method: "PUT", body: JSON.stringify(profileBody(p)) }),
     remove: (id: string) => request<void>(`/api/catalog/devices/${id}`, { method: "DELETE" }),
     importPedalPlayground: (text: string) => request<{ imported: number; skipped_existing: number; problems: string[] }>("/api/catalog/import/pedalplayground", { method: "POST", body: text }),
   },
 };
+
+/** API responses carry read-only echo fields (`unknown_attributes`, `source`) that the strict profile schema rejects on write. */
+function profileBody(p: DeviceProfile): Omit<DeviceProfile, "unknown_attributes" | "source"> {
+  const { unknown_attributes: _u, source: _s, ...body } = p; // eslint-disable-line @typescript-eslint/no-unused-vars
+  return body;
+}
 
 export function downloadText(filename: string, text: string, type = "text/plain") {
   const blob = new Blob([text], { type });

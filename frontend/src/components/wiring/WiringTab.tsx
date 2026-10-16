@@ -43,6 +43,8 @@ export function WiringTab() {
     return `${inst?.label ?? ref.instance_id}: ${port?.label ?? ref.port_id}`;
   };
   const topo = analysis?.ml10x.topology;
+  const presetPaths = analysis?.ml10x.preset_paths ?? [];
+  const kit = analysis?.cable_kit ?? [];
 
   return (
     <div className="grid lg:grid-cols-[1fr_360px] gap-3 items-start">
@@ -74,6 +76,46 @@ export function WiringTab() {
             </tbody>
           </table>
         </Panel>
+        {presetPaths.length > 0 && (
+          <Panel title="Signal paths per ML10X preset (left / right conductors)">
+            <p className="text-[11px] text-neutral-500 mb-2">Traced from the preset&apos;s routing and the physical cables: each row is one conductor from the ML10X Input (or a return-only loop) to an Output. Tip = left, Ring = right.</p>
+            <div className="flex flex-col gap-2" data-testid="signal-paths">
+              {presetPaths.map((pp) => (
+                <div key={pp.preset_number} className="text-xs border border-line rounded p-2">
+                  <div className="font-semibold">Preset {pp.preset_number} {pp.preset_name} <Badge>{pp.mode}</Badge> {pp.stereo_output ? <Badge tone="ok">stereo out</Badge> : <Badge>mono out</Badge>}</div>
+                  <ul className="mt-1 flex flex-col gap-1">
+                    {pp.paths.map((path) => (
+                      <li key={path.name} className="flex flex-col">
+                        <span><b>{path.name}</b>: {path.summary} {path.complete ? <Badge tone="ok">complete</Badge> : <Badge tone="bad">incomplete</Badge>}</span>
+                        <span className="text-[11px] text-neutral-500">
+                          {path.steps.filter((st) => st.send_jack).map((st) => `${st.device ?? "empty"}: ${st.send_jack} → ${st.return_jack}${st.state === "bypassed" ? " (bypassed)" : st.state === "return_only" ? " (return only)" : ""}`).join(" · ")}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          </Panel>
+        )}
+        {kit.length > 0 && (
+          <Panel title={`Cable kit (${kit.length} physical cables)`}>
+            <table className="w-full text-xs" data-testid="cable-kit">
+              <thead><tr className="text-left text-neutral-500"><th>#</th><th>Cable</th><th>Ends</th><th>Length</th><th>Notes</th></tr></thead>
+              <tbody>
+                {kit.map((item, i) => (
+                  <tr key={i} className={`border-t border-line ${item.kind === "trs_breakout" ? "bg-amber-50" : ""}`}>
+                    <td>{i + 1}</td>
+                    <td>{item.description}</td>
+                    <td>{item.ends.join("; ")}</td>
+                    <td>{item.length_cm ? `${item.length_cm} cm` : ""}</td>
+                    <td className="text-neutral-500">{item.notes.join(" ")}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Panel>
+        )}
         {topo && (
           <Panel title={`${topo.label} loop occupancy (derived from cables)`}>
             <table className="w-full text-xs">

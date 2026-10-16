@@ -41,7 +41,7 @@ IN_TO_MM = 25.4
 
 
 def _m(value_mm: float | None, ev: Evidence, note: str | None = None) -> Measure:
-    return Measure(value_mm=value_mm, evidence=ev, note=note)
+    return Measure(value_mm=None if value_mm is None else round(value_mm, 1), evidence=ev, note=note)
 
 
 def _audio(

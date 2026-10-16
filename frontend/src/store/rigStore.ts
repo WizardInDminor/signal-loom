@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import { api, ApiError, newId } from "@/lib/api";
-import type { Analysis, Connection, DeviceInstance, DeviceProfile, Rig, Scene } from "@/lib/types";
+import type { Analysis, Connection, DeviceInstance, DeviceProfile, PortDirection, Rig, Scene, SignalKind } from "@/lib/types";
 
 interface RigState {
   rig: Rig | null;
@@ -19,7 +19,17 @@ interface RigState {
   conflict: boolean;
   selectedInstanceId: string | null;
   selectedSceneId: string | null;
+  /** Undo/redo over whole-document snapshots (bounded). */
+  canUndo: boolean;
+  canRedo: boolean;
+  undo: () => void;
+  redo: () => void;
+  /** Pending port-to-port cable started on the board (drag-to-connect). */
+  pendingCable: { instance_id: string; port_id: string; kind: SignalKind; direction: PortDirection } | null;
+  setPendingCable: (p: RigState["pendingCable"]) => void;
   load: (id: string) => Promise<void>;
+  /** Adopt a rig document the server already stored (e.g. after a server-side import) without a loading cycle. */
+  replaceRig: (rig: Rig) => void;
   refreshCatalog: () => Promise<void>;
   update: (fn: (rig: Rig) => void) => void;
   /** Persist every pending edit, in order. Resolves true once the latest revision is saved. */
@@ -32,11 +42,17 @@ interface RigState {
   addConnection: (c: Omit<Connection, "id" | "intentional"> & { intentional?: boolean }) => string;
   removeConnection: (id: string) => void;
   addScene: (name: string) => string;
+  duplicateScene: (id: string) => string | null;
   removeScene: (id: string) => void;
+  /** Assign a scene to an MC8 bank/position (creating the bank if needed); position "" clears it. */
+  assignSceneToSwitch: (sceneId: string, bank: number, position: string) => void;
   clearError: () => void;
 }
 
 const SAVE_DEBOUNCE_MS = 500;
+const HISTORY_LIMIT = 100;
+let undoStack: Rig[] = [];
+let redoStack: Rig[] = [];
 const ANALYZE_DEBOUNCE_MS = 250;
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -72,11 +88,33 @@ export const useRigStore = create<RigState>((set, get) => ({
   conflict: false,
   selectedInstanceId: null,
   selectedSceneId: null,
+  canUndo: false,
+  canRedo: false,
+  pendingCable: null,
+  setPendingCable: (p) => set({ pendingCable: p }),
+
+  undo() {
+    const current = get().rig;
+    const prev = undoStack.pop();
+    if (!current || !prev) return;
+    redoStack.push(current);
+    applySnapshot(prev);
+  },
+
+  redo() {
+    const current = get().rig;
+    const next = redoStack.pop();
+    if (!current || !next) return;
+    undoStack.push(current);
+    applySnapshot(next);
+  },
 
   async load(id) {
     // Never drop pending edits of the previous rig when switching.
     if (get().rig && get().dirty) await get().ensureSaved();
-    set({ loading: true, error: null, conflict: false, rig: null, analysis: null, selectedInstanceId: null, selectedSceneId: null });
+    undoStack = [];
+    redoStack = [];
+    set({ loading: true, error: null, conflict: false, rig: null, analysis: null, selectedInstanceId: null, selectedSceneId: null, canUndo: false, canRedo: false, pendingCable: null });
     try {
       const [rig, analysis, catalog] = await Promise.all([api.rigs.get(id), api.rigs.analysis(id), api.catalog.list()]);
       const profiles: Record<string, DeviceProfile> = {};
@@ -85,6 +123,14 @@ export const useRigStore = create<RigState>((set, get) => ({
     } catch (e) {
       set({ loading: false, error: errorText(e) });
     }
+  },
+
+  replaceRig(rig) {
+    undoStack.push(get().rig ?? rig);
+    redoStack = [];
+    set({ rig, dirty: false, savedRevision: rig.revision, canUndo: true, canRedo: false });
+    const seq = ++analyzeSeq;
+    void api.rigs.analyzeDocument(rig).then((analysis) => { if (seq === analyzeSeq) set({ analysis }); }).catch((e) => set({ error: errorText(e) }));
   },
 
   async refreshCatalog() {
@@ -100,7 +146,10 @@ export const useRigStore = create<RigState>((set, get) => ({
     const next: Rig = structuredClone(current);
     fn(next);
     next.revision = current.revision + 1; // monotonic: the server refuses anything older
-    set({ rig: next, dirty: true });
+    undoStack.push(current);
+    if (undoStack.length > HISTORY_LIMIT) undoStack.shift();
+    redoStack = [];
+    set({ rig: next, dirty: true, canUndo: true, canRedo: false });
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => void get().ensureSaved(), SAVE_DEBOUNCE_MS);
     if (analyzeTimer) clearTimeout(analyzeTimer);
@@ -229,6 +278,42 @@ export const useRigStore = create<RigState>((set, get) => ({
     return id;
   },
 
+  duplicateScene(id) {
+    const src = get().rig?.scenes.find((s) => s.id === id);
+    if (!src) return null;
+    const newId_ = newId("scene");
+    get().update((r) => {
+      const copy: Scene = structuredClone(src);
+      copy.id = newId_;
+      copy.name = `${src.name} (copy)`;
+      copy.order = r.scenes.length;
+      r.scenes.push(copy);
+    });
+    set({ selectedSceneId: newId_ });
+    return newId_;
+  },
+
+  assignSceneToSwitch(sceneId, bank, position) {
+    get().update((r) => {
+      for (const b of r.controllers.mc8.banks) for (const p of b.presets) if (p.scene_id === sceneId) p.scene_id = null;
+      for (const b of r.controllers.mc8.banks) b.presets = b.presets.filter((p) => p.scene_id || p.short_name);
+      if (!position) return;
+      let b = r.controllers.mc8.banks.find((x) => x.number === bank);
+      if (!b) {
+        b = { number: bank, name: `Bank ${bank}`, presets: [] };
+        r.controllers.mc8.banks.push(b);
+      }
+      const scene = r.scenes.find((s) => s.id === sceneId);
+      let p = b.presets.find((x) => x.position === position);
+      if (!p) {
+        p = { position, short_name: "", toggle_mode: false, scene_id: null, action: "press", extra_messages: [] };
+        b.presets.push(p);
+      }
+      p.scene_id = sceneId;
+      if (!p.short_name) p.short_name = (scene?.name ?? "").slice(0, 10);
+    });
+  },
+
   removeScene(id) {
     get().update((r) => {
       r.scenes = r.scenes.filter((s) => s.id !== id);
@@ -239,6 +324,27 @@ export const useRigStore = create<RigState>((set, get) => ({
 
   clearError: () => set({ error: null }),
 }));
+
+/** Replace the document with a history snapshot, bumping the revision so the server accepts it. */
+function applySnapshot(snapshot: Rig) {
+  const state = useRigStore.getState();
+  const current = state.rig!;
+  const next = structuredClone(snapshot);
+  next.revision = current.revision + 1;
+  useRigStore.setState({ rig: next, dirty: true, canUndo: undoStack.length > 0, canRedo: redoStack.length > 0 });
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => void useRigStore.getState().ensureSaved(), SAVE_DEBOUNCE_MS);
+  if (analyzeTimer) clearTimeout(analyzeTimer);
+  const seq = ++analyzeSeq;
+  analyzeTimer = setTimeout(async () => {
+    try {
+      const analysis = await api.rigs.analyzeDocument(next);
+      if (seq === analyzeSeq) useRigStore.setState({ analysis });
+    } catch (e) {
+      useRigStore.setState({ error: errorText(e) });
+    }
+  }, ANALYZE_DEBOUNCE_MS);
+}
 
 export function instanceLabel(rig: Rig | null, id: string): string {
   return rig?.instances.find((i) => i.id === id)?.label ?? id;
