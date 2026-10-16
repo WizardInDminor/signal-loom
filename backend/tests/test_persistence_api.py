@@ -11,7 +11,9 @@ from app.repo import RigRepository
 
 def test_cold_start_seeds_catalog_and_demo(client):
     rigs = client.get("/api/rigs").json()
-    assert len(rigs) == 1 and rigs[0]["instance_count"] == 8 and rigs[0]["scene_count"] == 3
+    assert [r["id"] for r in rigs] == ["rig_demo_signal_loom", "rig_demo_stereo"]
+    assert rigs[0]["instance_count"] == 8 and rigs[0]["scene_count"] == 3
+    assert rigs[1]["instance_count"] == 9 and rigs[1]["scene_count"] == 3
     devices = client.get("/api/catalog/devices").json()
     assert {d["id"] for d in devices} >= {
         "morningstar-mc8",
@@ -52,7 +54,7 @@ def test_export_import_round_trip_preserves_content(client):
     b = normalize_rig(Rig.model_validate(imported))
     a.pop("id"), b.pop("id")
     assert a == b
-    assert len(client.get("/api/rigs").json()) == 2
+    assert len(client.get("/api/rigs").json()) == 3
 
 
 def test_import_rejects_untrusted_input(client):
@@ -199,7 +201,7 @@ def test_migrations_are_idempotent(tmp_path):
     assert db.migrate() == []
     seed(db)
     seed(db)
-    assert len(RigRepository(db).list()) == 1
+    assert len(RigRepository(db).list()) == 2  # mono demo + stereo demo, seeded once
     db.close()
 
 

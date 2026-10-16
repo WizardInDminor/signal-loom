@@ -12,10 +12,18 @@ from ..exports.text import (
     wiring_manifest_csv,
     wiring_manifest_markdown,
 )
+from ..models.rig import Mc8Bank
 from ..morningstar import specs
-from ..morningstar.mc8_export import build_single_bank_dump, check_dump, serialize, suggested_filename
+from ..morningstar.backup_diff import diff_backups
+from ..morningstar.mc8_export import (
+    bank_dump_to_plan,
+    build_single_bank_dump,
+    check_dump,
+    serialize,
+    suggested_filename,
+)
 from ..morningstar.ml10x_backup import read_backup
-from .deps import load_rig, profiles_for
+from .deps import load_rig, profiles_for, rig_repo
 
 router = APIRouter(prefix="/api/rigs", tags=["exports"])
 
@@ -184,3 +192,48 @@ async def inspect_mc8_backup(request: Request):
 async def inspect_ml10x_backup(request: Request):
     raw = await request.body()
     return read_backup(raw.decode("utf-8", errors="replace"))
+
+
+@router.post("/inspect/backup-diff")
+async def inspect_backup_diff(request: Request):
+    """Compare two editor backups (JSON body: {"a": "<file text>", "b": "<file text>"})."""
+    body = await request.json()
+    if not isinstance(body, dict) or not isinstance(body.get("a"), str) or not isinstance(body.get("b"), str):
+        raise HTTPException(status_code=422, detail='Body must be {"a": <text of backup A>, "b": <text of backup B>}')
+    return diff_backups(body["a"], body["b"])
+
+
+@router.post("/{rig_id}/import/mc8-bank")
+async def import_mc8_bank(rig_id: str, request: Request, replace: bool = False):
+    """Import an MC8 editor 'Current Bank' backup into this rig's MC8 plan as explicit PC/CC messages.
+
+    The bank is added (or replaces the bank with the same number when ``replace`` is true).
+    Nothing is mapped to scenes: the messages become ``extra_messages`` so the round trip to
+    the bank-backup export is lossless for PC/CC content and visible in the switch map.
+    """
+    rig = load_rig(request, rig_id)
+    raw = (await request.body()).decode("utf-8", errors="replace")
+    result = bank_dump_to_plan(raw)
+    if not result["ok"]:
+        raise HTTPException(
+            status_code=422, detail={"message": "Not an importable MC8 bank backup.", "problems": result["problems"]}
+        )
+    bank = Mc8Bank.model_validate(result["bank"])
+    existing = next((b for b in rig.controllers.mc8.banks if b.number == bank.number), None)
+    if existing is not None and not replace:
+        used = {b.number for b in rig.controllers.mc8.banks}
+        n = bank.number
+        while n in used:
+            n += 1
+        bank.number = n
+    if existing is not None and replace:
+        rig.controllers.mc8.banks = [b for b in rig.controllers.mc8.banks if b.number != bank.number]
+    rig.controllers.mc8.banks.append(bank)
+    rig.revision += 1
+    saved = rig_repo(request).save(rig)
+    return {
+        "rig": saved.model_dump(mode="json"),
+        "bank_number": bank.number,
+        "imported_presets": len(bank.presets),
+        "skipped": result["skipped"],
+    }

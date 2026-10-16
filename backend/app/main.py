@@ -14,7 +14,7 @@ from .api import catalog as catalog_api
 from .api import exports as exports_api
 from .api import rigs as rigs_api
 from .catalog.builtin import builtin_profiles
-from .catalog.demo import DEMO_RIG_ID, demo_rig
+from .catalog.demo import DEMO_RIG_ID, STEREO_DEMO_RIG_ID, demo_rig, stereo_demo_rig
 from .db import Database, default_db_path
 from .repo import ProfileRepository, RigRepository
 
@@ -28,9 +28,17 @@ def seed(db: Database) -> None:
             profiles.save(p, source="builtin")
     rigs = RigRepository(db)
     if not rigs.list() and os.environ.get("SIGNAL_LOOM_NO_DEMO") != "1":
-        rig = demo_rig()
-        if not rigs.exists(DEMO_RIG_ID):
-            rigs.save(rig, touch=False)
+        for rig in (demo_rig(), stereo_demo_rig()):
+            if not rigs.exists(rig.id):
+                rigs.save(rig, touch=False)
+    elif (
+        rigs.list()
+        and not rigs.exists(STEREO_DEMO_RIG_ID)
+        and os.environ.get("SIGNAL_LOOM_NO_DEMO") != "1"
+        and rigs.exists(DEMO_RIG_ID)
+    ):
+        # Databases created by Session 1 get the stereo example too, once.
+        rigs.save(stereo_demo_rig(), touch=False)
 
 
 def create_app(db_path: Path | str | None = None) -> FastAPI:

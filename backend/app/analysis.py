@@ -3,9 +3,11 @@ placed ports, ML10X topology and the compiled plan."""
 
 from __future__ import annotations
 
+from .domain.cables import cable_kit
 from .domain.compiler import compile_rig
 from .domain.geometry import board_diagnostics, effective_ports, placed_ports, rotated_size
 from .domain.ml10x import loop_occupancy, preset_diagnostics
+from .domain.paths import trace_preset
 from .domain.wiring import wiring_diagnostics
 from .models.common import DeviceCategory, Diagnostic, Severity
 from .models.profile import DeviceProfile
@@ -17,13 +19,17 @@ def analyze(rig: Rig, profiles: dict[str, DeviceProfile]) -> dict:
     ctx, wiring = wiring_diagnostics(rig, profiles)
     ml10x_topo = None
     ml10x_diags: list[Diagnostic] = []
+    preset_paths: list[dict] = []
     ml = rig.controllers.ml10x
     ml_inst = rig.instance(ml.instance_id) if ml.instance_id else None
     if ml_inst is not None:
         topo = loop_occupancy(ctx, ml_inst)
         ml10x_diags.extend(topo.diagnostics)
-        for p in ml.presets:
+        for p in sorted(ml.presets, key=lambda x: x.number):
             ml10x_diags.extend(preset_diagnostics(topo, p, ml.firmware_version))
+            traced = trace_preset(topo, p)
+            ml10x_diags.extend(traced.pop("diagnostics"))
+            preset_paths.append(traced)
         ml10x_topo = {
             "instance_id": topo.instance_id,
             "label": topo.label,
@@ -73,6 +79,7 @@ def analyze(rig: Rig, profiles: dict[str, DeviceProfile]) -> dict:
         for ch, labels in chan.items()
         if len(labels) > 1
     ]
+    kit, kit_diags = cable_kit(ctx)
     compiled = compile_rig(rig, profiles, ctx)
     placed = {}
     for inst in rig.instances:
@@ -101,7 +108,7 @@ def analyze(rig: Rig, profiles: dict[str, DeviceProfile]) -> dict:
             "effective_ports": [p.model_dump(mode="json") for p in effective_ports(inst, prof)],
             "unknowns": prof.unknowns() if prof else ["profile missing"],
         }
-    all_diags = board + wiring + ml10x_diags + midi_diags
+    all_diags = board + wiring + ml10x_diags + midi_diags + kit_diags
     return {
         "rig_id": rig.id,
         "diagnostics": [d.model_dump(mode="json") for d in all_diags],
@@ -112,7 +119,12 @@ def analyze(rig: Rig, profiles: dict[str, DeviceProfile]) -> dict:
         },
         "board": [d.model_dump(mode="json") for d in board],
         "wiring": [d.model_dump(mode="json") for d in wiring],
-        "ml10x": {"topology": ml10x_topo, "diagnostics": [d.model_dump(mode="json") for d in ml10x_diags]},
+        "ml10x": {
+            "topology": ml10x_topo,
+            "diagnostics": [d.model_dump(mode="json") for d in ml10x_diags],
+            "preset_paths": preset_paths,
+        },
+        "cable_kit": [i.as_dict() for i in kit],
         "instances": placed,
         "compiled": compiled,
     }

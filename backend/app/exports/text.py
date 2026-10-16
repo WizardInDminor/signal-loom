@@ -5,8 +5,10 @@ from __future__ import annotations
 import csv
 import io
 
+from ..domain.cables import cable_kit
 from ..domain.geometry import effective_ports
 from ..domain.ml10x import Ml10xTopology, loop_occupancy, preset_path
+from ..domain.paths import trace_preset
 from ..domain.wiring import WiringContext
 from ..models.common import SignalKind
 from ..models.profile import DeviceProfile
@@ -123,7 +125,20 @@ def wiring_manifest_markdown(
             for p in sorted(rig.controllers.ml10x.presets, key=lambda p: p.number):
                 byp = f" (bypassed: {', '.join(map(str, p.bypassed_loops))})" if p.bypassed_loops else ""
                 out.append(f"- Preset {p.number} '{p.name}' [{p.mode}]: {' -> '.join(preset_path(p))}{byp}")
+                traced = trace_preset(topo, p)
+                for path in traced["paths"]:
+                    out.append(f"  - {path['name']}: {path['summary']}{'' if path['complete'] else '  (INCOMPLETE)'}")
             out.append("")
+    kit, _ = cable_kit(ctx)
+    if kit:
+        out.append("## Cable kit (physical cables to make or buy)")
+        out.append("")
+        out.append("| # | Cable | Ends | Length (cm) | Notes |")
+        out.append("|---|---|---|---|---|")
+        for i, item in enumerate(kit, start=1):
+            length = "" if item.length_cm is None else f"{item.length_cm:g}"
+            out.append(f"| {i} | {item.description} | {'; '.join(item.ends)} | {length} | {' '.join(item.notes)} |")
+        out.append("")
     if diagnostics:
         out.append("## Diagnostics")
         out.append("")

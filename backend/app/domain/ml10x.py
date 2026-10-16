@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from ..models.common import DeviceCategory, Diagnostic, Severity, SignalKind
+from ..models.common import AudioChannel, DeviceCategory, Diagnostic, Severity, SignalKind
 from ..models.rig import DeviceInstance, Ml10xPreset, Rig
 from ..morningstar import specs
 from .wiring import WiringContext
@@ -42,6 +42,9 @@ class Ml10xTopology:
     stereo_pairs: list[tuple[int, int, str]] = field(default_factory=list)  # (tip loop, ring loop, label)
     input_cabled: bool = False
     output_cabled: bool = False
+    # Which devices feed the Input conductors and which the Output conductors drive (from cables).
+    input_from: dict[str, str] = field(default_factory=dict)  # "IN_TIP" / "IN_RING" -> device label
+    output_to: dict[str, str] = field(default_factory=dict)  # "OUT_TIP" / "OUT_RING" -> device label
     diagnostics: list[Diagnostic] = field(default_factory=list)
 
     def loop(self, n: int) -> LoopOccupancy | None:
@@ -79,6 +82,8 @@ def loop_occupancy(ctx: WiringContext, sw: DeviceInstance) -> Ml10xTopology:
                     lp.send_to_label = rc.target.instance.label
             elif p.role == "main_out":
                 topo.output_cabled = True
+                key = "OUT_RING" if p.audio_channel == AudioChannel.RIGHT else "OUT_TIP"
+                topo.output_to[key] = rc.target.instance.label
         if rc.target.instance.id == sw.id:
             p = rc.target.port
             if p.role == "loop_return" and p.loop:
@@ -88,6 +93,8 @@ def loop_occupancy(ctx: WiringContext, sw: DeviceInstance) -> Ml10xTopology:
                     lp.return_from_label = rc.source.instance.label
             elif p.role == "main_in":
                 topo.input_cabled = True
+                key = "IN_RING" if p.audio_channel == AudioChannel.RIGHT else "IN_TIP"
+                topo.input_from[key] = rc.source.instance.label
     for lp in topo.loops:
         lp.complete = bool(lp.send_to_instance_id and lp.return_from_instance_id)
     # Stereo pair detection: Tip and Ring of one jack feeding the same device = stereo pedal.
@@ -204,6 +211,22 @@ def preset_diagnostics(topo: Ml10xTopology, preset: Ml10xPreset, firmware_versio
                     subject_id=subj,
                 )
             )
+    if preset.mode == "advanced":
+        from .paths import advanced_cabling_diagnostics  # local import: paths depends on this module
+
+        diags.extend(advanced_cabling_diagnostics(topo, preset))
+        for n in loops_used:
+            if n < 1 or n > 10:
+                diags.append(
+                    Diagnostic(
+                        code="ml10x.loop_out_of_range",
+                        severity=Severity.ERROR,
+                        message=f"ML10X preset {preset.number} references loop {n}; loops are 1-10 (A Tip .. E Ring).",
+                        subject_type="preset",
+                        subject_id=subj,
+                    )
+                )
+        return diags
     for n in loops_used:
         if n < 1 or n > 10:
             diags.append(

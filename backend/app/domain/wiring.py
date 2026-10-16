@@ -566,11 +566,14 @@ def _switcher_loop_diagnostics(ctx: WiringContext, sw: DeviceInstance) -> None:
                 related=[sw.id],
             )
         elif r_conn and not s_conn:
+            # Documented ML10X pattern: mono send / stereo return uses the sibling conductor's
+            # Return only. It needs an Advanced preset that treats the loop as return-only; a
+            # Simple chain through this loop is flagged by the preset check instead.
             _diag(
                 ctx,
-                "switcher.loop_open",
-                Severity.ERROR,
-                f"'{sw.label}' loop {loop}: Return is cabled but Send is not. Engaging this loop in any preset breaks the signal path.",
+                "switcher.loop_return_only",
+                Severity.INFO,
+                f"'{sw.label}' loop {loop}: only the Return is cabled (return-only loop). Valid for a stereo return in an Advanced preset; a Simple chain through loop {loop} would break.",
                 subject_type="port",
                 subject_id=f"{sw.id}:{s.id if s else ''}",
                 related=[sw.id],
