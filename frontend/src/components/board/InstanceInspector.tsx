@@ -1,0 +1,67 @@
+"use client";
+
+import { useRigStore } from "@/store/rigStore";
+import type { DeviceInstance, Rotation } from "@/lib/types";
+import { Badge, Button, DiagnosticList, EvidenceBadge, Field, Panel } from "@/components/ui/basics";
+import { PortEditor } from "./PortEditor";
+
+export function InstanceInspector() {
+  const { rig, analysis, profiles, selectedInstanceId, update, removeInstance } = useRigStore();
+  const inst = rig?.instances.find((i) => i.id === selectedInstanceId);
+  if (!rig || !inst) return <Panel title="Device inspector"><p className="text-xs text-neutral-500">Select a device on the board.</p></Panel>;
+  const profile = profiles[inst.profile_id];
+  const geo = analysis?.instances[inst.id];
+  const diags = analysis?.diagnostics.filter((d) => d.subject_id === inst.id || d.related_ids.includes(inst.id)) ?? [];
+  const edit = (fn: (i: DeviceInstance) => void) => update((r) => { const k = r.instances.find((x) => x.id === inst.id); if (k) fn(k); });
+
+  return (
+    <Panel title="Device inspector" actions={<Button variant="danger" onClick={() => window.confirm(`Remove "${inst.label}" and its cables?`) && removeInstance(inst.id)}>Remove</Button>}>
+      <div className="flex flex-col gap-2 text-xs">
+        <div className="text-neutral-600">
+          {profile ? `${profile.manufacturer} ${profile.model}` : inst.profile_id} <span className="font-mono text-[10px] text-neutral-400">{inst.id}</span>
+        </div>
+        <Field label="Label"><input value={inst.label} onChange={(e) => edit((i) => { i.label = e.target.value; })} /></Field>
+        <div className="grid grid-cols-3 gap-2">
+          <Field label="X (mm)"><input type="number" value={inst.x_mm} onChange={(e) => edit((i) => { i.x_mm = Number(e.target.value); })} disabled={inst.off_board} /></Field>
+          <Field label="Y (mm)"><input type="number" value={inst.y_mm} onChange={(e) => edit((i) => { i.y_mm = Number(e.target.value); })} disabled={inst.off_board} /></Field>
+          <Field label="Rotation">
+            <select value={inst.rotation} onChange={(e) => edit((i) => { i.rotation = Number(e.target.value) as Rotation; })}>
+              {[0, 90, 180, 270].map((r) => <option key={r} value={r}>{r}°</option>)}
+            </select>
+          </Field>
+        </div>
+        <div className="text-neutral-600">
+          Footprint: {geo ? `${geo.width_mm} × ${geo.height_mm} mm (rotated)` : "?"}{" "}
+          {profile && <EvidenceBadge evidence={profile.footprint.width.evidence} />}{" "}
+          {profile?.footprint.includes_jacks === null && <Badge tone="warn">jack inclusion unknown</Badge>}
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="MIDI channel" hint={profile?.midi.interfaces.length ? `profile default: ${profile.midi.default_channel ?? "unknown"}` : "no MIDI interface"}>
+            <input type="number" min={1} max={16} value={inst.midi_channel ?? ""} placeholder="—" onChange={(e) => edit((i) => { i.midi_channel = e.target.value === "" ? null : Math.min(16, Math.max(1, Number(e.target.value))); })} />
+          </Field>
+          <div className="flex flex-col gap-1 pt-4">
+            <label className="flex items-center gap-1"><input type="checkbox" checked={inst.intentional_overlap} onChange={(e) => edit((i) => { i.intentional_overlap = e.target.checked; })} /> Overlap is intentional</label>
+            <label className="flex items-center gap-1"><input type="checkbox" checked={inst.off_board} onChange={(e) => edit((i) => { i.off_board = e.target.checked; })} /> Off-board (guitar, amp, under-board)</label>
+          </div>
+        </div>
+        <Field label="Notes"><textarea rows={2} value={inst.notes ?? ""} onChange={(e) => edit((i) => { i.notes = e.target.value || null; })} /></Field>
+        {geo?.unknowns.length ? (
+          <div>
+            <span className="text-neutral-600">Unknown / unverified on this profile: </span>
+            {geo.unknowns.map((u) => <Badge key={u} tone="warn">{u}</Badge>)}
+          </div>
+        ) : null}
+        {profile?.power.voltage_v != null ? (
+          <div className="text-neutral-600">Power: {profile.power.voltage_v} V {profile.power.polarity.replace("_", " ")}, {profile.power.current_ma_min ?? "?"} mA min <EvidenceBadge evidence={profile.power.evidence} /></div>
+        ) : (
+          <div className="text-neutral-600">Power requirement: <Badge tone="bad">unknown</Badge></div>
+        )}
+        <PortEditor inst={inst} />
+        <div>
+          <h3 className="font-semibold mb-1">Diagnostics for this device</h3>
+          <DiagnosticList items={diags} empty="Nothing flagged." />
+        </div>
+      </div>
+    </Panel>
+  );
+}
