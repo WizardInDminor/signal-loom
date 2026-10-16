@@ -655,6 +655,28 @@ def midi_reachability(ctx: WiringContext, controller_id: str) -> set[str]:
     return reach
 
 
+def midi_routes(ctx: WiringContext, controller_id: str) -> dict[str, list[str]]:
+    """For every instance the controller reaches over MIDI cables, the cables the messages travel,
+    in order (breadth-first, so the shortest physical route; MIDI Thru hops are included)."""
+    g: dict[str, list[tuple[str, str]]] = defaultdict(list)
+    for rc in ctx.resolved:
+        if rc.connection.kind != SignalKind.MIDI:
+            continue
+        g[rc.source.instance.id].append((rc.target.instance.id, rc.connection.id))
+    routes: dict[str, list[str]] = {}
+    queue = [controller_id]
+    seen = {controller_id}
+    while queue:
+        cur = queue.pop(0)
+        for nxt, conn_id in g.get(cur, []):
+            if nxt in seen:
+                continue
+            seen.add(nxt)
+            routes[nxt] = [*routes.get(cur, []), conn_id]
+            queue.append(nxt)
+    return routes
+
+
 def wiring_diagnostics(rig: Rig, profiles: dict[str, DeviceProfile]) -> tuple[WiringContext, list[Diagnostic]]:
     ctx = build_context(rig, profiles)
     validate_connections(ctx)

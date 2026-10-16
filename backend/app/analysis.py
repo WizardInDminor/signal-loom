@@ -8,7 +8,7 @@ from .domain.compiler import compile_rig
 from .domain.geometry import board_diagnostics, effective_ports, placed_ports, rotated_size
 from .domain.ml10x import loop_occupancy, preset_diagnostics
 from .domain.paths import trace_preset
-from .domain.wiring import wiring_diagnostics
+from .domain.wiring import midi_routes, wiring_diagnostics
 from .models.common import DeviceCategory, Diagnostic, Severity
 from .models.profile import DeviceProfile
 from .models.rig import Rig
@@ -81,6 +81,8 @@ def analyze(rig: Rig, profiles: dict[str, DeviceProfile]) -> dict:
     ]
     kit, kit_diags = cable_kit(ctx)
     compiled = compile_rig(rig, profiles, ctx)
+    mc8_id = rig.controllers.mc8.instance_id
+    midi = {"controller_id": mc8_id, "routes": midi_routes(ctx, mc8_id) if mc8_id else {}}
     placed = {}
     for inst in rig.instances:
         prof = profiles.get(inst.profile_id)
@@ -125,6 +127,7 @@ def analyze(rig: Rig, profiles: dict[str, DeviceProfile]) -> dict:
             "preset_paths": preset_paths,
         },
         "cable_kit": [i.as_dict() for i in kit],
+        "midi": midi,
         "instances": placed,
         "compiled": compiled,
     }

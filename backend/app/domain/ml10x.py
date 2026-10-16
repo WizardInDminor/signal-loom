@@ -28,6 +28,9 @@ class LoopOccupancy:
     return_from_label: str | None = None
     complete: bool = False  # both send and return cabled
     partner_loop: int | None = None  # the other conductor of the same TRS jack
+    # The physical cables patched into this loop's jacks (connection ids), for drawing the path.
+    send_connection_id: str | None = None
+    return_connection_id: str | None = None
 
     @property
     def occupied(self) -> bool:
@@ -45,6 +48,11 @@ class Ml10xTopology:
     # Which devices feed the Input conductors and which the Output conductors drive (from cables).
     input_from: dict[str, str] = field(default_factory=dict)  # "IN_TIP" / "IN_RING" -> device label
     output_to: dict[str, str] = field(default_factory=dict)  # "OUT_TIP" / "OUT_RING" -> device label
+    # Same conductors, as physical facts: the switcher's own jack id and the cable plugged into it.
+    input_port_id: dict[str, str] = field(default_factory=dict)
+    output_port_id: dict[str, str] = field(default_factory=dict)
+    input_connection_id: dict[str, str] = field(default_factory=dict)
+    output_connection_id: dict[str, str] = field(default_factory=dict)
     diagnostics: list[Diagnostic] = field(default_factory=list)
 
     def loop(self, n: int) -> LoopOccupancy | None:
@@ -70,6 +78,11 @@ def loop_occupancy(ctx: WiringContext, sw: DeviceInstance) -> Ml10xTopology:
         if n in returns:
             lp.return_port_id = returns[n].id
         topo.loops.append(lp)
+    for p in ports.values():
+        if p.role == "main_in":
+            topo.input_port_id["IN_RING" if p.audio_channel == AudioChannel.RIGHT else "IN_TIP"] = p.id
+        elif p.role == "main_out":
+            topo.output_port_id["OUT_RING" if p.audio_channel == AudioChannel.RIGHT else "OUT_TIP"] = p.id
     for rc in ctx.resolved:
         if rc.connection.kind != SignalKind.AUDIO:
             continue
@@ -80,10 +93,12 @@ def loop_occupancy(ctx: WiringContext, sw: DeviceInstance) -> Ml10xTopology:
                 if lp:
                     lp.send_to_instance_id = rc.target.instance.id
                     lp.send_to_label = rc.target.instance.label
+                    lp.send_connection_id = rc.connection.id
             elif p.role == "main_out":
                 topo.output_cabled = True
                 key = "OUT_RING" if p.audio_channel == AudioChannel.RIGHT else "OUT_TIP"
                 topo.output_to[key] = rc.target.instance.label
+                topo.output_connection_id[key] = rc.connection.id
         if rc.target.instance.id == sw.id:
             p = rc.target.port
             if p.role == "loop_return" and p.loop:
@@ -91,10 +106,12 @@ def loop_occupancy(ctx: WiringContext, sw: DeviceInstance) -> Ml10xTopology:
                 if lp:
                     lp.return_from_instance_id = rc.source.instance.id
                     lp.return_from_label = rc.source.instance.label
+                    lp.return_connection_id = rc.connection.id
             elif p.role == "main_in":
                 topo.input_cabled = True
                 key = "IN_RING" if p.audio_channel == AudioChannel.RIGHT else "IN_TIP"
                 topo.input_from[key] = rc.source.instance.label
+                topo.input_connection_id[key] = rc.connection.id
     for lp in topo.loops:
         lp.complete = bool(lp.send_to_instance_id and lp.return_from_instance_id)
     # Stereo pair detection: Tip and Ring of one jack feeding the same device = stereo pedal.
