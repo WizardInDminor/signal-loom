@@ -35,6 +35,8 @@ interface RigState {
   /** Adopt a rig document the server already stored (e.g. after a server-side import) without a loading cycle. */
   replaceRig: (rig: Rig) => void;
   refreshCatalog: () => Promise<void>;
+  /** Re-run the analysis of the current document (e.g. after a profile changed) without editing it. */
+  reanalyze: () => Promise<void>;
   update: (fn: (rig: Rig) => void) => void;
   /** Persist every pending edit, in order. Resolves true once the latest revision is saved. */
   ensureSaved: () => Promise<boolean>;
@@ -181,6 +183,18 @@ export const useRigStore = create<RigState>((set, get) => ({
     const profiles: Record<string, DeviceProfile> = {};
     for (const p of catalog) profiles[p.id] = p;
     set({ catalog, profiles });
+  },
+
+  async reanalyze() {
+    const rig = get().rig;
+    if (!rig) return;
+    const seq = ++analyzeSeq;
+    try {
+      const analysis = await api.rigs.analyzeDocument(rig);
+      if (seq === analyzeSeq) set({ analysis });
+    } catch (e) {
+      set({ error: errorText(e) });
+    }
   },
 
   update(fn) {

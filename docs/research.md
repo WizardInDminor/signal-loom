@@ -30,6 +30,14 @@ unknown jack inclusion and no ports/power/MIDI, and (b) ten hand-authored profil
 source URLs and per-attribute evidence. Other datasets found (pedalboard-3d heights,
 PedalboardPlanner, pedalvision) also lack usable data licenses; none was used.
 
+### User-supplied pictures (Session 3)
+
+Device photographs are supplied by the user and stored only on their computer (managed asset
+directory, never in the repository or a project file unless they opt in). The app does not fetch
+or redistribute Pedal Playground's or any vendor's product photography, and uploading a picture is
+not taken as proof of redistribution rights: the UI says so next to the upload control. The test
+fixture `pedal-photo.jpg` is a synthetic drawing made with Pillow for this repository.
+
 ## 2. Device profile facts shipped (evidence per attribute)
 
 | Device | Footprint | Power | Jacks / MIDI | Unknown on purpose |

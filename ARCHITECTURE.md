@@ -127,6 +127,37 @@ geometry into drawing coordinates and cable curves, shared by the Board and the 
 flow is drawn exactly on the cable the Board draws. Cables leave a jack perpendicular to the
 edge the jack sits on (as a plug does); top-face jacks fall back to a bend towards the centre.
 
+## Device pictures: assets, calibration and rendering (Session 3)
+
+A photograph is a *visual layer* on a device whose geometry is already known; it never becomes
+geometry. Three pieces keep that true:
+
+- **Assets** (`app/assets.py`, table `assets`, migration 0003, files in the managed asset
+  directory next to the database). An upload is sniffed by Pillow (JPEG/PNG/WebP only), checked
+  against byte and pixel ceilings before decoding, EXIF-transposed, downscaled to 2048 px and
+  re-encoded, so no original bytes or metadata are stored or served. Files are named by a
+  server-generated `img_…` id; the API validates ids against a strict pattern before any lookup.
+  Deleting an asset that a profile or rig still references is refused (409).
+- **`DeviceImage`** (`models/profile.py`), on a profile or as an instance override: `asset_id`,
+  a normalized `crop` in the stored image, `rotation_quarter` (quarter turns so the picture's top
+  matches the device's top edge), `fit` (`contain` letterboxes, `cover` clips) and `calibrated`
+  (true only when the selection was made against a known width and depth; a statement about the
+  workflow, not about the measurements' evidence). `app/images.py::resolve_image` picks the
+  effective picture (instance override wins) and joins it with the asset's pixel size; a missing
+  asset resolves to `{missing: true}` and renderers fall back to the enclosure. The analysis
+  exposes it per instance, the rig library preview per device.
+- **Rendering** (`frontend/src/components/images/DeviceImageGlyph.tsx`): the picture is placed in
+  the *unrotated* enclosure frame and rotated with the device about the same centre the jacks
+  rotate about, so a 90° device shows a 90° picture with its jacks on the new edge. The crop is a
+  nested SVG viewport (`viewBox` = crop in pixels) with `preserveAspectRatio` meet/slice, so
+  nothing is ever stretched. Board, Stage and previews all use this one glyph under their own
+  overlays (labels on a translucent chip, LEDs, paths, jacks).
+
+Project files: format 1 is unchanged and carries only `DeviceImage` metadata; importing one on a
+computer without the asset keeps the metadata and warns. `?include_images=1` produces a format 2
+file with the assets base64-bundled; import restores them through the same sanitizer under the
+same ids (local library still wins for existing profiles).
+
 ## Scenes and the compiler
 
 A scene is intent, not bytes. The compiler is deterministic for equal inputs (ordering is

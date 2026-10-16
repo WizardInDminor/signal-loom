@@ -1,4 +1,4 @@
-import type { Analysis, DeviceProfile, ExportStatus, Rig, RigSummary } from "./types";
+import type { Analysis, AssetRecord, DeviceProfile, ExportStatus, Rig, RigSummary } from "./types";
 
 export class ApiError extends Error {
   status: number;
@@ -31,6 +31,29 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
+/** Multipart upload: the browser sets the boundary, so no JSON content type here. */
+async function upload<T>(path: string, file: File): Promise<T> {
+  const form = new FormData();
+  form.append("file", file, file.name);
+  let res: Response;
+  try {
+    res = await fetch(path, { method: "POST", body: form });
+  } catch {
+    throw new ApiError(0, "Cannot reach the Signal Loom backend. Is it running on port 8000?");
+  }
+  if (!res.ok) {
+    let detail: unknown = res.statusText;
+    try {
+      const body = await res.json();
+      detail = body.detail ?? body;
+    } catch {
+      /* non-JSON error body */
+    }
+    throw new ApiError(res.status, detail);
+  }
+  return (await res.json()) as T;
+}
+
 export const api = {
   health: () => request<{ status: string; version: string }>("/api/health"),
   rigs: {
@@ -44,7 +67,7 @@ export const api = {
     duplicate: (id: string) => request<Rig>(`/api/rigs/${id}/duplicate`, { method: "POST" }),
     analysis: (id: string) => request<Analysis>(`/api/rigs/${id}/analysis`),
     analyzeDocument: (rig: Rig) => request<Analysis>("/api/rigs/analyze", { method: "POST", body: JSON.stringify(rig) }),
-    exportProject: (id: string) => request<unknown>(`/api/rigs/${id}/export`),
+    exportProject: (id: string, includeImages = false) => request<unknown>(`/api/rigs/${id}/export${includeImages ? "?include_images=1" : ""}`),
     importProject: (text: string, name?: string) =>
       request<{ rig: Rig; warnings: string[]; imported_profiles: string[] }>(`/api/rigs/import${name ? `?name=${encodeURIComponent(name)}` : ""}`, { method: "POST", body: text }),
     exportStatus: (id: string) => request<ExportStatus>(`/api/rigs/${id}/exports/status`),
@@ -53,6 +76,11 @@ export const api = {
     importMc8Bank: (id: string, text: string, replace = false) => request<{ rig: Rig; bank_number: number; imported_presets: number; skipped: { position: string; slot: number; type_code: number; type_name: string }[] }>(`/api/rigs/${id}/import/mc8-bank${replace ? "?replace=1" : ""}`, { method: "POST", body: text }),
     diffBackups: (a: string, b: string) => request<{ ok: boolean; problems: string[]; same_model: boolean | null; device_model: number | null; changes: { path: string[]; label: string; change: string; before: unknown; after: unknown }[]; summary: { total: number; by_kind: Record<string, number>; truncated: boolean; touched: string[] }; metadata_differences: Record<string, { a: unknown; b: unknown }> }>("/api/rigs/inspect/backup-diff", { method: "POST", body: JSON.stringify({ a, b }) }),
     inspectMl10x: (text: string) => request<{ ok: boolean; problems: string[]; midi_channel: number | null; device_id: number | null; connectors: { id: number; name: string; short_name: string; trails: boolean }[]; presets: { bank: number; number: number; global_number: number; name: string; advanced_mode: boolean }[]; settings: Record<string, unknown> }>("/api/rigs/inspect/ml10x-backup", { method: "POST", body: text }),
+  },
+  assets: {
+    upload: (file: File) => upload<AssetRecord>("/api/assets/images", file),
+    meta: (id: string) => request<AssetRecord & { referenced_by: { profiles: string[]; rigs: string[] } }>(`/api/assets/images/${encodeURIComponent(id)}/meta`),
+    remove: (id: string) => request<void>(`/api/assets/images/${encodeURIComponent(id)}`, { method: "DELETE" }),
   },
   catalog: {
     list: (q?: string, category?: string) => {

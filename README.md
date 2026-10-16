@@ -122,6 +122,33 @@ on stage, and the board shows what the scene does physically:
 
 The Stage is read-only: it never edits the rig and never sends anything to hardware.
 
+## Pictures of your pedals (Session 3)
+
+Open a profile in the **Device library** (or select a device on the Board and look at the
+inspector) and press **Add picture…**. Upload a top-down JPEG, PNG or WebP photograph, then in
+the crop editor draw a box around the enclosure, move it, resize it with the handles, and lock
+it to the device's recorded width : depth. The preview on the right shows the result fitted
+to the real footprint with the jacks in place; turn the picture in quarter steps if it was shot
+sideways, and choose *fit inside* (margins in the enclosure colour) or *fill & clip* when the
+box's proportions differ from the footprint. Nothing is ever stretched, and the text under the
+preview says exactly how large the margins or the clipped share are. Save, and every board that
+uses the profile shows the pedal at physical scale, on the Board, the Stage and the rig cards.
+Recrop, Replace and Remove are one click; removing restores the plain enclosure drawing.
+
+What stays true: the profile's footprint remains the source of truth for size (with its evidence
+level); jacks, cables, collisions, measurements and plug clearance never depend on the picture;
+rotating a device rotates the picture with it. A device without recorded dimensions can still be
+cropped, but is labelled *not calibrated* until dimensions are entered and the picture recropped.
+A placed unit can carry its own picture (a repainted pedal) that overrides the profile's.
+
+Storage and rights: uploads are decoded defensively (only real JPEG/PNG/WebP; never SVG; 15 MB
+and 40 megapixel limits), EXIF orientation is applied and then all metadata is stripped by
+re-encoding, and the sanitized copy is kept under `backend/data/assets/` (or `$SIGNAL_LOOM_ASSETS`)
+next to the database, named by id. Project files stay format 1 and carry only the crop metadata;
+`GET /api/rigs/{id}/export?include_images=1` is the explicit opt-in that bundles the pictures
+(format 2) for a backup or another computer. You are responsible for having the right to use any
+photograph you upload; Signal Loom never downloads or redistributes product photography.
+
 ## A short tour: the three-scene demo
 
 1. **Rigs** — open *Demo rig: three-scene song* (or create a new rig, optionally "from the demo").

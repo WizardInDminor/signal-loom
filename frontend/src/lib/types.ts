@@ -44,6 +44,27 @@ export interface PortDef {
 }
 
 export interface CcDef { cc: number; name: string; value_semantics?: string | null; evidence: Evidence }
+
+/** Normalized selection (0–1) in the stored, orientation-corrected photograph: the enclosure. */
+export interface ImageCrop { x: number; y: number; w: number; h: number }
+/** A user photograph fitted to a device's physical footprint (which stays the source of truth for size). */
+export interface DeviceImage {
+  asset_id: string;
+  crop: ImageCrop;
+  /** Quarter turns (clockwise) applied to the cropped picture so its top matches the device's top edge. */
+  rotation_quarter: number;
+  /** contain = whole selection visible, margins show the enclosure colour; cover = fill the footprint, clip the overhang. */
+  fit: "contain" | "cover";
+  /** True only when the selection was made against a known width and depth. */
+  calibrated: boolean;
+  note?: string | null;
+}
+/** A stored image asset as the API reports it. */
+export interface AssetRecord { id: string; kind: string; content_type: string; width: number; height: number; byte_size: number; sha256: string; original_name: string | null; created_at: string; url: string }
+/** The effective picture of a placed device, resolved by the backend (instance override or profile). */
+export type ResolvedImage =
+  | { asset_id: string; missing: true; source: "instance" | "profile" }
+  | { asset_id: string; missing: false; source: "instance" | "profile"; url: string; width: number; height: number; crop: ImageCrop; rotation_quarter: number; fit: "contain" | "cover"; calibrated: boolean };
 export interface DeviceProfile {
   id: string;
   manufacturer: string;
@@ -51,6 +72,7 @@ export interface DeviceProfile {
   category: (typeof CATEGORIES)[number];
   revision?: string | null;
   image_ref?: string | null;
+  image?: DeviceImage | null;
   provenance: { source: string; url?: string | null; evidence: Evidence; license?: string | null; attribution?: string | null; retrieved?: string | null };
   footprint: Footprint;
   ports: PortDef[];
@@ -76,7 +98,7 @@ export interface Board { name: string; width_mm: number; depth_mm: number; grid_
 export interface DeviceInstance {
   id: string; profile_id: string; label: string; x_mm: number; y_mm: number; rotation: Rotation;
   intentional_overlap: boolean; off_board: boolean; midi_channel: number | null;
-  port_overrides: PortDef[]; removed_port_ids: string[]; notes?: string | null;
+  port_overrides: PortDef[]; removed_port_ids: string[]; image?: DeviceImage | null; notes?: string | null;
 }
 export interface PortRef { instance_id: string; port_id: string }
 export interface Connection {
@@ -104,7 +126,7 @@ export interface Rig {
   };
   notes?: string | null;
 }
-export interface PreviewDevice { x_mm: number; y_mm: number; width_mm: number; height_mm: number; category: string; off_board: boolean; placeholder: boolean }
+export interface PreviewDevice { x_mm: number; y_mm: number; width_mm: number; height_mm: number; category: string; off_board: boolean; placeholder: boolean; rotation: number; image: ResolvedImage | null }
 export interface RigPreview { width_mm: number; depth_mm: number; devices: PreviewDevice[]; cable_count: number }
 export interface RigSummary { id: string; name: string; description?: string | null; created_at: string; updated_at: string; revision: number; instance_count: number; scene_count: number; preview?: RigPreview | null }
 
@@ -133,7 +155,7 @@ export interface Analysis {
   cable_kit: CableItem[];
   /** MIDI cables from the MC8 to every device it reaches, in order (through MIDI Thru and the Omniport). */
   midi: { controller_id: string | null; routes: Record<string, string[]> };
-  instances: Record<string, { width_mm: number; height_mm: number; placeholder: boolean; ports: PlacedPort[]; effective_ports: PortDef[]; unknowns: string[] }>;
+  instances: Record<string, { width_mm: number; height_mm: number; placeholder: boolean; ports: PlacedPort[]; effective_ports: PortDef[]; unknowns: string[]; image: ResolvedImage | null }>;
   compiled: { scenes: ScenePlan[]; mc8: { instance_id: string | null; firmware_assumed: string; limits: { banks: number; presets_per_bank: number; messages_per_preset: number; footswitch_positions: string[] }; banks: { number: number; name: string; diagnostics: Diagnostic[]; switches: SwitchPlan[] }[] }; diagnostics: Diagnostic[] };
 }
 export interface ExportStatus { [key: string]: { level: string; available: boolean; note: string } }

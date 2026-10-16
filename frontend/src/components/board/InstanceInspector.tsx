@@ -5,11 +5,14 @@ import type { DeviceInstance, Rotation } from "@/lib/types";
 import { Badge, Button, DiagnosticList, EvidenceBadge, Field, Panel } from "@/components/ui/basics";
 import { PortEditor } from "./PortEditor";
 import { JackEditor } from "./JackEditor";
+import { DeviceImageSection } from "@/components/images/DeviceImageSection";
+import { api } from "@/lib/api";
+import { enclosureFill } from "@/lib/boardLayout";
 import { useState } from "react";
 import type { PortDef } from "@/lib/types";
 
 export function InstanceInspector() {
-  const { rig, analysis, profiles, selectedInstanceId, update, removeInstance } = useRigStore();
+  const { rig, analysis, profiles, selectedInstanceId, update, removeInstance, refreshCatalog, reanalyze } = useRigStore();
   const inst = rig?.instances.find((i) => i.id === selectedInstanceId);
   if (!rig || !inst) return <Panel title="Device inspector"><p className="text-xs text-neutral-500">Select a device on the board.</p></Panel>;
   const profile = profiles[inst.profile_id];
@@ -65,6 +68,41 @@ export function InstanceInspector() {
         ) : (
           <div className="text-neutral-600">Power requirement: <Badge tone="bad">unknown</Badge></div>
         )}
+        <div className="flex flex-col gap-2 border border-line rounded p-2">
+          <DeviceImageSection
+            heading={`Picture for every ${profile?.model ?? "device of this profile"}`}
+            value={profile?.image ?? null}
+            widthMm={profile?.footprint.width.value_mm ?? null}
+            depthMm={profile?.footprint.depth.value_mm ?? null}
+            evidence={profile?.footprint.width.evidence}
+            ports={geo?.effective_ports ?? profile?.ports ?? []}
+            fill={enclosureFill(profile?.category)}
+            testId="profile-image"
+            hint="A top-down photograph shown on every board that uses this profile."
+            onSave={async (img) => {
+              if (!profile) return;
+              await api.catalog.update({ ...profile, image: img });
+              await refreshCatalog();
+              await reanalyze();
+            }}
+          />
+          <details data-testid="instance-image-details">
+            <summary className="cursor-pointer text-neutral-600">This unit only (repainted or customised pedal){inst.image ? " · override active" : ""}</summary>
+            <div className="mt-2">
+              <DeviceImageSection
+                value={inst.image ?? null}
+                widthMm={profile?.footprint.width.value_mm ?? null}
+                depthMm={profile?.footprint.depth.value_mm ?? null}
+                evidence={profile?.footprint.width.evidence}
+                ports={geo?.effective_ports ?? []}
+                fill={enclosureFill(profile?.category)}
+                testId="instance-image"
+                hint="Overrides the profile's picture for this one placed unit; the profile's dimensions and jacks still apply."
+                onSave={(img) => edit((i) => { i.image = img; })}
+              />
+            </div>
+          </details>
+        </div>
         <div>
           <h3 className="font-semibold mb-1">Jack positions (drag on the outline)</h3>
           <JackEditorForInstance inst={inst} onChange={savePort} />

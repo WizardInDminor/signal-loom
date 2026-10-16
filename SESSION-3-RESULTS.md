@@ -118,6 +118,58 @@ internal arcs, label collisions, note truncation).
 - The library computes previews by loading each rig on `GET /api/rigs`; fine for a personal
   library, worth caching if someone has hundreds of rigs.
 
+## Part two: pictures of real pedals (same branch, same PR)
+
+The owner asked for a user-managed image layer: photograph a pedal, draw a box around it, see it
+at scale. Built as follows.
+
+### What a user does
+
+Open a profile (Device library) or select a device on the Board → **Add picture…** → choose a
+JPEG/PNG/WebP → the crop editor opens on the stored, orientation-corrected copy with a selection
+already locked to the device's width : depth → draw / move / resize with eight handles, nudge with
+the arrow keys, turn the picture in quarter steps, choose *fit inside* or *fill & clip* → the
+preview shows the picture in the real footprint with the jacks in place and a sentence explains
+any margins or clipping in mm and % → **Save picture** → the Board, Stage and rig cards show the
+pedal; **Recrop** reopens the saved selection, **Replace** uploads another photo keeping the crop,
+**Remove** restores the enclosure drawing. A unit can also carry its own override picture.
+
+### Design decisions
+
+- **Server-side sanitizer, then crop in the browser.** The browser only ever sees the re-encoded,
+  orientation-corrected copy, so the normalized crop is stable across devices and reloads and EXIF
+  never has to be interpreted twice.
+- **Footprint first.** The crop is fitted to the recorded mm; the picture never changes a size, a
+  jack, a collision or a clearance. `calibrated` is about the workflow (made against known
+  dimensions), not a claim about the dimensions' evidence, which keeps its own badge.
+- **No stretching, ever.** A mismatched box is either letterboxed (enclosure colour shows) or
+  clipped, and the editor says by how much. Perspective correction was left out deliberately: a
+  top-down shot is the documented path, and a half-working warp would undermine trust.
+- **Local-first, opt-in portability.** Plain project files are byte-identical to before; bundling
+  pictures is an explicit export option that bumps the format version, and import re-validates
+  the bytes like an upload.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| `pytest -q` | **76 passed** (8 new in `tests/test_images.py`: sanitizer behaviour incl. EXIF orientation 6 and metadata stripping, SVG/GIF/text/truncated rejection, pixel limit and downscale, strict asset ids, profile round trip + analysis/preview resolution + delete refusal + removal, instance override and rotation, missing assets + bundled restore + tampered bundle, unchanged rigs; migration list updated) |
+| Playwright | **25 passed** (2 new: the full upload → reject SVG → locked crop → resize/move/draw → fit report → save → Board at scale → rotation keeps jacks → persisted metadata + sanitized asset → reload → Stage → rig card → recrop → remove flow; and the no-dimensions / instance-override / export-format flow) |
+| Screenshots | before/after on the stereo demo's BigSky: catalog, editor (initial, free-drawn, calibrated after a quarter turn), Board at 0° and 90°, inspector, Stage, home miniatures; no console errors |
+
+Acceptance criteria 1–10 from the request are each exercised by the tests above; see
+`frontend/e2e/images.spec.ts` and `backend/tests/test_images.py`.
+
+### Caveats
+
+- WebP uploads are stored as JPEG (or PNG when they have transparency); the stored copy is the
+  sanitized one, never the original.
+- The crop editor is sized for the inspector's column as well as the catalog page, but a very
+  narrow window stacks the preview under the photo.
+- Perspective and background removal are out of scope (documented in the editor).
+- The asset directory is not part of the SQLite file: back it up alongside, or use the
+  image-inclusive export.
+
 ## Two next ideas
 
 1. **Visual Advanced-mode editor on the Stage canvas**: drag from a Return jack to a Send jack

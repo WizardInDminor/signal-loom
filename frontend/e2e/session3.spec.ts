@@ -96,7 +96,7 @@ test("stage: breaking a loop return shows the path breaking at that cable and th
 
 test("rig library: cards show a true-scale miniature of each board", async ({ page }) => {
   await page.goto("/");
-  const card = page.getByTestId("rig-preview").first();
+  const card = page.getByRole("listitem").filter({ hasText: "Demo rig: three-scene song" }).getByTestId("rig-preview");
   await expect(card).toBeVisible();
   const n = await card.locator("rect[data-device]").count();
   expect(n).toBeGreaterThanOrEqual(5);

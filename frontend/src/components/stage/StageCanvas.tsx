@@ -4,6 +4,8 @@ import { useMemo } from "react";
 import { useRigStore } from "@/store/rigStore";
 import { boardLayout, enclosureFill } from "@/lib/boardLayout";
 import type { FlowSegment, SceneStory } from "@/lib/stage";
+import type { ResolvedImage } from "@/lib/types";
+import { DeviceImageGlyph } from "@/components/images/DeviceImageGlyph";
 
 export const FLOW_COLOR = { L: "#4ade80", R: "#fb7185" } as const;
 export const MIDI_COLOR = "#c084fc";
@@ -17,17 +19,23 @@ export interface StageView {
 }
 
 /** Device glyph used on the stage: enclosure, name, scene LED and a state line. */
-function Device({ x, y, w, h, label, fill, placeholder, offBoard, dim, led, state, changed, testId, note }: {
+function Device({ x, y, w, h, label, fill, placeholder, offBoard, dim, led, state, changed, testId, note, image, rotation }: {
   x: number; y: number; w: number; h: number; label: string; fill: string; placeholder: boolean; offBoard: boolean; dim: boolean;
   led: "on" | "off" | "unset" | null; state: string; changed: boolean; testId: string; note?: string | null;
+  image?: ResolvedImage | null; rotation: number;
 }) {
   const fs = Math.min(8, w / 8);
+  const photo = image && !image.missing ? image : null;
   return (
     <g data-testid={testId} data-state={led === "on" ? "engaged" : led === "off" ? "bypassed" : led === "unset" ? "unset" : "n/a"} data-inpath={dim ? "false" : "true"} opacity={dim ? 0.38 : 1}>
       {changed && <rect x={x - 2} y={y - 2} width={w + 4} height={h + 4} rx={5} fill="none" stroke="#fbbf24" strokeWidth={1.4} className="stage-pulse" />}
-      <rect x={x} y={y} width={w} height={h} rx={3} fill={fill} stroke={offBoard ? "#94a3b8" : "#1f2937"} strokeWidth={0.8} strokeDasharray={placeholder || offBoard ? "3 2" : undefined} />
+      <rect x={x} y={y} width={w} height={h} rx={3} fill={fill} />
+      {photo && <DeviceImageGlyph x={x} y={y} w={w} h={h} rotation={rotation} image={photo} clipId={`clip-stage-${testId}`} />}
+      <rect x={x} y={y} width={w} height={h} rx={3} fill="none" stroke={offBoard ? "#94a3b8" : "#1f2937"} strokeWidth={0.8} strokeDasharray={placeholder || offBoard ? "3 2" : undefined} />
       {/* subtle top highlight so enclosures read as objects, not table cells */}
-      <rect x={x + 1} y={y + 1} width={Math.max(0, w - 2)} height={Math.min(4, h / 6)} rx={2} fill="#fff" opacity={0.45} />
+      {!photo && <rect x={x + 1} y={y + 1} width={Math.max(0, w - 2)} height={Math.min(4, h / 6)} rx={2} fill="#fff" opacity={0.45} />}
+      {/* on a photograph the name and state sit on a translucent chip so overlays stay legible */}
+      {photo && <rect x={x + 1.5} y={y + 2} width={Math.min(w - 3, Math.max(label.length * fs * 0.62, state.length * 2.6) + 4)} height={fs + 9} rx={1.5} fill="#fff" opacity={0.85} />}
       <text x={x + 3} y={y + 9} fontSize={fs} fontWeight={600} fill="#111827">{label}</text>
       {led && (
         <g>
@@ -132,6 +140,8 @@ export function StageCanvas({ story, changed, view }: { story: SceneStory | null
             changed={changed.has(inst.id)}
             testId={`stage-device-${inst.id}`}
             note={byFoot.get(inst.id) ? `✋ by foot: ${byFoot.get(inst.id)}` : unreachable.has(inst.id) ? "⚠ no MIDI cable path from the MC8" : null}
+            image={geo?.image}
+            rotation={inst.rotation}
           />
         );
       })}

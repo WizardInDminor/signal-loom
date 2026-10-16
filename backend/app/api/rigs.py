@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import copy
 
 from fastapi import APIRouter, HTTPException, Request
@@ -191,8 +192,6 @@ async def import_rig(request: Request, keep_id: bool = False, name: str | None =
         if not isinstance(aid, str) or store.get(aid) is not None:
             continue
         try:
-            import base64
-
             store.ingest_image(
                 base64.b64decode(a.get("data_base64", ""), validate=True), a.get("original_name"), asset_id=aid
             )

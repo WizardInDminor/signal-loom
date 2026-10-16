@@ -6,6 +6,8 @@ import type { DeviceProfile } from "@/lib/types";
 import { CATEGORIES } from "@/lib/types";
 import { Badge, Button, ErrorBanner, EvidenceBadge, Field, Panel } from "@/components/ui/basics";
 import { JackEditor } from "@/components/board/JackEditor";
+import { DeviceImageSection } from "@/components/images/DeviceImageSection";
+import { enclosureFill } from "@/lib/boardLayout";
 import type { PortDef, SignalKind, PortDirection, Edge } from "@/lib/types";
 import { CONNECTORS } from "@/lib/types";
 
@@ -146,6 +148,21 @@ export default function CatalogPage() {
               <tbody>{sel.ports.map((p) => <tr key={p.id} className="border-t border-line"><td>{p.label}</td><td>{p.kind}</td><td>{p.direction}</td><td>{p.connector}{p.midi_trs_type ? ` (${p.midi_trs_type})` : ""}{p.audio_channel ? ` ${p.audio_channel}` : ""}</td><td>{p.edge}</td><td>{p.position == null ? <Badge tone="bad">unknown</Badge> : <>{p.position} <EvidenceBadge evidence={p.position_evidence} /></>}</td><td className="text-neutral-500">{p.notes}</td></tr>)}</tbody>
             </table>
             {sel.capabilities.notes && <div className="text-neutral-600">{sel.capabilities.notes}</div>}
+            <DeviceImageSection
+              heading="Picture"
+              value={sel.image ?? null}
+              widthMm={sel.footprint.width.value_mm}
+              depthMm={sel.footprint.depth.value_mm}
+              evidence={sel.footprint.width.evidence}
+              ports={sel.ports}
+              fill={enclosureFill(sel.category)}
+              hint={`Add a top-down photograph of the ${sel.model}; every board that uses this profile shows it.${sel.builtin ? " Saving a picture on a built-in profile makes it your own copy (same id, never overwritten by updates)." : ""}`}
+              onSave={async (img) => {
+                const saved = await api.catalog.update({ ...sel, image: img });
+                setSel(saved);
+                void refresh();
+              }}
+            />
             <div>
               <h3 className="font-semibold mb-1">Jack layout (read-only; Edit or Duplicate to change)</h3>
               <JackEditor widthMm={sel.footprint.width.value_mm ?? 70} depthMm={sel.footprint.depth.value_mm ?? 120} ports={sel.ports} onChange={() => undefined} />

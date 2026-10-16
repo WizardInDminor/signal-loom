@@ -5,6 +5,7 @@ import { useRigStore } from "@/store/rigStore";
 import type { DeviceInstance, Rotation, SignalKind } from "@/lib/types";
 import { KIND_COLOR } from "@/components/ui/basics";
 import { OFFBOARD_GAP, boardLayout, boardViewBox, enclosureFill } from "@/lib/boardLayout";
+import { DeviceImageGlyph } from "@/components/images/DeviceImageGlyph";
 
 export { boardViewBox };
 
@@ -207,9 +208,13 @@ export function BoardCanvas({ view }: { view: BoardViewOptions }) {
             className={inst.off_board ? "cursor-default" : "cursor-move"}
           >
             <rect x={pos.x} y={pos.y} width={w} height={h} rx={3}
-              fill={enclosureFill(profile?.category, { placeholder: geo?.placeholder, offBoard: inst.off_board })}
+              fill={enclosureFill(profile?.category, { placeholder: geo?.placeholder, offBoard: inst.off_board })} />
+            {geo?.image && !geo.image.missing && <DeviceImageGlyph x={pos.x} y={pos.y} w={w} h={h} rotation={inst.rotation} image={geo.image} clipId={`clip-board-${inst.id}`} />}
+            <rect x={pos.x} y={pos.y} width={w} height={h} rx={3} fill="none"
               stroke={bad ? "#dc2626" : selected ? "#2563eb" : inst.off_board ? "#9ca3af" : "#374151"} strokeWidth={selected ? 1.6 : 0.8}
               strokeDasharray={inst.intentional_overlap || geo?.placeholder || inst.off_board ? "3 2" : undefined} />
+            {/* label chip keeps the name legible on a photograph */}
+            {geo?.image && !geo.image.missing && <rect x={pos.x + 1.5} y={pos.y + 2} width={Math.min(w - 3, inst.label.length * Math.min(8, w / 8) * 0.62 + 4)} height={Math.min(8, w / 8) + 10} rx={1.5} fill="#fff" opacity={0.82} />}
             <text x={pos.x + 3} y={pos.y + 9} fontSize={Math.min(8, w / 8)} fontWeight={600} fill="#111">{inst.label}</text>
             <text x={pos.x + 3} y={pos.y + 17} fontSize={5} fill="#4b5563">{geo?.placeholder ? "size unknown (placeholder)" : `${Math.round(w)} × ${Math.round(h)} mm`} · {inst.rotation}°</text>
           </g>
