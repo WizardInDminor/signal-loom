@@ -88,7 +88,7 @@ test("wiring: an incompatible connection is flagged, not silently accepted", asy
   await expect(page.getByText(/DIN to TRS MIDI needs an adapter cable/).first()).toBeVisible();
   // Audio into a MIDI jack is impossible: the form only offers same-kind ports, and the
   // backend rejects a cross-kind cable if one is forced through the API.
-  const rigId = page.url().split("/rigs/")[1];
+  const rigId = page.url().split("/rigs/")[1].split("#")[0];
   const rig = await (await page.request.get(`/api/rigs/${rigId}`)).json();
   rig.connections.push({ id: "conn_bad", kind: "audio", source: { instance_id: "inst_guitar", port_id: "out" }, target: { instance_id: "inst_mc8", port_id: "midi_in" }, intentional: false });
   await page.request.put(`/api/rigs/${rigId}`, { data: rig });
@@ -165,7 +165,7 @@ test("usability: build a small rig from scratch through the UI", async ({ page }
 
 test("exports: an export made right after an edit reflects the edit, even while the save is slow", async ({ page }) => {
   await openDemo(page);
-  const rigId = page.url().split("/rigs/")[1];
+  const rigId = page.url().split("/rigs/")[1].split("#")[0];
   // Make the persistence slow so the export would read stale data without the save barrier.
   await page.route(`**/api/rigs/${rigId}`, async (route) => {
     if (route.request().method() === "PUT") await new Promise((r) => setTimeout(r, 1500));
@@ -183,7 +183,7 @@ test("exports: an export made right after an edit reflects the edit, even while 
 
 test("saves: edits during an in-flight save are persisted in order and 'Saved' is only shown once the latest revision is stored", async ({ page }) => {
   await openDemo(page);
-  const rigId = page.url().split("/rigs/")[1];
+  const rigId = page.url().split("/rigs/")[1].split("#")[0];
   let puts = 0;
   await page.route(`**/api/rigs/${rigId}`, async (route) => {
     if (route.request().method() === "PUT") {
@@ -217,7 +217,7 @@ test("exports: a wiring error blocks the native MC8 export even though the switc
   await page.getByRole("tab", { name: "exports" }).click();
   await expect(page.getByTestId("native-export-blocked")).toBeVisible();
   await expect(page.getByRole("button", { name: /Prepare bank 1/ })).toBeDisabled();
-  const rigId = page.url().split("/rigs/")[1];
+  const rigId = page.url().split("/rigs/")[1].split("#")[0];
   await expect.poll(async () => (await page.request.get(`/api/rigs/${rigId}/exports/mc8-bank/1`)).status()).toBe(409);
   // Human-readable reports remain available and list the problem.
   const md = await (await page.request.get(`/api/rigs/${rigId}/exports/wiring.md`)).text();

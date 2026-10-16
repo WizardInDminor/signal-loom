@@ -14,6 +14,13 @@ def test_cold_start_seeds_catalog_and_demo(client):
     assert [r["id"] for r in rigs] == ["rig_demo_signal_loom", "rig_demo_stereo"]
     assert rigs[0]["instance_count"] == 8 and rigs[0]["scene_count"] == 3
     assert rigs[1]["instance_count"] == 9 and rigs[1]["scene_count"] == 3
+    # The library miniature is true to scale and only ever derived from the stored rig.
+    pv = rigs[1]["preview"]
+    assert pv["width_mm"] == 600 and pv["depth_mm"] == 300 and pv["cable_count"] == 18
+    assert len(pv["devices"]) == 9
+    ml10x = next(d for d in pv["devices"] if d["category"] == "switcher")
+    assert (ml10x["width_mm"], ml10x["height_mm"]) == (169.0, 58.0) and ml10x["off_board"] is False
+    assert all(d["off_board"] for d in pv["devices"] if d["category"] in ("instrument", "amp"))
     devices = client.get("/api/catalog/devices").json()
     assert {d["id"] for d in devices} >= {
         "morningstar-mc8",

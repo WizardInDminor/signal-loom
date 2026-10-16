@@ -10,18 +10,34 @@ import { WiringTab } from "@/components/wiring/WiringTab";
 import { ScenesTab } from "@/components/scenes/ScenesTab";
 import { ControllersTab } from "@/components/controllers/ControllersTab";
 import { ExportsTab } from "@/components/exports/ExportsTab";
+import { StageTab } from "@/components/stage/StageTab";
 
-const TABS = ["board", "wiring", "scenes", "controllers", "exports"] as const;
+const TABS = ["board", "stage", "wiring", "scenes", "controllers", "exports"] as const;
 type Tab = (typeof TABS)[number];
+const isTab = (v: string): v is Tab => (TABS as readonly string[]).includes(v);
 
 export default function RigPage() {
   const { id } = useParams<{ id: string }>();
   const { rig, analysis, loading, error, saving, dirty, conflict, load, clearError, update, flush, undo, redo, blockedSwitch, retrySwitch, discardAndSwitch } = useRigStore();
-  const [tab, setTab] = useState<Tab>("board");
+  const [tab, setTabState] = useState<Tab>("board");
+  // Workspaces are addressable (`#stage`), so a setlist view can be bookmarked or shared.
+  const setTab = (t: Tab) => {
+    setTabState(t);
+    if (typeof window !== "undefined") window.history.replaceState(null, "", `#${t}`);
+  };
 
   useEffect(() => {
     if (id) void load(id);
   }, [id, load]);
+  useEffect(() => {
+    const fromHash = () => {
+      const h = window.location.hash.replace(/^#/, "");
+      if (isTab(h)) setTabState(h);
+    };
+    fromHash();
+    window.addEventListener("hashchange", fromHash);
+    return () => window.removeEventListener("hashchange", fromHash);
+  }, []);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return;
@@ -90,6 +106,7 @@ export default function RigPage() {
       </div>
       <div role="tabpanel" className="flex-1 min-h-0 p-3 overflow-auto">
         {tab === "board" && <BoardTab />}
+        {tab === "stage" && <StageTab />}
         {tab === "wiring" && <WiringTab />}
         {tab === "scenes" && <ScenesTab />}
         {tab === "controllers" && <ControllersTab />}

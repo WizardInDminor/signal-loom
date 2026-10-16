@@ -212,6 +212,25 @@ class Rig(StrictModel):
         return None
 
 
+class PreviewDevice(StrictModel):
+    """One enclosure in a rig's miniature: true-scale rectangle plus category, nothing else."""
+
+    x_mm: float
+    y_mm: float
+    width_mm: float
+    height_mm: float
+    category: str
+    off_board: bool = False
+    placeholder: bool = False
+
+
+class RigPreview(StrictModel):
+    width_mm: float
+    depth_mm: float
+    devices: list[PreviewDevice] = Field(default_factory=list)
+    cable_count: int = 0
+
+
 class RigSummary(StrictModel):
     id: str
     name: str
@@ -221,6 +240,8 @@ class RigSummary(StrictModel):
     revision: int = 0
     instance_count: int
     scene_count: int
+    # Response-only miniature of the board (derived from the stored rig; never part of a project file).
+    preview: RigPreview | None = None
 
 
 class ProjectFile(StrictModel):

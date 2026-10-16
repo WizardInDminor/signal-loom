@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRigStore } from "@/store/rigStore";
-import type { DeviceInstance, PlacedPort, Rotation, SignalKind } from "@/lib/types";
+import type { DeviceInstance, Rotation, SignalKind } from "@/lib/types";
 import { KIND_COLOR } from "@/components/ui/basics";
+import { OFFBOARD_GAP, boardLayout, boardViewBox, enclosureFill } from "@/lib/boardLayout";
 
-const OFFBOARD_GAP = 40;
+export { boardViewBox };
+
 const DROP_RADIUS_MM = 9;
 
 export interface BoardViewOptions {
@@ -13,15 +15,6 @@ export interface BoardViewOptions {
   cableKinds: Set<SignalKind>;
   showLabels: boolean;
   showClearance: boolean;
-}
-
-export function boardViewBox(rig: NonNullable<ReturnType<typeof useRigStore.getState>["rig"]>, analysis: ReturnType<typeof useRigStore.getState>["analysis"]) {
-  const margin = 30;
-  const offboard = rig.instances.filter((i) => i.off_board);
-  const offboardWidth = offboard.length ? 200 : 0;
-  const vbW = rig.board.width_mm + margin * 2 + offboardWidth + (offboard.length ? OFFBOARD_GAP : 0);
-  const vbH = Math.max(rig.board.depth_mm, offboard.reduce((acc, i) => acc + (analysis?.instances[i.id]?.height_mm ?? 60) + 20, 0)) + margin * 2;
-  return { margin, vbW, vbH, offboard };
 }
 
 export function BoardCanvas({ view }: { view: BoardViewOptions }) {
@@ -32,7 +25,8 @@ export function BoardCanvas({ view }: { view: BoardViewOptions }) {
   const [guides, setGuides] = useState<{ x?: number; y?: number }>({});
 
   const board = rig!.board;
-  const { margin, vbW, vbH, offboard } = boardViewBox(rig!, analysis);
+  const layout = boardLayout(rig!, analysis);
+  const { margin, vbW, vbH, offboard, originOf, ports: portAbs } = layout;
   const pxPerMm = view.zoom;
 
   const toMm = useCallback((e: React.PointerEvent): { x: number; y: number } => {
@@ -46,22 +40,6 @@ export function BoardCanvas({ view }: { view: BoardViewOptions }) {
 
   const snap = (v: number) => Math.round(v / board.grid_mm) * board.grid_mm;
 
-  // Absolute (board-space, including margin) positions of every placed port.
-  let offY = margin;
-  const offboardPos: Record<string, { x: number; y: number }> = {};
-  for (const i of offboard) {
-    offboardPos[i.id] = { x: margin + board.width_mm + OFFBOARD_GAP, y: offY };
-    offY += (analysis?.instances[i.id]?.height_mm ?? 60) + 20;
-  }
-  const originOf = (inst: DeviceInstance) => (inst.off_board ? offboardPos[inst.id] : { x: margin + inst.x_mm, y: margin + inst.y_mm });
-  const portAbs: Record<string, { x: number; y: number; port: PlacedPort; inst: DeviceInstance }> = {};
-  for (const inst of rig!.instances) {
-    const geo = analysis?.instances[inst.id];
-    if (!geo) continue;
-    const o = originOf(inst);
-    const base = inst.off_board ? { x: 0, y: 0 } : { x: inst.x_mm, y: inst.y_mm };
-    for (const p of geo.ports) portAbs[`${inst.id}:${p.port_id}`] = { x: o.x + (p.x_mm - base.x), y: o.y + (p.y_mm - base.y), port: p, inst };
-  }
   const used = new Set(rig!.connections.flatMap((c) => [`${c.source.instance_id}:${c.source.port_id}`, `${c.target.instance_id}:${c.target.port_id}`]));
   const compatible = (key: string): boolean => {
     if (!pendingCable) return false;
@@ -229,7 +207,7 @@ export function BoardCanvas({ view }: { view: BoardViewOptions }) {
             className={inst.off_board ? "cursor-default" : "cursor-move"}
           >
             <rect x={pos.x} y={pos.y} width={w} height={h} rx={3}
-              fill={geo?.placeholder ? "#fef3c7" : profile?.category === "controller" ? "#e0e7ff" : profile?.category === "switcher" ? "#dcfce7" : profile?.category === "power_supply" ? "#fee2e2" : inst.off_board ? "#f8fafc" : "#f3f4f6"}
+              fill={enclosureFill(profile?.category, { placeholder: geo?.placeholder, offBoard: inst.off_board })}
               stroke={bad ? "#dc2626" : selected ? "#2563eb" : inst.off_board ? "#9ca3af" : "#374151"} strokeWidth={selected ? 1.6 : 0.8}
               strokeDasharray={inst.intentional_overlap || geo?.placeholder || inst.off_board ? "3 2" : undefined} />
             <text x={pos.x + 3} y={pos.y + 9} fontSize={Math.min(8, w / 8)} fontWeight={600} fill="#111">{inst.label}</text>
@@ -242,18 +220,8 @@ export function BoardCanvas({ view }: { view: BoardViewOptions }) {
         const a = portAbs[`${c.source.instance_id}:${c.source.port_id}`];
         const b = portAbs[`${c.target.instance_id}:${c.target.port_id}`];
         if (!a || !b) return null;
-        // Bend each cable gently towards the board centre so runs stay inside the drawing.
-        const cx = margin + board.width_mm / 2;
-        const cy = margin + board.depth_mm / 2;
-        const mx0 = (a.x + b.x) / 2;
-        const my0 = (a.y + b.y) / 2;
-        const dist = Math.hypot(b.x - a.x, b.y - a.y);
-        const toC = Math.hypot(cx - mx0, cy - my0) || 1;
-        const bend = Math.min(25, dist / 5);
-        const mx = mx0 + ((cx - mx0) / toC) * bend;
-        const my = my0 + ((cy - my0) / toC) * bend;
         return (
-          <path key={c.id} d={`M ${a.x} ${a.y} Q ${mx} ${my} ${b.x} ${b.y}`} fill="none" stroke={KIND_COLOR[c.kind]} strokeWidth={1.1} strokeOpacity={0.75} pointerEvents="none">
+          <path key={c.id} d={layout.cablePath(a, b)} fill="none" stroke={KIND_COLOR[c.kind]} strokeWidth={1.1} strokeOpacity={0.75} pointerEvents="none">
             <title>{c.label ?? `${a.inst.label}: ${a.port.label} → ${b.inst.label}: ${b.port.label}`}</title>
           </path>
         );

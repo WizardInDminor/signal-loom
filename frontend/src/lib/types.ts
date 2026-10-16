@@ -104,14 +104,24 @@ export interface Rig {
   };
   notes?: string | null;
 }
-export interface RigSummary { id: string; name: string; description?: string | null; created_at: string; updated_at: string; revision: number; instance_count: number; scene_count: number }
+export interface PreviewDevice { x_mm: number; y_mm: number; width_mm: number; height_mm: number; category: string; off_board: boolean; placeholder: boolean }
+export interface RigPreview { width_mm: number; depth_mm: number; devices: PreviewDevice[]; cable_count: number }
+export interface RigSummary { id: string; name: string; description?: string | null; created_at: string; updated_at: string; revision: number; instance_count: number; scene_count: number; preview?: RigPreview | null }
 
 export interface Diagnostic { code: string; severity: Severity; message: string; subject_type: string; subject_id: string | null; related_ids: string[] }
 export interface PlacedPort { port_id: string; label: string; kind: SignalKind; direction: PortDirection; x_mm: number; y_mm: number; edge: Edge; estimated: boolean; plug_clearance_mm: number | null; role: string | null; loop: number | null }
 export interface CompiledMessage { type: "pc" | "cc"; channel: number; number: number; value: number | null; target_instance_id: string; target_label: string; source_kind: string; scene_id: string; explanation: string; deterministic: boolean; summary: string }
 export interface ScenePlan { scene_id: string; scene_name: string; messages: CompiledMessage[]; manual_steps: string[]; diagnostics: Diagnostic[]; message_count: number }
 export interface SwitchPlan { bank_number: number; position: string; short_name: string; scene_id: string | null; scene_name: string | null; action: string; messages: CompiledMessage[]; extra_messages: Mc8Message[]; manual_steps: string[]; diagnostics: Diagnostic[]; message_count: number; message_limit: number }
-export interface PathStep { node: string; label: string; device: string | null; device_instance_id: string | null; state: "through" | "engaged" | "bypassed" | "return_only" | "missing"; send_jack: string | null; return_jack: string | null; note: string | null }
+export interface PathStep {
+  node: string; label: string; device: string | null; device_instance_id: string | null;
+  state: "through" | "engaged" | "bypassed" | "return_only" | "missing";
+  send_jack: string | null; return_jack: string | null; note: string | null;
+  /** Switcher jack the conductor leaves through (Send / main Output) and comes back in through (Return / main Input). */
+  out_port_id: string | null; in_port_id: string | null;
+  /** Physical cables of this step in signal order (send then return; one cable for an input/output node). */
+  cables: string[];
+}
 export interface ConductorPath { name: string; source: string; steps: PathStep[]; ends_at: string[]; branches: string[][]; complete: boolean; summary: string }
 export interface PresetPaths { preset_number: number; preset_name: string; mode: string; paths: ConductorPath[]; stereo_output: boolean; stereo_input: boolean }
 export interface CableItem { kind: string; description: string; ends: string[]; connection_ids: string[]; length_cm: number | null; notes: string[] }
@@ -121,6 +131,8 @@ export interface Analysis {
   summary: { errors: number; warnings: number; infos: number };
   ml10x: { topology: null | { instance_id: string; label: string; input_cabled: boolean; output_cabled: boolean; stereo_pairs: { tip: number; ring: number; label: string }[]; loops: { loop: number; name: string; send_to: string | null; send_to_instance_id: string | null; return_from: string | null; return_from_instance_id: string | null; complete: boolean; occupied: boolean }[] }; diagnostics: Diagnostic[]; preset_paths: PresetPaths[] };
   cable_kit: CableItem[];
+  /** MIDI cables from the MC8 to every device it reaches, in order (through MIDI Thru and the Omniport). */
+  midi: { controller_id: string | null; routes: Record<string, string[]> };
   instances: Record<string, { width_mm: number; height_mm: number; placeholder: boolean; ports: PlacedPort[]; effective_ports: PortDef[]; unknowns: string[] }>;
   compiled: { scenes: ScenePlan[]; mc8: { instance_id: string | null; firmware_assumed: string; limits: { banks: number; presets_per_bank: number; messages_per_preset: number; footswitch_positions: string[] }; banks: { number: number; name: string; diagnostics: Diagnostic[]; switches: SwitchPlan[] }[] }; diagnostics: Diagnostic[] };
 }

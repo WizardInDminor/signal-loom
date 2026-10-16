@@ -6,9 +6,10 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from ..catalog.demo import demo_rig
+from ..domain.geometry import rotated_size
 from ..exports.project import ProjectImportError, export_project, parse_project
 from ..models.common import new_id
-from ..models.rig import ProjectFile, Rig, RigSummary, utcnow_iso
+from ..models.rig import PreviewDevice, ProjectFile, Rig, RigPreview, RigSummary, utcnow_iso
 from .deps import load_rig, profile_repo, profiles_for, rig_repo
 
 router = APIRouter(prefix="/api/rigs", tags=["rigs"])
@@ -27,9 +28,37 @@ class RenameBody(BaseModel):
     description: str | None = None
 
 
+def rig_preview(rig: Rig, profiles) -> RigPreview:
+    """A true-scale miniature of the board for the rig library: enclosures only, at their real size."""
+    devices = []
+    for inst in rig.instances:
+        prof = profiles.get(inst.profile_id)
+        w, h, placeholder = rotated_size(prof, inst.rotation)
+        devices.append(
+            PreviewDevice(
+                x_mm=inst.x_mm,
+                y_mm=inst.y_mm,
+                width_mm=w,
+                height_mm=h,
+                category=prof.category.value if prof else "other",
+                off_board=inst.off_board,
+                placeholder=placeholder,
+            )
+        )
+    return RigPreview(
+        width_mm=rig.board.width_mm, depth_mm=rig.board.depth_mm, devices=devices, cable_count=len(rig.connections)
+    )
+
+
 @router.get("", response_model=list[RigSummary])
 def list_rigs(request: Request):
-    return rig_repo(request).list()
+    repo = rig_repo(request)
+    summaries = repo.list()
+    for s in summaries:
+        rig = repo.get(s.id)
+        if rig is not None:
+            s.preview = rig_preview(rig, profiles_for(request, rig))
+    return summaries
 
 
 @router.post("", response_model=Rig, status_code=201)
