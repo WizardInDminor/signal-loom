@@ -398,6 +398,23 @@ board, and can this supply run the planned rig. Two phases, each left usable and
 - Per-instance outlet overrides (editing a supply's outlet facts on one unit) use the existing port
   editor; the planner reads them like any port.
 
+## Backlog from the owner's physical build (2026-10-16, not in this PR)
+
+Recorded from the owner's hands-on test with MC8 and pedals above, ML10X and Zuma below.
+Neither item is implemented here; both must keep the current honesty rules.
+
+1. **Underside clearance and mounting verification.** Keep reporting unknown usable clearance and
+   unverified bracket/rail compatibility rather than inventing a fit. Later: user measurements,
+   verified manufacturer mounting geometry, bracket/mounting method, and device height plus a
+   cabling/connector allowance, each as evidence permits.
+2. **Explicit daisy-chain / splitter power cable assemblies.** Several typed power connections from
+   one outlet already work electrically (`domain/power.py`, `outlet_load_diagnostics`). What is
+   missing is the *physical* multi-plug DC cable: a reusable assembly with an identifiable trunk and
+   taps, plug count, optional lengths, and a readable board/wiring/BOM view. The outlet-to-device
+   connections and their electrical checks stay authoritative (no second allocation record);
+   taps share voltage, polarity and current and are never isolated from one another; independent
+   isolated outlets are never pooled; a missing load figure stays unknown, not zero.
+
 ## Two next ideas
 
 1. **Visual Advanced-mode editor on the Stage canvas**: drag from a Return jack to a Send jack
