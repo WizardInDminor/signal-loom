@@ -7,10 +7,11 @@ from datetime import UTC, datetime
 from pydantic import Field
 
 from .common import Rotation, SignalKind, StrictModel, new_id
-from .profile import PortDef
+from .profile import DeviceImage, PortDef
 
 PROJECT_FORMAT = "signal-loom-project"
-PROJECT_FORMAT_VERSION = 1
+PROJECT_FORMAT_VERSION = 1  # plain project files
+PROJECT_FORMAT_VERSION_WITH_ASSETS = 2  # opt-in: image assets bundled (base64) inside the file
 
 
 def utcnow_iso() -> str:
@@ -41,6 +42,9 @@ class DeviceInstance(StrictModel):
     # replaces it; a new id adds a user-defined jack. Removed ids hide profile ports.
     port_overrides: list[PortDef] = Field(default_factory=list)
     removed_port_ids: list[str] = Field(default_factory=list)
+    # Optional picture for this particular unit (a repainted or customised pedal). When unset the
+    # profile's image is used. Never affects geometry.
+    image: DeviceImage | None = None
     notes: str | None = None
 
 
@@ -213,7 +217,8 @@ class Rig(StrictModel):
 
 
 class PreviewDevice(StrictModel):
-    """One enclosure in a rig's miniature: true-scale rectangle plus category, nothing else."""
+    """One enclosure in a rig's miniature: true-scale rectangle plus category and, if the device
+    has a picture on this computer, the facts needed to draw it."""
 
     x_mm: float
     y_mm: float
@@ -222,6 +227,8 @@ class PreviewDevice(StrictModel):
     category: str
     off_board: bool = False
     placeholder: bool = False
+    rotation: int = 0
+    image: dict | None = None
 
 
 class RigPreview(StrictModel):
@@ -253,3 +260,6 @@ class ProjectFile(StrictModel):
     app_version: str = "0.1.0"
     rig: Rig
     profiles: list[dict] = Field(default_factory=list)  # DeviceProfile dumps (kept loose for forward-compat)
+    # Only present (format_version 2) when the user explicitly asked for an image-inclusive backup:
+    # {id, content_type, original_name, data_base64}. Bytes are re-validated on import like an upload.
+    assets: list[dict] = Field(default_factory=list)

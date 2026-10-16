@@ -5,12 +5,14 @@ import copy
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from ..assets import ImageAssetError
 from ..catalog.demo import demo_rig
 from ..domain.geometry import rotated_size
-from ..exports.project import ProjectImportError, export_project, parse_project
+from ..exports.project import ProjectImportError, bundle_assets, export_project, parse_project
+from ..images import image_asset_ids, resolve_image
 from ..models.common import new_id
 from ..models.rig import PreviewDevice, ProjectFile, Rig, RigPreview, RigSummary, utcnow_iso
-from .deps import load_rig, profile_repo, profiles_for, rig_repo
+from .deps import asset_store, assets_for, load_rig, profile_repo, profiles_for, rig_repo
 
 router = APIRouter(prefix="/api/rigs", tags=["rigs"])
 
@@ -28,12 +30,14 @@ class RenameBody(BaseModel):
     description: str | None = None
 
 
-def rig_preview(rig: Rig, profiles) -> RigPreview:
-    """A true-scale miniature of the board for the rig library: enclosures only, at their real size."""
+def rig_preview(rig: Rig, profiles, assets=None) -> RigPreview:
+    """A true-scale miniature of the board for the rig library: enclosures at their real size,
+    with the device picture when one is on this computer."""
     devices = []
     for inst in rig.instances:
         prof = profiles.get(inst.profile_id)
         w, h, placeholder = rotated_size(prof, inst.rotation)
+        img = resolve_image(inst, prof, assets or {})
         devices.append(
             PreviewDevice(
                 x_mm=inst.x_mm,
@@ -43,6 +47,8 @@ def rig_preview(rig: Rig, profiles) -> RigPreview:
                 category=prof.category.value if prof else "other",
                 off_board=inst.off_board,
                 placeholder=placeholder,
+                rotation=inst.rotation,
+                image=img if img and not img.get("missing") else None,
             )
         )
     return RigPreview(
@@ -57,7 +63,8 @@ def list_rigs(request: Request):
     for s in summaries:
         rig = repo.get(s.id)
         if rig is not None:
-            s.preview = rig_preview(rig, profiles_for(request, rig))
+            profiles = profiles_for(request, rig)
+            s.preview = rig_preview(rig, profiles, assets_for(request, rig, profiles))
     return summaries
 
 
@@ -147,9 +154,16 @@ def duplicate_rig(rig_id: str, request: Request):
 
 
 @router.get("/{rig_id}/export", response_model=ProjectFile)
-def export_rig(rig_id: str, request: Request):
+def export_rig(rig_id: str, request: Request, include_images: bool = False):
+    """Project file. Plain by default (format_version 1, no binary data). With ``include_images=1``
+    the user explicitly opts into bundling their device photographs (format_version 2)."""
     rig = load_rig(request, rig_id)
-    return export_project(rig, profiles_for(request, rig))
+    profiles = profiles_for(request, rig)
+    project = export_project(rig, profiles)
+    if include_images:
+        store = asset_store(request)
+        bundle_assets(project, store.get_many(image_asset_ids(rig, profiles)), store.read_bytes)
+    return project
 
 
 class ImportResult(BaseModel):
@@ -169,6 +183,31 @@ async def import_rig(request: Request, keep_id: bool = False, name: str | None =
     prof_repo = profile_repo(request)
     imported: list[str] = []
     from ..models.profile import DeviceProfile
+
+    # Bundled images (opt-in exports) are restored through the same validation as an upload.
+    store = asset_store(request)
+    for a in project.assets:
+        aid = a.get("id")
+        if not isinstance(aid, str) or store.get(aid) is not None:
+            continue
+        try:
+            import base64
+
+            store.ingest_image(
+                base64.b64decode(a.get("data_base64", ""), validate=True), a.get("original_name"), asset_id=aid
+            )
+        except (ImageAssetError, ValueError) as e:
+            warnings.append(f"bundled image {aid} was not restored: {e}")
+    # Images referenced but not on this computer: keep the metadata, draw the enclosure meanwhile.
+    for p in project.profiles:
+        img = p.get("image") if isinstance(p, dict) else None
+        if isinstance(img, dict) and isinstance(img.get("asset_id"), str) and store.get(img["asset_id"]) is None:
+            warnings.append(
+                f"profile {p.get('id')} refers to image {img['asset_id']}, which is not on this computer; the enclosure drawing is used until you add a picture"
+            )
+    for inst in project.rig.instances:
+        if inst.image and store.get(inst.image.asset_id) is None:
+            warnings.append(f"device {inst.label} refers to image {inst.image.asset_id}, which is not on this computer")
 
     for p in project.profiles:
         prof = DeviceProfile.model_validate(p)

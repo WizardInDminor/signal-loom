@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from pydantic import Field
+from typing import Literal
+
+from pydantic import Field, model_validator
 
 from .common import (
     AudioChannel,
@@ -138,6 +140,42 @@ class Capabilities(StrictModel):
     notes: str | None = None
 
 
+class ImageCrop(StrictModel):
+    """Normalized selection (0–1) in the stored, orientation-corrected image: the enclosure."""
+
+    x: float = Field(default=0.0, ge=0.0, le=1.0)
+    y: float = Field(default=0.0, ge=0.0, le=1.0)
+    w: float = Field(default=1.0, gt=0.0, le=1.0)
+    h: float = Field(default=1.0, gt=0.0, le=1.0)
+
+    @model_validator(mode="after")
+    def _inside(self) -> ImageCrop:
+        if self.x + self.w > 1.0 + 1e-6 or self.y + self.h > 1.0 + 1e-6:
+            raise ValueError("crop must lie inside the image")
+        return self
+
+
+class DeviceImage(StrictModel):
+    """A user photograph fitted to a device's physical footprint.
+
+    The footprint (width × depth, with its own evidence level) stays the source of truth; the
+    image is a visual overlay. ``crop`` says which part of the photograph *is* the enclosure,
+    ``rotation_quarter`` turns that part so its top edge matches the device's top edge,
+    ``fit`` says what to do when the selection's proportions differ from the footprint
+    (``contain``: whole selection visible, margins show the enclosure colour; ``cover``: the
+    selection fills the footprint and its overhang is clipped). ``calibrated`` is true only when
+    the selection was made against a known width and depth; it is a statement about the
+    workflow, never about the measurements' evidence.
+    """
+
+    asset_id: str = Field(pattern=r"^img_[0-9a-f]{12}$")
+    crop: ImageCrop = Field(default_factory=ImageCrop)
+    rotation_quarter: int = Field(default=0, ge=0, le=3)
+    fit: Literal["contain", "cover"] = "contain"
+    calibrated: bool = False
+    note: str | None = None
+
+
 class Provenance(StrictModel):
     source: str = "hand_authored"  # "hand_authored" | "pedalplayground_import" | "user"
     url: str | None = None
@@ -153,7 +191,8 @@ class DeviceProfile(StrictModel):
     model: str
     category: DeviceCategory = DeviceCategory.EFFECT
     revision: str | None = None
-    image_ref: str | None = None
+    image_ref: str | None = None  # legacy free-text reference; the structured image lives in ``image``
+    image: DeviceImage | None = None
     provenance: Provenance = Field(default_factory=Provenance)
     footprint: Footprint = Field(default_factory=Footprint)
     ports: list[PortDef] = Field(default_factory=list)

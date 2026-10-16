@@ -36,11 +36,17 @@ def get_device(profile_id: str, request: Request):
     return _out(p, repo.source_of(p.id) or "custom")
 
 
+def _check_image(request: Request, profile: DeviceProfile) -> None:
+    if profile.image is not None and request.app.state.assets.get(profile.image.asset_id) is None:
+        raise HTTPException(status_code=422, detail=f"Image asset '{profile.image.asset_id}' is not on this computer")
+
+
 @router.post("/devices", response_model=ProfileOut, status_code=201)
 def create_device(profile: DeviceProfile, request: Request):
     repo = profile_repo(request)
     if repo.get(profile.id) is not None:
         raise HTTPException(status_code=409, detail=f"Profile id '{profile.id}' already exists")
+    _check_image(request, profile)
     profile.builtin = False
     repo.save(profile, source="custom")
     return _out(profile, "custom")
@@ -54,6 +60,7 @@ def update_device(profile_id: str, profile: DeviceProfile, request: Request):
         raise HTTPException(status_code=404, detail="Profile not found")
     if profile.id != profile_id:
         raise HTTPException(status_code=400, detail="Profile id mismatch")
+    _check_image(request, profile)
     if src == "builtin":
         # Editing a builtin turns it into a user-owned profile so reseeding never clobbers it.
         profile.builtin = False

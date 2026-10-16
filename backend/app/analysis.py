@@ -9,12 +9,13 @@ from .domain.geometry import board_diagnostics, effective_ports, placed_ports, r
 from .domain.ml10x import loop_occupancy, preset_diagnostics
 from .domain.paths import trace_preset
 from .domain.wiring import midi_routes, wiring_diagnostics
+from .images import resolve_image
 from .models.common import DeviceCategory, Diagnostic, Severity
 from .models.profile import DeviceProfile
 from .models.rig import Rig
 
 
-def analyze(rig: Rig, profiles: dict[str, DeviceProfile]) -> dict:
+def analyze(rig: Rig, profiles: dict[str, DeviceProfile], assets: dict | None = None) -> dict:
     board = board_diagnostics(rig, profiles)
     ctx, wiring = wiring_diagnostics(rig, profiles)
     ml10x_topo = None
@@ -109,6 +110,8 @@ def analyze(rig: Rig, profiles: dict[str, DeviceProfile]) -> dict:
             ],
             "effective_ports": [p.model_dump(mode="json") for p in effective_ports(inst, prof)],
             "unknowns": prof.unknowns() if prof else ["profile missing"],
+            # Picture (if any) fitted to this footprint; geometry above never depends on it.
+            "image": resolve_image(inst, prof, assets or {}),
         }
     all_diags = board + wiring + ml10x_diags + midi_diags + kit_diags
     return {

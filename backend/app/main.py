@@ -10,9 +10,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .api import analysis as analysis_api
+from .api import assets as assets_api
 from .api import catalog as catalog_api
 from .api import exports as exports_api
 from .api import rigs as rigs_api
+from .assets import AssetStore, default_assets_dir
 from .catalog.builtin import builtin_profiles
 from .catalog.demo import DEMO_RIG_ID, STEREO_DEMO_RIG_ID, demo_rig, stereo_demo_rig
 from .db import Database, default_db_path
@@ -50,6 +52,7 @@ def create_app(db_path: Path | str | None = None) -> FastAPI:
         db.migrate()
         seed(db)
         app.state.db = db
+        app.state.assets = AssetStore(db, default_assets_dir(path))
         yield
         db.close()
 
@@ -64,6 +67,7 @@ def create_app(db_path: Path | str | None = None) -> FastAPI:
     app.include_router(catalog_api.router)
     app.include_router(analysis_api.router)
     app.include_router(exports_api.router)
+    app.include_router(assets_api.router)
 
     @app.get("/api/health")
     def health() -> dict:
