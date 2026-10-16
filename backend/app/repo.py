@@ -243,3 +243,32 @@ class ProfileRepository:
             "SELECT DISTINCT rig_id FROM device_instances WHERE profile_id = ?", (profile_id,)
         ).fetchall()
         return [r["rig_id"] for r in rows]
+
+    def port_usage(self, profile_id: str) -> dict[str, list[dict]]:
+        """Cables, across every rig, plugged into a profile port of a device using this profile.
+
+        Keyed by port id. An instance whose own override redefines the port still counts: the
+        cable exists and the user should see it before changing the profile's jack."""
+        rigs = RigRepository(self.db)
+        usage: dict[str, list[dict]] = {}
+        for rig_id in self.referenced_by(profile_id):
+            rig = rigs.get(rig_id)
+            if rig is None:
+                continue
+            labels = {i.id: i.label for i in rig.instances}
+            ours = {i.id for i in rig.instances if i.profile_id == profile_id}
+            for c in rig.connections:
+                for end, other in ((c.source, c.target), (c.target, c.source)):
+                    if end.instance_id in ours:
+                        usage.setdefault(end.port_id, []).append(
+                            {
+                                "rig_id": rig.id,
+                                "rig_name": rig.name,
+                                "connection_id": c.id,
+                                "connection_label": c.label,
+                                "instance_id": end.instance_id,
+                                "instance_label": labels.get(end.instance_id, end.instance_id),
+                                "other_label": f"{labels.get(other.instance_id, other.instance_id)}: {other.port_id}",
+                            }
+                        )
+        return usage

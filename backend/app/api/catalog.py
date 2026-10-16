@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from ..catalog.pedalplayground import parse_pedalplayground
-from ..models.profile import DeviceProfile
+from ..models.profile import DeviceProfile, PortDef
 from .deps import profile_repo
 
 router = APIRouter(prefix="/api/catalog", tags=["catalog"])
@@ -63,6 +63,66 @@ def update_device(profile_id: str, profile: DeviceProfile, request: Request):
     _check_image(request, profile)
     if src == "builtin":
         # Editing a builtin turns it into a user-owned profile so reseeding never clobbers it.
+        profile.builtin = False
+        profile.provenance.source = "user"
+        src = "custom"
+    repo.save(profile, source=src)
+    return _out(profile, src)
+
+
+@router.get("/devices/{profile_id}/port-usage")
+def port_usage(profile_id: str, request: Request):
+    """Which cables (in which rigs) are plugged into each of this profile's jacks."""
+    repo = profile_repo(request)
+    if repo.source_of(profile_id) is None:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    return repo.port_usage(profile_id)
+
+
+class PortsBody(BaseModel):
+    ports: list[PortDef]
+    # Removing or renaming a jack that rig cables use is refused unless the user explicitly confirms.
+    force: bool = False
+
+
+@router.put("/devices/{profile_id}/ports", response_model=ProfileOut)
+def update_ports(profile_id: str, body: PortsBody, request: Request):
+    """Replace only the jack list of a profile (dimensions, provenance, picture, MIDI and power
+    data untouched). Jack ids are stable handles for cables: a removed or renamed id that a cable
+    references is reported with the affected cables and refused until confirmed."""
+    repo = profile_repo(request)
+    src = repo.source_of(profile_id)
+    profile = repo.get(profile_id)
+    if src is None or profile is None:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    ids = [p.id for p in body.ports]
+    if len(set(ids)) != len(ids):
+        dup = sorted({i for i in ids if ids.count(i) > 1})
+        raise HTTPException(status_code=422, detail=f"duplicate jack id(s): {', '.join(dup)}")
+    if any(not i.strip() for i in ids):
+        raise HTTPException(status_code=422, detail="every jack needs an id")
+    for p in body.ports:
+        if p.image_anchor is not None and request.app.state.assets.get(p.image_anchor.asset_id) is None:
+            raise HTTPException(
+                status_code=422,
+                detail=f"jack '{p.id}' is anchored on image {p.image_anchor.asset_id}, which is not on this computer",
+            )
+    removed = {p.id for p in profile.ports} - set(ids)
+    if removed and not body.force:
+        usage = repo.port_usage(profile_id)
+        affected = [dict(u, port_id=pid) for pid in sorted(removed) for u in usage.get(pid, [])]
+        if affected:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "ports_in_use",
+                    "message": f"{len(affected)} cable(s) are plugged into jack(s) you are removing or renaming: "
+                    + ", ".join(sorted({a["port_id"] for a in affected})),
+                    "affected": affected,
+                },
+            )
+    profile.ports = body.ports
+    if src == "builtin":
         profile.builtin = False
         profile.provenance.source = "user"
         src = "custom"

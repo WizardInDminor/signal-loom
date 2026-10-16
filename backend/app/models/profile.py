@@ -41,6 +41,18 @@ class Footprint(StrictModel):
         return self.width.value_mm is not None and self.depth.value_mm is not None
 
 
+class ImageAnchor(StrictModel):
+    """Where a connector *appears* in the device's photograph: a normalized point (0–1) in the
+    stored, orientation-corrected image, which may lie outside the enclosure crop (a protruding
+    plug). This is a visual annotation only; wiring geometry comes from ``edge``/``position``.
+    ``asset_id`` records which picture the point was placed on, so a replaced photograph can be
+    flagged for reconciliation instead of silently misplacing markers."""
+
+    x: float = Field(ge=0.0, le=1.0)
+    y: float = Field(ge=0.0, le=1.0)
+    asset_id: str = Field(pattern=r"^img_[0-9a-f]{12}$")
+
+
 class PortDef(StrictModel):
     """A physical connector on a device, in the device's own (unrotated) frame."""
 
@@ -48,6 +60,11 @@ class PortDef(StrictModel):
     label: str
     kind: SignalKind
     direction: PortDirection
+    # Provenance of this connector's description (what it is, not where it is). None = not
+    # stated separately, i.e. it shares the profile's provenance (hand-authored builtins);
+    # "user" marks connections the user added or edited themselves.
+    evidence: Evidence | None = None
+    image_anchor: ImageAnchor | None = None
     connector: Connector = Connector.UNKNOWN
     audio_channel: AudioChannel | None = None
     trs_role: TrsRole | None = None
