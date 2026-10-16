@@ -54,6 +54,11 @@ PedalboardPlanner, pedalvision) also lack usable data licenses; none was used.
   exports (short 10, toggle 9, long 23, bank 24) and labels them unverified.
 - Latest firmware 3.13.6 (2025-08-29). Editor and firmware versions must match from 3.11.
 - MC8 Pro limits (128 banks, 24 presets, 32 messages, `data[18]`) are explicitly *not* used.
+- **Footswitch face (Session 3).** The Stage draws the MC8 as two rows of four switches per
+  page with A–D along the bottom and E–H above (I–P on page 2), which is how the device's
+  display labels them. Evidence: THIRD_PARTY/approximate (product images and editor screenshots,
+  not the manual's text, and not hardware-validated). The drawing is a picture of the *plan*;
+  the app never sends anything to a controller.
 
 ### MC8 editor backup format — fixture-validated
 

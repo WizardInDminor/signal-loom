@@ -8,9 +8,10 @@ wiring (audio / MIDI / expression / power), reusable **scenes** that describe th
 state, and a compiler that turns scenes into an inspectable Morningstar **MC8** switch plan and
 **ML10X** routing plan. Nothing is ever sent to hardware; the app plans, validates and exports.
 
-Session reports: [SESSION-1-RESULTS.md](SESSION-1-RESULTS.md) (foundation) and
+Session reports: [SESSION-1-RESULTS.md](SESSION-1-RESULTS.md) (foundation),
 [SESSION-2-RESULTS.md](SESSION-2-RESULTS.md) (jack-aware wiring, stereo routing, Morningstar
-tools, evidence levels and the hardware verification procedure). The domain model is described in
+tools, evidence levels and the hardware verification procedure) and
+[SESSION-3-RESULTS.md](SESSION-3-RESULTS.md) (the Stage: a scene-first view of the physical rig). The domain model is described in
 [ARCHITECTURE.md](ARCHITECTURE.md); research and licensing findings in
 [docs/research.md](docs/research.md).
 
@@ -99,6 +100,27 @@ GitHub Actions runs the same gates on every push (`.github/workflows/ci.yml`).
   scene; switches already used by other scenes are disabled.
 - **Morningstar tools** (Exports tab): import an MC8 "Current Bank" backup into the plan, and
   compare any two editor backups (MC8 or ML10X) field by field for controlled experiments.
+
+## The Stage (Session 3)
+
+Open a rig and pick **Stage** (or press ▶ Stage on a rig card; the URL fragment `#stage` deep
+links to it). Pick a scene in the setlist, or step through it with the arrow keys as you would
+on stage, and the board shows what the scene does physically:
+
+- the **left and right conductors** flow along the real cables between the real jacks; routing
+  inside the ML10X (the preset, not a cable) is drawn as dashed arcs inside its enclosure; a
+  bypassed loop is faint, an empty loop is a dashed pass-through, a half-cabled loop ends the
+  flow with “✕ breaks here”;
+- every pedal shows the state the scene wants as an **LED** (lit = engaged, dark = bypassed,
+  dashed = the scene does not say) and a line such as “loop bypassed · prog 1”; pedals the
+  scene's path does not touch fade;
+- the **MC8 face** lights the switch that recalls the scene (press a switch to jump to its
+  scene); the scene's **MIDI messages** travel as pulses along the real MIDI cables, and a
+  device no cable reaches is flagged on the board;
+- “What happens” tells the scene in words, “What changes” lists the differences from the
+  previous scene in the set (preset, paths, pedal states, programs, CCs, manual steps).
+
+The Stage is read-only: it never edits the rig and never sends anything to hardware.
 
 ## A short tour: the three-scene demo
 

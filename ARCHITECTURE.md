@@ -106,6 +106,27 @@ saved, the switch is refused and the current document stays in memory with a blo
 decided from the same `effective_ports` the backend uses, and the resulting connection is an
 ordinary document edit.
 
+## The Stage: a scene told on the physical board (Session 3)
+
+The Stage is a pure projection of facts the rig already stores; it owns no state of its own
+and never writes. Two backend additions make it possible without guessing in the browser:
+
+- every traced `PathStep` names the switcher jack the conductor leaves through (`out_port_id`:
+  a Send or the main Output), the jack it comes back in through (`in_port_id`: a Return or the
+  main Input) and the physical cables plugged into them, in signal order (`cables`);
+- `analysis.midi.routes` lists, for every device the MC8 reaches, the ordered MIDI cables
+  (breadth-first, so the shortest physical route; MIDI Thru hops included).
+
+`frontend/src/lib/stage.ts` turns a scene into a *story*: per conductor a list of segments
+(`cable` = a connection id, `virtual` = the preset's hop inside the switcher, `device` = through
+a pedal, each with a state: engaged / bypassed / empty / broken / return-only), per device the
+state the scene wants (kept separate from the loop state, because an analog pedal's bypass is
+its own footswitch), MIDI targets with their routes, the MC8 assignment, and a diff against the
+previous scene in the set. `frontend/src/lib/boardLayout.ts` is the one place that turns rig
+geometry into drawing coordinates and cable curves, shared by the Board and the Stage, so a
+flow is drawn exactly on the cable the Board draws. Cables leave a jack perpendicular to the
+edge the jack sits on (as a plug does); top-face jacks fall back to a bend towards the centre.
+
 ## Scenes and the compiler
 
 A scene is intent, not bytes. The compiler is deterministic for equal inputs (ordering is

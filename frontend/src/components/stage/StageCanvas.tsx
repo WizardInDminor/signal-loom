@@ -170,7 +170,7 @@ export function StageCanvas({ story, changed, view }: { story: SceneStory | null
                 );
               })}
               {flow.segments[0] && ports[flow.segments[0].from] && (
-                <text x={ports[flow.segments[0].from].x} y={ports[flow.segments[0].from].y - 4} fontSize={6} fontWeight={700} fill={color} textAnchor="middle">{flow.short}</text>
+                <text x={ports[flow.segments[0].from].x} y={ports[flow.segments[0].from].y - 5} fontSize={6} fontWeight={700} fill={color} textAnchor="middle" paintOrder="stroke" stroke="#0f172a" strokeWidth={1.2}>{flow.short}</text>
               )}
             </g>
           );
@@ -203,7 +203,7 @@ export function StageCanvas({ story, changed, view }: { story: SceneStory | null
                 {(() => {
                   const last = rig.connections.find((x) => x.id === t.route![t.route!.length - 1]);
                   const b = last && ports[`${last.target.instance_id}:${last.target.port_id}`];
-                  return b ? <text x={b.x + 3} y={b.y - 2} fontSize={5} fill={MIDI_COLOR}>{`ch ${t.channel} · ${t.messages.length} msg`}</text> : null;
+                  return b ? <text x={b.x + 3} y={b.y - 7} fontSize={5} fill={MIDI_COLOR} paintOrder="stroke" stroke="#0f172a" strokeWidth={1.2}>{`ch ${t.channel} · ${t.messages.length} msg`}</text> : null;
                 })()}
               </g>
             );
