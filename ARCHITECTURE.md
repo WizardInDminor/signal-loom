@@ -100,7 +100,9 @@ one kit item.
 
 The store keeps bounded undo/redo stacks of whole-document snapshots; applying one bumps the
 revision like any edit so the save queue and the server's stale-revision rule stay in force.
-`pendingCable` holds a half-made cable while the user drags from a jack; compatibility is
+Switching to another rig first drains the save queue; if the latest revision cannot be
+saved, the switch is refused and the current document stays in memory with a blocking banner
+(retry, or an explicit discard). `pendingCable` holds a half-made cable while the user drags from a jack; compatibility is
 decided from the same `effective_ports` the backend uses, and the resulting connection is an
 ordinary document edit.
 

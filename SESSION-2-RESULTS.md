@@ -100,6 +100,18 @@ in Session 2: undo/redo snapshots go through the same queue; importing an MC8 ba
 server document without a page reload (and without dropping the result message); a stale
 demo rig can no longer be mutated by tests (each test imports its own copy).
 
+### Review follow-up (PR #2, 2026-10-16)
+
+The owner's review found that `load()` cleared the current document even when `ensureSaved()`
+reported a failed save, so switching rig URLs during a disk/server/validation fault could drop
+unsaved edits. Fixed: a switch is refused while the current document cannot be saved; the
+document stays in memory and on screen with a blocking banner offering *Retry save, then open
+the other rig* or an explicit, confirmed *Discard*. Regression test: every PUT fails, an edit is
+made, the user navigates to another rig; the banner appears, the edit is still unsaved on the
+server; once the fault clears, Retry saves the first rig and opens the second (20th Playwright
+scenario). Merge sequencing note: PR #2 targets `session-1-build`; after PR #1 lands in `main`,
+retarget PR #2 to `main` and recheck before merging.
+
 ## User-facing capabilities added
 
 | Where | Capability |
@@ -119,7 +131,7 @@ demo rig can no longer be mutated by tests (each test imports its own copy).
 | `backend: pytest -q` | **64 passed** (14 new: stereo paths, return-only loops, per-direction edge checks, cable kit, ring-only breakout, stereo scene compile, stereo export/import, MC8 import round trip incl. the real fixture, collisions/replace, skipped types, backup diff + endpoint) |
 | `ruff check` / `ruff format --check` | clean |
 | `npm run lint` / `npm run typecheck` / `npm run build` | clean |
-| Playwright, production build, Chromium | **19 passed** (12 Session 1 + 7 new: drag-to-connect incl. incompatible drops, undo/redo + Ctrl+Z, jack editor drag reflected in analysis, stereo L/R paths + cable kit + breaking the right return, scene duplicate + switch assignment + compiled output + disabled taken switch, MC8 import + diff, catalog duplicate + jack drag + save) |
+| Playwright, production build, Chromium | **20 passed** (12 Session 1 + 8 new: failing-save rig switch, drag-to-connect incl. incompatible drops, undo/redo + Ctrl+Z, jack editor drag reflected in analysis, stereo L/R paths + cable kit + breaking the right return, scene duplicate + switch assignment + compiled output + disabled taken switch, MC8 import + diff, catalog duplicate + jack drag + save) |
 | Screenshot review of every workspace on the stereo demo | no console errors; cable routing and label staggering fixed after the first pass |
 
 Bugs found and fixed during the session: profile save 422 (echo fields), import result lost on

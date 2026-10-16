@@ -16,7 +16,7 @@ type Tab = (typeof TABS)[number];
 
 export default function RigPage() {
   const { id } = useParams<{ id: string }>();
-  const { rig, analysis, loading, error, saving, dirty, conflict, load, clearError, update, flush, undo, redo } = useRigStore();
+  const { rig, analysis, loading, error, saving, dirty, conflict, load, clearError, update, flush, undo, redo, blockedSwitch, retrySwitch, discardAndSwitch } = useRigStore();
   const [tab, setTab] = useState<Tab>("board");
 
   useEffect(() => {
@@ -47,7 +47,18 @@ export default function RigPage() {
   const s = analysis?.summary;
   return (
     <div className="flex flex-col flex-1 min-h-0">
-      <ErrorBanner message={error} onClose={clearError} />
+      {blockedSwitch && rig && rig.id !== id && (
+        <div role="alert" data-testid="blocked-switch" className="bg-red-50 border border-red-300 text-red-900 text-sm px-4 py-3 flex flex-col gap-2">
+          <div>
+            <b>Your unsaved edits to “{blockedSwitch.fromName}” could not be saved</b>, so the other rig was not opened and nothing was discarded. {blockedSwitch.reason}
+          </div>
+          <div className="flex gap-2">
+            <Button variant="primary" onClick={() => void retrySwitch()}>Retry save, then open the other rig</Button>
+            <Button variant="danger" onClick={() => window.confirm(`Discard the unsaved edits to "${blockedSwitch.fromName}"? This cannot be undone.`) && void discardAndSwitch()}>Discard edits and open the other rig</Button>
+          </div>
+        </div>
+      )}
+      {!blockedSwitch && <ErrorBanner message={error} onClose={clearError} />}
       <div className="flex items-center gap-3 px-4 py-2 bg-panel border-b border-line">
         <Link href="/" className="text-sm text-neutral-500 hover:underline">← Rigs</Link>
         <input

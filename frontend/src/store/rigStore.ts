@@ -28,6 +28,10 @@ interface RigState {
   pendingCable: { instance_id: string; port_id: string; kind: SignalKind; direction: PortDirection } | null;
   setPendingCable: (p: RigState["pendingCable"]) => void;
   load: (id: string) => Promise<void>;
+  /** Set when a rig switch was refused because the current document could not be saved. */
+  blockedSwitch: { targetId: string; fromName: string; reason: string } | null;
+  retrySwitch: () => Promise<void>;
+  discardAndSwitch: () => Promise<void>;
   /** Adopt a rig document the server already stored (e.g. after a server-side import) without a loading cycle. */
   replaceRig: (rig: Rig) => void;
   refreshCatalog: () => Promise<void>;
@@ -92,6 +96,29 @@ export const useRigStore = create<RigState>((set, get) => ({
   canRedo: false,
   pendingCable: null,
   setPendingCable: (p) => set({ pendingCable: p }),
+  blockedSwitch: null,
+
+  async retrySwitch() {
+    const b = get().blockedSwitch;
+    if (!b) return;
+    set({ error: null, conflict: false });
+    const ok = await get().ensureSaved();
+    if (!ok) {
+      set({ blockedSwitch: { ...b, reason: get().error ?? b.reason } });
+      return;
+    }
+    set({ blockedSwitch: null });
+    await get().load(b.targetId);
+  },
+
+  async discardAndSwitch() {
+    const b = get().blockedSwitch;
+    if (!b) return;
+    // Explicit user choice: drop the unsaved edits of the current document.
+    if (saveTimer) clearTimeout(saveTimer);
+    set({ dirty: false, error: null, conflict: false, blockedSwitch: null });
+    await get().load(b.targetId);
+  },
 
   undo() {
     const current = get().rig;
@@ -110,8 +137,24 @@ export const useRigStore = create<RigState>((set, get) => ({
   },
 
   async load(id) {
-    // Never drop pending edits of the previous rig when switching.
-    if (get().rig && get().dirty) await get().ensureSaved();
+    // Never drop pending edits of the previous rig when switching: if they cannot be saved,
+    // keep the current document in memory and let the user retry or discard explicitly.
+    const current = get().rig;
+    if (current && get().dirty && current.id !== id) {
+      const ok = await get().ensureSaved();
+      if (!ok) {
+        set({
+          loading: false,
+          blockedSwitch: {
+            targetId: id,
+            fromName: current.name,
+            reason: get().error ?? "The latest edits could not be saved.",
+          },
+        });
+        return;
+      }
+    }
+    set({ blockedSwitch: null });
     undoStack = [];
     redoStack = [];
     set({ loading: true, error: null, conflict: false, rig: null, analysis: null, selectedInstanceId: null, selectedSceneId: null, canUndo: false, canRedo: false, pendingCable: null });

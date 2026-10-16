@@ -181,3 +181,37 @@ test("catalog: duplicate a profile, drag a jack, save, and find it in the librar
   expect(out.position_evidence).toBe("user");
   await page.request.delete("/api/catalog/devices/eqd-plumes-copy");
 });
+
+test("saves: switching rigs while a save fails keeps the unsaved document instead of dropping it", async ({ page }) => {
+  const rigA = await openCopy(page, "mono");
+  const rigB = await openCopy(page, "stereo"); // the second openCopy navigates to B; go back to A
+  await page.goto(`/rigs/${rigA}`);
+  await expect(page.getByRole("tab", { name: "board" })).toBeVisible({ timeout: 15_000 });
+  // Make every PUT fail (as a disk/server fault would).
+  let failing = true;
+  await page.route(`**/api/rigs/${rigA}`, async (route) => {
+    if (route.request().method() === "PUT" && failing) return route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ detail: "disk full (simulated)" }) });
+    await route.continue();
+  });
+  await page.getByRole("button", { name: /^Plumes,/ }).click();
+  await page.getByRole("textbox", { name: "Label", exact: true }).fill("Plumes KEEP ME");
+  await expect(page.getByTestId("save-state")).not.toHaveText("Saved", { timeout: 10_000 });
+  // Client-side navigation: library, then open rig B.
+  await page.getByRole("link", { name: "← Rigs" }).click();
+  await page.getByRole("listitem").filter({ hasText: "E2E stereo" }).getByRole("button", { name: "Open" }).click();
+  await expect(page).toHaveURL(new RegExp(`/rigs/${rigB}`));
+  // The switch is refused: the document of A is still in memory and shown, with a blocking error.
+  const banner = page.getByTestId("blocked-switch");
+  await expect(banner).toBeVisible();
+  await expect(banner).toContainText("could not be saved");
+  await expect(page.getByLabel("Rig name")).toHaveValue(/E2E mono/);
+  let stored = await (await page.request.get(`/api/rigs/${rigA}`)).json();
+  expect(stored.instances.find((i: { id: string }) => i.id === "inst_plumes").label).toBe("Plumes"); // not yet saved
+  // The fault clears; retry saves A first, then opens B.
+  failing = false;
+  await banner.getByRole("button", { name: /Retry save/ }).click();
+  await expect(page.getByLabel("Rig name")).toHaveValue(/E2E stereo/, { timeout: 15_000 });
+  await expect(page.getByTestId("blocked-switch")).toHaveCount(0);
+  stored = await (await page.request.get(`/api/rigs/${rigA}`)).json();
+  expect(stored.instances.find((i: { id: string }) => i.id === "inst_plumes").label).toBe("Plumes KEEP ME");
+});

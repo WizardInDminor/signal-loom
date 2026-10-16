@@ -147,4 +147,4 @@ content; names are carried verbatim; expression presets and bank messages are no
 Next.js 16 / React 19 / TypeScript with zustand; plain SVG for the board and the signal
 diagram (predictable geometry, no heavy canvas dependency; React Flow/Konva were evaluated
 and rejected for Session 1 as unnecessary). FastAPI + Pydantic v2 + SQLite with file-based
-migrations. Pytest (50 tests) and Playwright (12 scenarios) cover the rules and the demo path.
+migrations. Pytest (64 tests) and Playwright (20 scenarios) cover the rules and the demo path.
