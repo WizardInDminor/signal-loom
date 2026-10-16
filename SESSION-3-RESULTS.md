@@ -327,6 +327,77 @@ changes, each with a browser scenario at several window sizes.
 
 Counts after the pass: 84 backend tests, 34 browser scenarios (3 new), lint/typecheck/build clean.
 
+## Part four: underboard layout and power planning (same branch, same PR)
+
+The owner's rig hangs an ML10X and a Strymon Zuma under a Pedaltrain. Part four lets the rig model
+say so and asks the two questions that matter for it: does everything fit on *and under* this
+board, and can this supply run the planned rig. Two phases, each left usable and tested.
+
+### Phase A — mounting surfaces
+
+- `DeviceInstance.surface` (top / underside / off_board) refines the legacy `off_board` flag. Older
+  rigs load with `surface = None` and are read through `mount`; the flag is never rewritten. An
+  explicit surface keeps the flag in agreement. Tested with a pre-surfaces demo export.
+- The underside is drawn **seen through the board from above, not mirrored**, so x/y mean the same
+  thing in both views; the UI says so in the frame. Both surfaces are bounds-checked against the
+  one perimeter; collisions are only within a surface (the ML10X under the Plumes is fine).
+- Fit under the board needs two documented figures: the device's height and the board's usable
+  clearance. Both known → fits / too tall; either missing → unverified, with a message that a
+  footprint inside the perimeter is not enough. The user can enter their own clearance (evidence
+  *user*), which wins over the catalog.
+- Pedalboard catalog: Pedaltrain Classic 2 and Novo 24 from retailer-reproduced manufacturer copy
+  (third_party), rail counts but no spacing (so no rails are drawn), bracket compatibility as text,
+  and a generic flat board that refuses underside devices.
+- Board: Top/Underside switch with counts, pedalboard select, clearance field, spec line with
+  evidence badges; underside frame with open front and clearance status; ghosts of the other
+  surface; ↧/↥ stubs for cables that change surface (no invented route); *Add device* on the viewed
+  surface; *Mounted on* in the inspector. Stage dims underside devices, rig cards draw the top, the
+  wiring manifest has a *Mounted* column and notes crossings.
+
+### Phase B — power supply profiles, planner, validation
+
+- Outlets gained `supply_ac_dc`, `supply_isolated`, `supply_shared_group` and `supply_options`
+  (voltage → rating at that voltage); `role = expansion_out` marks the Zuma's 24 V Ojai link so
+  it is never a pedal outlet. `PowerSpec.voltage_max_v` expresses the ML10X's 9–18 V range. The
+  rig stores only `supply_settings` (chosen voltage per selectable outlet); **assignments are the
+  existing typed power cables**, so the planner cannot disagree with the wiring.
+- Seeds: Strymon Zuma (7 × 9 V/500 mA + 2 × selectable 9/12/18 V at 500/375/250 mA, isolated,
+  173 × 84 × 46 mm) and Zuma R300 (4 + 1, 184 × 88 × 30 mm) as distinct devices; the ML10X's
+  documented 9–18 V, centre negative, ≥ 160 mA preserved. No current was invented for any pedal:
+  the generic mono effect stays unknown and is listed as such.
+- `domain/power.py` derives the plan (`analysis.power`): per outlet the effective voltage and
+  rating after the setting, the devices on it, the sum of documented minimums, the remaining
+  current and a status taken from the wiring diagnostics. Separate outlets are never pooled.
+- Validation extends `_validate_power`: voltage outside the documented point/range, polarity (DC
+  only), AC/DC, rating below the documented minimum at the selected voltage, expansion link misuse,
+  invalid setting; shared outlets add overload (sum of minimums), unknowable totals, and the lost
+  isolation between co-powered devices as an INFO assumption. Unknowns stay warnings and every
+  current message says "documented minimum, not measured draw".
+- Power planner (Wiring tab): supply picker, outlet table with voltage selects, ratings, assigned
+  devices with their needs, remaining, status and issues in words; assign from the row or from the
+  *Not yet powered* list, move or unplug from the row; *Requirement not documented* list; footer
+  disclaimer. The Device library shows what each outlet supplies.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| `pytest -q` | **96 passed** (5 mounting: legacy flag, catalog evidence, per-surface collisions, clearance logic, API/export/import/manifest; 7 power: Zuma/R300/ML10X facts, setting → capacity, range/current/expansion rules, polarity and AC/DC, shared-outlet aggregation without pooling, plan contents, settings round trip + legacy profile) |
+| Playwright | **37 passed** (3 new: Pedaltrain + pedals on top + ML10X/supply underneath with positions kept across views, clearance error/fit, reload/export/import; legacy off_board rig unchanged, underside supply still powers a pedal on top with ↧/↥ stubs; Zuma under the board: assign four devices, per-outlet capacity, 18 V → 250 mA, overload and wrong-voltage errors, unknown requirement, moves, reload/export/import with settings) |
+| Lint / typecheck / build / ruff | clean |
+| Screenshots | top view with ghosts and cable stubs, underside view with frame, ghosts and clearance verdicts, the power planner with ok / unknown / error / link rows |
+
+### Honest limits
+
+- No rail geometry is drawn for any Pedaltrain board and no bracket fit is checked: the spacing
+  is not published. Users must measure the usable clearance themselves.
+- Cables that cross surfaces have no route or length; the stub only says they do.
+- Manufacturer figures were cross-checked across retailers but the vendor sites were unreachable
+  from the sandbox, so they are recorded as third-party evidence.
+- The 24 V Ojai link's current is not published; an Ojai is not modelled as a device.
+- Per-instance outlet overrides (editing a supply's outlet facts on one unit) use the existing port
+  editor; the planner reads them like any port.
+
 ## Two next ideas
 
 1. **Visual Advanced-mode editor on the Stage canvas**: drag from a Return jack to a Send jack

@@ -58,6 +58,9 @@ class DeviceInstance(StrictModel):
     # replaces it; a new id adds a user-defined jack. Removed ids hide profile ports.
     port_overrides: list[PortDef] = Field(default_factory=list)
     removed_port_ids: list[str] = Field(default_factory=list)
+    # For a power supply with selectable outlets: the voltage chosen per outlet (port id -> V).
+    # Must be one of the outlet's ``supply_options``; the outlet's current capacity follows it.
+    supply_settings: dict[str, float] = Field(default_factory=dict)
     # Optional picture for this particular unit (a repainted or customised pedal). When unset the
     # profile's image is used. Never affects geometry.
     image: DeviceImage | None = None

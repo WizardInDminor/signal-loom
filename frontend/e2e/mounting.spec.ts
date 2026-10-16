@@ -151,3 +151,96 @@ test("mounting: an older rig with off_board devices loads unchanged and a supply
   expect(md).toContain("| Power supply | Generic Isolated power supply (8 x 9 V + 1 x 18 V) | underside |");
   expect(md).toContain("Crosses from under the board to the top of the board");
 });
+
+test("power: a Zuma under the board powers the pedals on top; outlets show capacity, selectable voltage, overload, mismatch and unknowns; everything survives reload and import", async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 1000 });
+  const rigId = await newRig(page, `E2E power ${Date.now()}`);
+  const inst = (id: string, profile_id: string, label: string, x: number, y: number, surface: string) => ({ id, profile_id, label, x_mm: x, y_mm: y, rotation: 0, intentional_overlap: false, off_board: surface === "off_board", surface, midi_channel: null, port_overrides: [], removed_port_ids: [] });
+  let rig = await (await page.request.get(`/api/rigs/${rigId}`)).json();
+  rig.board = { ...rig.board, model_id: "pedaltrain-novo-24", width_mm: 609.6, depth_mm: 368.3 };
+  rig.instances = [
+    inst("bs", "strymon-bigsky-mx", "BigSky", 40, 30, "top"), // 9 V, 500 mA
+    inst("pl", "eqd-plumes", "Plumes", 260, 30, "top"), // 9 V, 25 mA
+    inst("my", "generic-mono-effect", "Mystery", 380, 30, "top"), // requirement unknown
+    inst("ml", "morningstar-ml10x", "ML10X", 40, 220, "underside"), // 9-18 V, 160 mA
+    inst("z", "strymon-zuma", "Zuma", 300, 230, "underside"),
+  ];
+  rig.revision += 1;
+  expect((await page.request.put(`/api/rigs/${rigId}`, { data: rig })).ok()).toBeTruthy();
+  await page.reload();
+  await page.getByRole("tab", { name: "wiring" }).click();
+  const planner = page.getByTestId("power-planner");
+  await expect(planner).toBeVisible();
+  await expect(planner).toContainText("Zuma");
+  await expect(planner).toContainText("underside");
+  // 6. Each outlet shows its own rating; the 24 V link is not a pedal outlet; nothing is pooled.
+  await expect(page.getByTestId("outlet-rated-out1")).toContainText("500 mA");
+  await expect(page.getByTestId("outlet-link24")).toContainText("not a pedal outlet");
+  await expect(page.getByTestId("power-unpowered")).toContainText("Not yet powered (4)");
+  // 5. Assign: BigSky -> Out 1, Plumes -> Out 2, ML10X -> Out 8, Mystery -> Out 3.
+  await page.getByTestId("power-bs").selectOption("out1");
+  await page.getByTestId("power-pl").selectOption("out2");
+  await page.getByTestId("power-ml").selectOption("out8");
+  await page.getByTestId("power-my").selectOption("out3");
+  await expect(page.getByTestId("power-unpowered")).toContainText("Not yet powered (0)");
+  await expect(page.getByTestId("outlet-out1")).toHaveAttribute("data-status", "ok");
+  await expect(page.getByTestId("outlet-remaining-out1")).toContainText("0 mA");
+  await expect(page.getByTestId("outlet-remaining-out2")).toContainText("475 mA");
+  // 9. Unknown requirement stays unknown, never approved.
+  await expect(page.getByTestId("outlet-out3")).toHaveAttribute("data-status", "unknown");
+  await expect(page.getByTestId("power-unknown")).toContainText("Mystery");
+  // Selectable voltage: Out 8 at 18 V gives 250 mA, enough for the ML10X (160 mA, accepts 9-18 V).
+  await page.getByTestId("outlet-voltage-out8").selectOption("18");
+  await expect(page.getByTestId("outlet-rated-out8")).toContainText("250 mA");
+  await expect(page.getByTestId("outlet-remaining-out8")).toContainText("90 mA");
+  await expect(page.getByTestId("outlet-out8")).toHaveAttribute("data-status", "ok");
+  // 7. Capacity exceeded: move the BigSky onto Out 8 (250 mA at 18 V) -> error, and BigSky needs 9 V -> mismatch.
+  await page.getByTestId("assign-out8").selectOption("bs");
+  await expect(page.getByTestId("outlet-out8")).toHaveAttribute("data-status", "error");
+  await expect(page.getByTestId("outlet-out8")).toContainText("overloaded");
+  await expect(page.getByTestId("outlet-out8")).toContainText("wrong voltage");
+  await expect(page.getByTestId("outlet-out1")).toHaveAttribute("data-status", "unused"); // it moved, not copied
+  // Back at 9 V the voltage is right for the BigSky but 660 mA of documented minimums exceed 500 mA.
+  await page.getByTestId("outlet-voltage-out8").selectOption("9");
+  await expect(page.getByTestId("outlet-out8")).not.toContainText("wrong voltage");
+  await expect(page.getByTestId("outlet-out8")).toContainText("overloaded");
+  await expect(page.getByTestId("outlet-remaining-out8")).toContainText("-160 mA");
+  // Move the BigSky back to Out 1 from the row itself.
+  await page.getByLabel("Move BigSky to another outlet").selectOption("out1");
+  await expect(page.getByTestId("outlet-out8")).toHaveAttribute("data-status", "ok");
+  await expect(page.getByTestId("outlet-out1")).toHaveAttribute("data-status", "ok");
+  // 8. A polarity / voltage error: Plumes (9 V) onto Out 9 set to 12 V.
+  await page.getByTestId("outlet-voltage-out9").selectOption("12");
+  await page.getByLabel("Move Plumes to another outlet").selectOption("out9");
+  await expect(page.getByTestId("outlet-out9")).toHaveAttribute("data-status", "error");
+  await expect(page.getByTestId("outlet-out9")).toContainText("wrong voltage");
+  await saved(page);
+  // The assignments are ordinary power cables: four of them, from the underside supply to devices on both surfaces.
+  rig = await (await page.request.get(`/api/rigs/${rigId}`)).json();
+  const power = rig.connections.filter((c: { kind: string }) => c.kind === "power");
+  expect(power).toHaveLength(4);
+  expect(power.every((c: { source: { instance_id: string } }) => c.source.instance_id === "z")).toBe(true);
+  expect(rig.instances.find((i: { id: string }) => i.id === "z").supply_settings).toEqual({ out8: 9, out9: 12 });
+  const a = await (await page.request.get(`/api/rigs/${rigId}/analysis`)).json();
+  const codes = new Set(a.diagnostics.map((d: { code: string }) => d.code));
+  expect(codes.has("power.voltage_mismatch")).toBe(true);
+  expect(codes.has("power.requirement_unknown")).toBe(true);
+  expect(codes.has("power.outlet_overloaded")).toBe(false);
+  // 10. Reload, export, import.
+  await page.reload();
+  await page.getByRole("tab", { name: "wiring" }).click();
+  await expect(page.getByTestId("outlet-voltage-out9")).toHaveValue("12");
+  await expect(page.getByTestId("outlet-out9")).toHaveAttribute("data-status", "error");
+  await expect(page.getByTestId("assigned-ml")).toBeVisible();
+  const exported = await (await page.request.get(`/api/rigs/${rigId}/export`)).json();
+  const imported = (await (await page.request.post(`/api/rigs/import?name=${encodeURIComponent("E2E power copy")}`, { data: exported })).json()).rig;
+  createdRigs.push(imported.id);
+  expect(imported.instances.find((i: { id: string }) => i.id === "z").supply_settings).toEqual({ out8: 9, out9: 12 });
+  expect(imported.instances.find((i: { id: string }) => i.id === "z").surface).toBe("underside");
+  const plan = (await (await page.request.get(`/api/rigs/${imported.id}/analysis`)).json()).power;
+  const out9 = plan.supplies[0].outputs.find((o: { port_id: string }) => o.port_id === "out9");
+  expect(out9.voltage_v).toBe(12);
+  expect(out9.current_ma_max).toBe(375);
+  expect(out9.assigned.map((x: { instance_id: string }) => x.instance_id)).toEqual(["pl"]);
+  expect(plan.unknown_requirements).toEqual(["my"]);
+});

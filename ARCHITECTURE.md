@@ -194,6 +194,77 @@ alone. TRS semantics are untouched: a stereo
 TRS jack is one port with `audio_channel = stereo_trs`; an L/R pair is two ports sharing a
 `pair_group`; per-conductor ML10X ports keep their `pair_group`/`loop` facts.
 
+## Mounting surfaces and the underside (Session 3e, phase A)
+
+A placed device has a **mounting surface**: `top`, `underside` or `off_board`
+(`DeviceInstance.surface`). Rigs saved before this existed carry only `off_board`; they load with
+`surface = None` and are read through `DeviceInstance.mount` (`off_board → off_board`, else
+`top`). Loading never rewrites the flag; an explicit `surface` keeps the flag in agreement so
+older readers see the same fact. The frontend mirrors this in `lib/mounting.ts` (`surfaceOf`).
+
+Top and underside share one coordinate system and one perimeter. The underside view is the board
+**seen through from above, not mirrored**: what is under your left foot is drawn on the left.
+`geometry.board_diagnostics` bounds-checks both surfaces and reports collisions only between
+devices on the same surface. Whether something fits *under* the board is a separate question
+answered only from two documented figures: the device's `footprint.height` and the board's usable
+clearance (`geometry.underside_clearance`: the user's `Board.underside_clearance_mm` wins, then
+the catalog spec's figure, else unknown). Both known → `instance.underside_fits` (INFO) or
+`instance.underside_too_tall` (ERROR); either missing → `instance.underside_height_unknown` /
+`instance.underside_clearance_unverified` (WARNING). A footprint inside the perimeter is never
+taken as proof. A board whose spec says `underside_mountable = False` refuses underside devices
+(`instance.underside_unavailable`).
+
+`models/board.py` / `catalog/boards.py` hold **pedalboard specs** (`GET /api/catalog/boards`):
+overall size, height, rail count, rail pitch, underside mountability and clearance, open front,
+bracket compatibility as text, each with evidence. Rails are drawn only when their pitch is known
+(it never is, for the shipped Pedaltrain boards), so the underside view shows the frame outline,
+the open front and the clearance status, and `board.underside_mounting_unverified` says bracket
+fit is not checked. `Rig.board.model_id` points at a spec; the board's width/depth are copied in
+when the user picks one and remain editable.
+
+Mounting changes nothing electrically: wiring, MIDI, scenes and the Stage read the same
+connections. On the Board a cable whose other end is on the other surface ends in a short stub
+with ↧/↥; where it passes the board is not modelled and no length is invented. The wiring
+manifest gains a *Mounted* column and notes cables that cross surfaces. Rig cards draw the top
+surface only; the Stage dims underside devices.
+
+## Power supplies and the power plan (Session 3e, phase B)
+
+Outlet facts stay on the outlet's `PortDef`: `supply_voltage_v`, `supply_current_ma_max`,
+`supply_polarity`, `supply_ac_dc`, `supply_isolated`, `supply_shared_group`, and for selectable
+outlets `supply_options` (voltage → rating at that voltage). A jack that feeds another supply
+(Strymon's 24 V Ojai link) is `role = "expansion_out"`. A device's need stays on its profile's
+`PowerSpec`, now with `voltage_max_v` for a documented range (ML10X 9–18 V); `current_ma_min` is
+the manufacturer's documented minimum requirement, not a measurement.
+
+An **assignment is the typed power `Connection`** from outlet to inlet; there is no second
+allocation model. The rig adds only `DeviceInstance.supply_settings` (outlet port id → chosen
+voltage). `domain/power.py` derives everything else: `effective_outlet` applies the setting (an
+option replaces voltage *and* rating; a value that is no option is reported invalid and the default
+is used, never an invented capacity), `outlet_loads` sums the documented minimums per outlet, and
+`power_plan` builds the planner view (`analysis.power`: supplies → outputs with assigned devices,
+known requirement total, remaining, status derived from the wiring diagnostics; consumers;
+`unpowered`; `unknown_requirements`). Capacities of separate outlets are never pooled.
+
+`wiring._validate_power` extends the existing checks rather than replacing them: expansion link
+used as an outlet (ERROR), invalid setting (ERROR), voltage outside the documented point or range
+(ERROR), AC/DC mismatch (ERROR) or unknown (WARNING), polarity mismatch (ERROR, DC only) or unknown
+(WARNING), rating below the documented minimum at the selected voltage (ERROR), and the unknowns
+(`requirement_unknown`, `current_unknown`, `outlet_current_unknown`, `supply_unknown`) as
+WARNINGs that never approve. `outlet_load_diagnostics` handles shared outlets: documented minimums
+adding up beyond the rating (`power.outlet_overloaded`, ERROR), a total that cannot be known
+(`power.outlet_load_unknown`), the lost isolation between devices on one outlet
+(`power.outlet_shared_assumption`, INFO) and outlets documented as sharing a regulator
+(`power.outlets_share_regulator`, INFO). `power.unpowered` is unchanged.
+
+The **Power planner** (Wiring tab, `components/wiring/PowerPlanner.tsx`) shows one supply at a
+time: each outlet's voltage (a select for selectable outlets, bound to `supply_settings`),
+polarity, rating, the devices on it with their documented needs, the remaining current and a
+status with the diagnostic codes in words. Assigning, moving and unplugging write power cables
+through the store (`assignPower`, `unassignPower`, `setOutletVoltage`). Unpowered devices and
+devices with no documented requirement are listed explicitly, and the footer repeats that the
+figures are ratings and documented minimums, not measured draw.
+
 ## Scenes and the compiler
 
 A scene is intent, not bytes. The compiler is deterministic for equal inputs (ordering is

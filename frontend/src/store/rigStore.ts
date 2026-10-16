@@ -48,6 +48,12 @@ interface RigState {
   addInstance: (profile: DeviceProfile, surface?: Surface) => string;
   removeInstance: (id: string) => void;
   addConnection: (c: Omit<Connection, "id" | "intentional"> & { intentional?: boolean }) => string;
+  /** Plug a device's power inlet into a supply outlet (moving it off any outlet it is on). Returns the cable id. */
+  assignPower: (supplyId: string, outletPortId: string, deviceId: string, inletPortId: string) => string;
+  /** Unplug a device's power inlet. */
+  unassignPower: (deviceId: string) => void;
+  /** Pick the voltage of a selectable outlet (null = back to the outlet's default). */
+  setOutletVoltage: (supplyId: string, outletPortId: string, voltage: number | null) => void;
   removeConnection: (id: string) => void;
   addScene: (name: string) => string;
   duplicateScene: (id: string) => string | null;
@@ -327,6 +333,34 @@ export const useRigStore = create<RigState>((set, get) => ({
   removeConnection(id) {
     get().update((r) => {
       r.connections = r.connections.filter((c) => c.id !== id);
+    });
+  },
+
+  assignPower(supplyId, outletPortId, deviceId, inletPortId) {
+    const id = newId("conn");
+    get().update((r) => {
+      // One plug per inlet: the assignment *is* the typed power cable, so moving a device means
+      // replacing its power cable, never keeping a second record of where it is plugged in.
+      r.connections = r.connections.filter((c) => !(c.kind === "power" && c.target.instance_id === deviceId && c.target.port_id === inletPortId));
+      r.connections.push({ id, kind: "power", source: { instance_id: supplyId, port_id: outletPortId }, target: { instance_id: deviceId, port_id: inletPortId }, label: null, intentional: false });
+    });
+    return id;
+  },
+
+  unassignPower(deviceId) {
+    get().update((r) => {
+      r.connections = r.connections.filter((c) => !(c.kind === "power" && c.target.instance_id === deviceId));
+    });
+  },
+
+  setOutletVoltage(supplyId, outletPortId, voltage) {
+    get().update((r) => {
+      const i = r.instances.find((k) => k.id === supplyId);
+      if (!i) return;
+      const settings = { ...(i.supply_settings ?? {}) };
+      if (voltage == null) delete settings[outletPortId];
+      else settings[outletPortId] = voltage;
+      i.supply_settings = settings;
     });
   },
 

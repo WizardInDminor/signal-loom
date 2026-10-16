@@ -9,6 +9,7 @@ from .domain.compiler import compile_rig
 from .domain.geometry import board_diagnostics, effective_ports, placed_ports, rotated_size, underside_clearance
 from .domain.ml10x import loop_occupancy, preset_diagnostics
 from .domain.paths import trace_preset
+from .domain.power import power_plan
 from .domain.wiring import midi_routes, wiring_diagnostics
 from .images import resolve_image
 from .models.common import DeviceCategory, Diagnostic, Severity
@@ -143,6 +144,7 @@ def analyze(rig: Rig, profiles: dict[str, DeviceProfile], assets: dict | None = 
         },
         "cable_kit": [i.as_dict() for i in kit],
         "midi": midi,
+        "power": power_plan(ctx, wiring),
         "instances": placed,
         "compiled": compiled,
     }

@@ -45,8 +45,14 @@ export interface PortDef {
   supply_voltage_v?: number | null;
   supply_polarity?: "center_negative" | "center_positive" | "unknown" | null;
   supply_current_ma_max?: number | null;
+  supply_ac_dc?: "dc" | "ac" | null;
+  /** Settings of a selectable outlet; `supply_voltage_v` / `supply_current_ma_max` are the default. */
+  supply_options?: SupplyOption[];
+  supply_isolated?: boolean | null;
+  supply_shared_group?: string | null;
   notes?: string | null;
 }
+export interface SupplyOption { voltage_v: number; current_ma_max: number | null; note?: string | null }
 
 export interface CcDef { cc: number; name: string; value_semantics?: string | null; evidence: Evidence }
 
@@ -81,7 +87,7 @@ export interface DeviceProfile {
   provenance: { source: string; url?: string | null; evidence: Evidence; license?: string | null; attribution?: string | null; retrieved?: string | null };
   footprint: Footprint;
   ports: PortDef[];
-  power: { voltage_v: number | null; polarity: string; ac_dc?: string | null; current_ma_min: number | null; connector: Connector; evidence: Evidence; note?: string | null };
+  power: { voltage_v: number | null; voltage_max_v?: number | null; polarity: string; ac_dc?: string | null; current_ma_min: number | null; connector: Connector; evidence: Evidence; note?: string | null };
   midi: {
     interfaces: string[]; default_channel: number | null; channel_configurable?: boolean | null;
     program_change: { supported: boolean | null; min: number | null; max: number | null; display_numbering?: string | null; bank_select_supported?: boolean | null; note?: string | null; evidence: Evidence };
@@ -127,7 +133,10 @@ export interface DeviceInstance {
   /** Mounting surface; null/absent on older rigs (derived from off_board). */
   surface?: Surface | null;
   midi_channel: number | null;
-  port_overrides: PortDef[]; removed_port_ids: string[]; image?: DeviceImage | null; notes?: string | null;
+  port_overrides: PortDef[]; removed_port_ids: string[];
+  /** Selected voltage per selectable outlet (port id → V) on a power supply. */
+  supply_settings?: Record<string, number>;
+  image?: DeviceImage | null; notes?: string | null;
 }
 export interface PortRef { instance_id: string; port_id: string }
 export interface Connection {
@@ -176,6 +185,24 @@ export interface PathStep {
 export interface ConductorPath { name: string; source: string; steps: PathStep[]; ends_at: string[]; branches: string[][]; complete: boolean; summary: string }
 export interface PresetPaths { preset_number: number; preset_name: string; mode: string; paths: ConductorPath[]; stereo_output: boolean; stereo_input: boolean }
 export interface CableItem { kind: string; description: string; ends: string[]; connection_ids: string[]; length_cm: number | null; notes: string[] }
+/** One supply outlet as set up in this rig, with what is cabled to it (derived from the power cables). */
+export interface PowerOutlet {
+  port_id: string; label: string; voltage_v: number | null; current_ma_max: number | null;
+  polarity: string | null; ac_dc: string | null; connector: string; selectable: boolean;
+  options: { voltage_v: number; current_ma_max: number | null }[]; selected_voltage_v: number | null; setting_valid: boolean;
+  expansion: boolean; isolated: boolean | null; shared_group: string | null; evidence: string | null;
+  assigned: PowerConsumer[]; required_known_ma: number; unknown_count: number; remaining_ma: number | null;
+  status: "ok" | "warning" | "error" | "unknown" | "unused" | "expansion"; issues: Record<string, Severity>;
+}
+export interface PowerConsumer {
+  instance_id: string; label: string; surface: Surface; voltage_v: number | null; voltage_max_v: number | null; polarity: string | null; ac_dc: string | null;
+  current_ma_min: number | null; requirement_known: boolean; current_known: boolean; evidence: string | null;
+  connection_id?: string; port_id?: string; inlet_port_id?: string; powered?: boolean;
+}
+export interface PowerPlan {
+  supplies: { instance_id: string; label: string; profile: string; surface: Surface; evidence: string | null; outputs: PowerOutlet[] }[];
+  consumers: PowerConsumer[]; unpowered: string[]; unknown_requirements: string[]; note: string;
+}
 export interface Analysis {
   rig_id: string;
   diagnostics: Diagnostic[];
@@ -184,6 +211,7 @@ export interface Analysis {
   cable_kit: CableItem[];
   /** MIDI cables from the MC8 to every device it reaches, in order (through MIDI Thru and the Omniport). */
   midi: { controller_id: string | null; routes: Record<string, string[]> };
+  power: PowerPlan;
   /** The board as a physical object: its catalog spec (if any) and the usable height underneath. */
   mounting: { spec: PedalboardSpec | null; clearance_mm: number | null; clearance_source: string; counts: Record<Surface, number> };
   instances: Record<string, { width_mm: number; height_mm: number; placeholder: boolean; surface: Surface; tall_mm: number | null; ports: PlacedPort[]; effective_ports: PortDef[]; unknowns: string[]; image: ResolvedImage | null }>;

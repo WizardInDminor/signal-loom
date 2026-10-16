@@ -54,6 +54,14 @@ class ImageAnchor(StrictModel):
     asset_id: str = Field(pattern=r"^img_[0-9a-f]{12}$")
 
 
+class SupplyOption(StrictModel):
+    """One setting of a selectable power outlet: the voltage and what the outlet can deliver at it."""
+
+    voltage_v: float = Field(gt=0)
+    current_ma_max: int | None = Field(default=None, ge=0)  # None = not published at this setting
+    note: str | None = None
+
+
 class PortDef(StrictModel):
     """A physical connector on a device, in the device's own (unrotated) frame."""
 
@@ -87,10 +95,20 @@ class PortDef(StrictModel):
     # "thru", "supply_out", "supply_in", "exp_in", "exp_out", "controller_out". None = generic.
     role: str | None = None
     loop: int | None = None  # for loop_send / loop_return on a switcher
-    # For power supply outputs: what the outlet provides (None = unknown).
+    # For power supply outputs: what the outlet provides (None = unknown). ``supply_voltage_v`` and
+    # ``supply_current_ma_max`` describe a fixed outlet, or the factory/default setting of a
+    # selectable one whose other settings are listed in ``supply_options`` (the rig picks one per
+    # outlet in ``DeviceInstance.supply_settings``). ``role = "expansion_out"`` marks a jack that
+    # feeds another supply (Strymon's 24 V Ojai link), never a pedal.
     supply_voltage_v: float | None = None
     supply_polarity: Polarity | None = None
     supply_current_ma_max: int | None = None
+    supply_ac_dc: Literal["dc", "ac"] | None = None
+    supply_options: list[SupplyOption] = Field(default_factory=list)
+    # Electrically isolated from the supply's other outlets? None = not documented. Outlets that share
+    # a regulator or ground carry the same ``supply_shared_group`` label.
+    supply_isolated: bool | None = None
+    supply_shared_group: str | None = None
     notes: str | None = None
 
     def is_exclusive(self) -> bool:
@@ -100,7 +118,12 @@ class PortDef(StrictModel):
 
 
 class PowerSpec(StrictModel):
+    """What a device needs from a supply. ``current_ma_min`` is the manufacturer's documented
+    minimum (what they ask a supply to provide), not a measured draw."""
+
     voltage_v: float | None = None
+    # Upper end of an accepted range (e.g. 9-18 V); None = ``voltage_v`` only.
+    voltage_max_v: float | None = None
     polarity: Polarity = Polarity.UNKNOWN
     ac_dc: str | None = None  # "dc" | "ac" | None
     current_ma_min: int | None = None

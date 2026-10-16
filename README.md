@@ -187,6 +187,32 @@ check, never deleted silently. Labels, positions and photo markers change freely
 imported pedal has its jacks mapped, the import's "ports (not in dataset)" note disappears from
 its unknowns; power and MIDI stay marked unknown until you fill them in.
 
+## Under the board, and the power to run it (Session 3)
+
+**Top / Underside.** The Board has two surfaces that share one coordinate system. Switch with the
+*Top* / *Underside* buttons: the underside is drawn seen through the board from above (not
+mirrored), the other surface shows as faint ghosts, and *Add device* places on the surface you are
+looking at. A device's *Mounted on* select (inspector) moves it between top, underside and
+off-board. Pick a manufacturer pedalboard (Pedaltrain Classic 2, Novo 24) to take its dimensions;
+the spec line says what is known (rail count) and what is not (rail spacing, usable clearance).
+A device under the board is called a fit only when its documented height and the board's clearance
+are both known; enter your own measurement in *Clearance under* to get a real answer, otherwise it
+stays *unverified*. Cables that cross between surfaces end in a ↧/↥ stub; where they pass the
+board is not modelled. Mounting changes nothing electrically: an underside Zuma powers pedals on
+top, and an underside ML10X keeps its audio and MIDI in the Wiring and Stage workspaces.
+
+**Power planner** (Wiring tab). Pick a supply (Strymon Zuma, Zuma R300 or the generic isolated
+supply are built in); each outlet shows its voltage and polarity, its rating at the selected
+voltage, the devices on it with their documented minimum requirements, the remaining current and
+a status. Assign a device from the outlet row or from the *Not yet powered* list; move it with the
+row's *move…* select; change a selectable outlet's voltage and watch its rating follow (Zuma out
+8/9: 9 V/500 mA, 12 V/375 mA, 18 V/250 mA). Assignments are ordinary power cables, so the Wiring
+diagnostics, cable kit and manifest agree with the planner. Errors: wrong voltage, wrong polarity,
+AC/DC mismatch, an outlet rated below a device's documented minimum, a shared outlet whose
+documented minimums add up past its rating, a pedal on the 24 V expansion link. Warnings: anything
+not documented, which is never an approval. All currents are ratings and documented minimums, not
+measured draw, and passing every check does not make an installation safe.
+
 ## A short tour: the three-scene demo
 
 1. **Rigs** — open *Demo rig: three-scene song* (or create a new rig, optionally "from the demo").

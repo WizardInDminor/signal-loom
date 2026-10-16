@@ -155,7 +155,49 @@ content; names are carried verbatim; expression presets and bank messages are no
    `docs/research/raw-*.md` and confirm the "documented (snippet)" rows; any correction is a
    one-line change in `backend/app/morningstar/specs.py` or `backend/app/catalog/builtin.py`.
 
-## 6. Stack choices
+## 6. Pedalboards and power supplies (Session 3e)
+
+Vendor sites (strymon.net, pedaltrain.com, help.morningstar.io) were unreachable from the build
+sandbox. Every figure below was taken from retailer listings that reproduce the manufacturer's
+copy and cross-checked across several listings; it is therefore recorded as **third_party**, not
+*documented*, even where it is clearly the manufacturer's own text. Anything no listing states is
+left **unknown** and the app says "unverified".
+
+### Verified (third_party, consistent across listings)
+
+| Device | Facts shipped |
+|---|---|
+| Strymon **Zuma** (`strymon-zuma`) | 9 isolated outputs, each with its own regulator: outputs 1–7 fixed 9 V DC / 500 mA; outputs 8–9 selectable 9 V / 500 mA, 12 V / 375 mA or 18 V / 250 mA. Centre-negative 5.5 × 2.1 mm barrels. 24 V out jack links a Strymon Ojai / Ojai R30 only (modelled as `role = expansion_out`, never a pedal outlet; its current is not published). Input 100–240 V AC. 173 × 84 × 46 mm (6.8 × 3.3 × 1.8 in), about 680 g. |
+| Strymon **Zuma R300** (`strymon-zuma-r300`) | A different device: 5 isolated outputs, four fixed 9 V / 500 mA, one selectable 9 / 12 / 18 V with the same currents; 24 V thru for an Ojai; 184 × 88 × 30 mm (7.25 × 3.5 × 1.18 in), about 400 g. The Zuma mounting kit does not fit it. |
+| Morningstar **ML10X** power | 9–18 V DC, centre negative, minimum 160 mA (already in the profile from Session 1, documented level; `voltage_max_v = 18` now makes the range explicit). |
+| Pedaltrain **Classic 2** | 24 × 12.5 × 3.5 in (609.6 × 317.5 × 88.9 mm), 3.1 lb, four rails, open front; Pedaltrain states the elevation was raised about 1 in over the PT-2 to clear more supplies. |
+| Pedaltrain **Novo 24** | 24 × 14.5 × 3.5 in (609.6 × 368.3 × 88.9 mm), 3.8 lb, five rails, open front, "elevated height" for supplies and switchers. |
+| Strymon Zuma Mounting Kit | Retailer compatibility lists name Pedaltrain Classic Jr/1/2/Pro, Novo 18/24/32, PT-3/Pro/Grande, Terra 42 and Fly; not for PT-1/PT-2/PT-JR (holes, not an open channel) and not for the Zuma R300. Stored as text on the board spec, never as geometry. |
+
+### Not stated anywhere, therefore unknown in the app
+
+- Rail spacing (centre-to-centre) and rail cross-section of any Pedaltrain board: rails are
+  reported as a count and **never drawn**; bracket fit is not checked
+  (`board.underside_mounting_unverified`).
+- Usable height under the rails: a device under the board is **unverified** until the user enters
+  their own measurement (`Board.underside_clearance_mm`, evidence *user*); only then is a documented
+  device height compared with it.
+- The 24 V Ojai link's current; whether the Zuma dimensions include jacks.
+- Current *draw* of any pedal: profiles carry the manufacturer's **documented minimum requirement**
+  (what they ask a supply to provide). Every planner figure and message says "documented minimum,
+  not measured draw", and nothing is fabricated for pedals whose manuals we have not read
+  (`generic-mono-effect` stays unknown and is listed as such).
+
+### Assumptions the app makes, said out loud
+
+- A device whose footprint fits inside the board perimeter is *not* assumed to fit underneath.
+- Separate outlet ratings are never pooled into a supply total.
+- Devices sharing one outlet are assumed to tolerate a common ground
+  (`power.outlet_shared_assumption`, INFO); the supply's isolation between outlets does not isolate
+  them from each other.
+- Passing every check does not make an installation safe; the planner's footer says so.
+
+## 7. Stack choices
 
 Next.js 16 / React 19 / TypeScript with zustand; plain SVG for the board and the signal
 diagram (predictable geometry, no heavy canvas dependency; React Flow/Konva were evaluated
