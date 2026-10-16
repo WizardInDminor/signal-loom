@@ -9,6 +9,8 @@ import { Badge, Button, Panel } from "@/components/ui/basics";
 type Mc8Result = Awaited<ReturnType<typeof api.rigs.mc8Bank>>;
 type Mc8Inspect = Awaited<ReturnType<typeof api.rigs.inspectMc8>>;
 type MlInspect = Awaited<ReturnType<typeof api.rigs.inspectMl10x>>;
+type DiffResult = Awaited<ReturnType<typeof api.rigs.diffBackups>>;
+type ImportResult = Awaited<ReturnType<typeof api.rigs.importMc8Bank>>;
 
 export function ExportsTab() {
   const { rig, analysis, saving, dirty, conflict, ensureSaved } = useRigStore();
@@ -18,6 +20,11 @@ export function ExportsTab() {
   const [mlInspect, setMlInspect] = useState<MlInspect | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [diffA, setDiffA] = useState<string | null>(null);
+  const [diffB, setDiffB] = useState<string | null>(null);
+  const [diff, setDiff] = useState<DiffResult | null>(null);
+  const [imported, setImported] = useState<ImportResult | null>(null);
+  const { replaceRig } = useRigStore();
   useEffect(() => {
     if (rig) api.rigs.exportStatus(rig.id).then(setStatus).catch((e) => setErr(String(e.message)));
   }, [rig?.id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -126,6 +133,35 @@ export function ExportsTab() {
               <div>Connectors: {mlInspect.connectors.map((c) => `${c.id}:${c.name}`).join(", ")}</div>
               <div>Named presets: {mlInspect.presets.slice(0, 40).map((p) => `${p.global_number} ${p.name}${p.advanced_mode ? " [adv]" : ""}`).join(", ")}{mlInspect.presets.length > 40 ? " …" : ""}</div>
               <div className="text-neutral-500">Routing is not decoded (matrixArray semantics unknown) — this is why no ML10X file is written.</div>
+            </div>
+          )}
+          <h3 className="font-semibold mt-2">Import an MC8 “Current Bank” backup into this rig</h3>
+          <p className="text-neutral-600">PC and CC messages become explicit extra messages on the MC8 plan (no scene mapping); other message types are listed as skipped, never guessed. Exporting the bank again reproduces the same PC/CC bytes.</p>
+          <label className="flex flex-col gap-1">MC8 bank backup (.json)
+            <input type="file" accept=".json,application/json" data-testid="mc8-import-file" onChange={async (e) => { const f = e.target.files?.[0]; if (!f) return; try { const r = await api.rigs.importMc8Bank(rig.id, await f.text()); setImported(r); replaceRig(r.rig); } catch (err) { setErr(`Import failed: ${(err as Error).message}`); } }} />
+          </label>
+          {imported && <p data-testid="mc8-import-result">Imported bank {imported.bank_number} with {imported.imported_presets} preset(s){imported.skipped.length ? `; skipped ${imported.skipped.length} unsupported message(s): ${imported.skipped.map((x) => `${x.position}#${x.slot} ${x.type_name}`).join(", ")}` : ""}. See the Controllers tab.</p>}
+          <h3 className="font-semibold mt-2">Compare two editor backups (MC8 or ML10X)</h3>
+          <p className="text-neutral-600">For controlled experiments: export, change exactly one thing in the Morningstar editor, export again, and see which fields moved. Files are compared locally through this app&apos;s backend only.</p>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="flex flex-col gap-1">Backup A (before)<input type="file" accept=".json,application/json" data-testid="diff-a" onChange={async (e) => { const f = e.target.files?.[0]; setDiffA(f ? await f.text() : null); }} /></label>
+            <label className="flex flex-col gap-1">Backup B (after)<input type="file" accept=".json,application/json" data-testid="diff-b" onChange={async (e) => { const f = e.target.files?.[0]; setDiffB(f ? await f.text() : null); }} /></label>
+          </div>
+          <div><Button disabled={!diffA || !diffB} onClick={async () => { try { setDiff(await api.rigs.diffBackups(diffA!, diffB!)); } catch (e) { setErr((e as Error).message); } }}>Compare</Button></div>
+          {diff && (
+            <div className="border border-line rounded p-2" data-testid="diff-result">
+              {!diff.ok && <div className="text-red-700">{diff.problems.join("; ")}</div>}
+              {diff.ok && (
+                <>
+                  <div>{diff.summary.total} change(s){diff.summary.truncated ? " (truncated)" : ""} · device model {diff.device_model ?? "?"}{diff.same_model === false ? " (models differ!)" : ""}{Object.keys(diff.metadata_differences).length ? ` · metadata: ${Object.keys(diff.metadata_differences).join(", ")}` : ""}</div>
+                  {diff.summary.touched.length > 0 && <div className="text-neutral-600">Touched: {diff.summary.touched.join(", ")}</div>}
+                  <table className="w-full mt-1">
+                    <thead><tr className="text-left text-neutral-500"><th>Where</th><th>Before</th><th>After</th></tr></thead>
+                    <tbody>{diff.changes.slice(0, 200).map((c, i) => <tr key={i} className="border-t border-line"><td className="font-mono text-[10px]">{c.label}</td><td className="font-mono text-[10px]">{JSON.stringify(c.before)}</td><td className="font-mono text-[10px]">{JSON.stringify(c.after)}</td></tr>)}</tbody>
+                  </table>
+                  {diff.changes.length > 200 && <div className="text-neutral-500">Showing the first 200 changes.</div>}
+                </>
+              )}
             </div>
           )}
         </div>

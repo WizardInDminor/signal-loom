@@ -111,11 +111,16 @@ export interface PlacedPort { port_id: string; label: string; kind: SignalKind; 
 export interface CompiledMessage { type: "pc" | "cc"; channel: number; number: number; value: number | null; target_instance_id: string; target_label: string; source_kind: string; scene_id: string; explanation: string; deterministic: boolean; summary: string }
 export interface ScenePlan { scene_id: string; scene_name: string; messages: CompiledMessage[]; manual_steps: string[]; diagnostics: Diagnostic[]; message_count: number }
 export interface SwitchPlan { bank_number: number; position: string; short_name: string; scene_id: string | null; scene_name: string | null; action: string; messages: CompiledMessage[]; extra_messages: Mc8Message[]; manual_steps: string[]; diagnostics: Diagnostic[]; message_count: number; message_limit: number }
+export interface PathStep { node: string; label: string; device: string | null; device_instance_id: string | null; state: "through" | "engaged" | "bypassed" | "return_only" | "missing"; send_jack: string | null; return_jack: string | null; note: string | null }
+export interface ConductorPath { name: string; source: string; steps: PathStep[]; ends_at: string[]; branches: string[][]; complete: boolean; summary: string }
+export interface PresetPaths { preset_number: number; preset_name: string; mode: string; paths: ConductorPath[]; stereo_output: boolean; stereo_input: boolean }
+export interface CableItem { kind: string; description: string; ends: string[]; connection_ids: string[]; length_cm: number | null; notes: string[] }
 export interface Analysis {
   rig_id: string;
   diagnostics: Diagnostic[];
   summary: { errors: number; warnings: number; infos: number };
-  ml10x: { topology: null | { instance_id: string; label: string; input_cabled: boolean; output_cabled: boolean; stereo_pairs: { tip: number; ring: number; label: string }[]; loops: { loop: number; name: string; send_to: string | null; send_to_instance_id: string | null; return_from: string | null; return_from_instance_id: string | null; complete: boolean; occupied: boolean }[] }; diagnostics: Diagnostic[] };
+  ml10x: { topology: null | { instance_id: string; label: string; input_cabled: boolean; output_cabled: boolean; stereo_pairs: { tip: number; ring: number; label: string }[]; loops: { loop: number; name: string; send_to: string | null; send_to_instance_id: string | null; return_from: string | null; return_from_instance_id: string | null; complete: boolean; occupied: boolean }[] }; diagnostics: Diagnostic[]; preset_paths: PresetPaths[] };
+  cable_kit: CableItem[];
   instances: Record<string, { width_mm: number; height_mm: number; placeholder: boolean; ports: PlacedPort[]; effective_ports: PortDef[]; unknowns: string[] }>;
   compiled: { scenes: ScenePlan[]; mc8: { instance_id: string | null; firmware_assumed: string; limits: { banks: number; presets_per_bank: number; messages_per_preset: number; footswitch_positions: string[] }; banks: { number: number; name: string; diagnostics: Diagnostic[]; switches: SwitchPlan[] }[] }; diagnostics: Diagnostic[] };
 }

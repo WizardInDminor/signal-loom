@@ -78,6 +78,34 @@ independently of scenes — a disconnected cable cannot be fixed by a scene chan
 **MIDI reachability** (controller → device, through hardware Thru ports) feeds the compiler so
 that a scene targeting an uncabled device gets a warning.
 
+## Stereo: conductors, paths and cables (Session 2)
+
+The ML10X is modelled per **conductor**: each TRS jack contributes two ports (Tip, Ring)
+sharing a `pair_group`, and each loop conductor is one of ten nodes `L1`..`L10`. A preset is
+a directed graph over the nodes `IN_TIP`, `IN_RING`, `L1`..`L10`, `OUT_TIP`, `OUT_RING`
+(a Simple chain is just `IN_TIP -> ... -> OUT_TIP`). `domain/paths.py` walks the graph from
+each input and from every **return-only** loop (a loop with outgoing edges but none incoming,
+the documented mono-send / stereo-return pattern) and labels each step with the device that
+the cables put into that loop, its Send/Return jack, and whether the preset bypasses it. The
+result is the "Left (Input Tip)" / "Right (…)" path list shown in the Wiring tab, the scene
+editor and the manifest. Edges are checked per direction (`X -> Ln` needs Send n cabled,
+`Ln -> Y` needs Return n cabled); an Output that no path reaches is an error.
+
+`domain/cables.py` turns connections into the physical **cable kit**: both conductors of one
+TRS jack in use → a TRS-to-dual-TS breakout; Tip only → a TS cable; Ring only → a breakout
+with the Tip lead unused; MIDI DIN/TRS/adapter; DC leads. Every connection appears in exactly
+one kit item.
+
+## Document editing in the browser (Session 2)
+
+The store keeps bounded undo/redo stacks of whole-document snapshots; applying one bumps the
+revision like any edit so the save queue and the server's stale-revision rule stay in force.
+Switching to another rig first drains the save queue; if the latest revision cannot be
+saved, the switch is refused and the current document stays in memory with a blocking banner
+(retry, or an explicit discard). `pendingCable` holds a half-made cable while the user drags from a jack; compatibility is
+decided from the same `effective_ports` the backend uses, and the resulting connection is an
+ordinary document edit.
+
 ## Scenes and the compiler
 
 A scene is intent, not bytes. The compiler is deterministic for equal inputs (ordering is
@@ -117,6 +145,10 @@ validation, no overwrite of existing library profiles, fresh rig id unless reque
   and reads/validates any MC8 backup. Only PC/CC messages are emitted; anything else is refused.
 - `ml10x_backup.py` — read-only. The routing matrix of the ML10X backup is undecoded, so no
   writer exists on purpose.
+- `mc8_export.py::bank_dump_to_plan` — imports an editor "Current Bank" file into the MC8 plan
+  as explicit PC/CC messages (other message types are reported, not guessed).
+- `backup_diff.py` — labelled structural diff of two editor backups (any model) for controlled
+  experiments on the undecoded fields.
 
 The core model never depends on these; a future adapter (another controller or switcher) adds
 a module here and a compile target, not a change to scenes or wiring.

@@ -330,3 +330,80 @@ def check_dump(raw: str) -> dict:
         report["banks"].append(banks_entry)
     report["ok"] = not report["problems"]
     return report
+
+
+# --------------------------------------------------------------------------- import to a plan
+
+
+def bank_dump_to_plan(raw: str) -> dict:
+    """Turn an MC8 editor bank backup into a Signal Loom MC8 bank plan (PC/CC messages only).
+
+    Returns {"ok", "problems", "bank": {number, name, presets: [...]}, "skipped": [...]} where each
+    preset carries its PC/CC messages as ``extra_messages``. Message types other than PC/CC
+    (SAMPLE-confirmed codes 1 and 2) are reported in ``skipped`` with their third-party type
+    name, never guessed into something else. Toggle-mode presets are imported with their
+    position codes preserved.
+    """
+    report = check_dump(raw)
+    out: dict[str, Any] = {"ok": False, "problems": list(report["problems"]), "bank": None, "skipped": []}
+    if report["dump_type"] != "singleBank":
+        out["problems"].append(
+            f"expected a singleBank export, got {report['dump_type']!r} (use 'Current Bank' in the editor)"
+        )
+    if out["problems"]:
+        return out
+    bank = json.loads(raw)["data"]["bank"]
+    action_names = {v: k for k, v in specs.MC8_ACTIONS.items()}
+    tg_names = {v: k for k, v in specs.MC8_TOGGLE_POSITIONS.items()}
+    presets = []
+    for p in bank.get("presetArray", []):
+        n = p.get("presetNum")
+        if not isinstance(n, int) or not 0 <= n < specs.MC8_SWITCH_PRESETS_PER_BANK:
+            continue
+        msgs = []
+        for m in p.get("msgArray", []):
+            t = m.get("t", 0)
+            if t == specs.MC8_MSG_TYPE_EMPTY:
+                continue
+            if t not in (specs.MC8_MSG_TYPE_PC, specs.MC8_MSG_TYPE_CC):
+                out["skipped"].append(
+                    {
+                        "position": specs.MC8_POSITIONS[n],
+                        "slot": m.get("m"),
+                        "type_code": t,
+                        "type_name": specs.MC8_MSG_TYPE_NAMES_THIRD_PARTY.get(t, f"type {t}"),
+                    }
+                )
+                continue
+            msgs.append(
+                {
+                    "type": "pc" if t == specs.MC8_MSG_TYPE_PC else "cc",
+                    "channel": int(m.get("c", 1)),
+                    "number": int(m.get("d1", 0)),
+                    "value": int(m.get("d2", 0)) if t == specs.MC8_MSG_TYPE_CC else None,
+                    "action": action_names.get(m.get("a", 1), "press"),
+                    "toggle_position": tg_names.get(m.get("tg", 2), "both"),
+                    "label": None,
+                }
+            )
+        if not (p.get("shortName") or msgs):
+            continue
+        presets.append(
+            {
+                "position": specs.MC8_POSITIONS[n],
+                "short_name": str(p.get("shortName", ""))[: specs.MC8_SHORT_NAME_MAX],
+                "long_name": str(p.get("longName") or "") or None,
+                "toggle_name": str(p.get("toggleName") or "") or None,
+                "toggle_mode": bool(p.get("toToggle", False)),
+                "scene_id": None,
+                "action": "press",
+                "extra_messages": msgs,
+            }
+        )
+    out["bank"] = {
+        "number": int(bank.get("bankNumber", 0)) + 1,
+        "name": str(bank.get("bankName", "")),
+        "presets": presets,
+    }
+    out["ok"] = True
+    return out

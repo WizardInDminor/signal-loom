@@ -39,7 +39,7 @@ class RigRepository:
             "SELECT r.id, r.name, r.description, r.created_at, r.updated_at, r.revision, "
             "(SELECT COUNT(*) FROM device_instances i WHERE i.rig_id = r.id) AS n_inst, "
             "(SELECT COUNT(*) FROM scenes s WHERE s.rig_id = r.id) AS n_scenes "
-            "FROM rigs r ORDER BY r.updated_at DESC"
+            "FROM rigs r ORDER BY r.updated_at DESC, r.rowid ASC"
         ).fetchall()
         return [
             RigSummary(

@@ -4,6 +4,9 @@ import { useRigStore } from "@/store/rigStore";
 import type { DeviceInstance, Rotation } from "@/lib/types";
 import { Badge, Button, DiagnosticList, EvidenceBadge, Field, Panel } from "@/components/ui/basics";
 import { PortEditor } from "./PortEditor";
+import { JackEditor } from "./JackEditor";
+import { useState } from "react";
+import type { PortDef } from "@/lib/types";
 
 export function InstanceInspector() {
   const { rig, analysis, profiles, selectedInstanceId, update, removeInstance } = useRigStore();
@@ -13,6 +16,12 @@ export function InstanceInspector() {
   const geo = analysis?.instances[inst.id];
   const diags = analysis?.diagnostics.filter((d) => d.subject_id === inst.id || d.related_ids.includes(inst.id)) ?? [];
   const edit = (fn: (i: DeviceInstance) => void) => update((r) => { const k = r.instances.find((x) => x.id === inst.id); if (k) fn(k); });
+  const savePort = (port: PortDef) =>
+    edit((k) => {
+      const idx = k.port_overrides.findIndex((p) => p.id === port.id);
+      if (idx >= 0) k.port_overrides[idx] = port;
+      else k.port_overrides.push(port);
+    });
 
   return (
     <Panel title="Device inspector" actions={<Button variant="danger" onClick={() => window.confirm(`Remove "${inst.label}" and its cables?`) && removeInstance(inst.id)}>Remove</Button>}>
@@ -31,7 +40,7 @@ export function InstanceInspector() {
           </Field>
         </div>
         <div className="text-neutral-600">
-          Footprint: {geo ? `${geo.width_mm} × ${geo.height_mm} mm (rotated)` : "?"}{" "}
+          Footprint: {geo ? `${Math.round(geo.width_mm * 10) / 10} × ${Math.round(geo.height_mm * 10) / 10} mm (rotated)` : "?"}{" "}
           {profile && <EvidenceBadge evidence={profile.footprint.width.evidence} />}{" "}
           {profile?.footprint.includes_jacks === null && <Badge tone="warn">jack inclusion unknown</Badge>}
         </div>
@@ -56,6 +65,10 @@ export function InstanceInspector() {
         ) : (
           <div className="text-neutral-600">Power requirement: <Badge tone="bad">unknown</Badge></div>
         )}
+        <div>
+          <h3 className="font-semibold mb-1">Jack positions (drag on the outline)</h3>
+          <JackEditorForInstance inst={inst} onChange={savePort} />
+        </div>
         <PortEditor inst={inst} />
         <div>
           <h3 className="font-semibold mb-1">Diagnostics for this device</h3>
@@ -63,5 +76,21 @@ export function InstanceInspector() {
         </div>
       </div>
     </Panel>
+  );
+}
+
+
+function JackEditorForInstance({ inst, onChange }: { inst: DeviceInstance; onChange: (p: PortDef) => void }) {
+  const { analysis, profiles } = useRigStore();
+  const [sel, setSel] = useState<string | null>(null);
+  const prof = profiles[inst.profile_id];
+  const ports = analysis?.instances[inst.id]?.effective_ports ?? [];
+  const w = prof?.footprint.width.value_mm ?? 70;
+  const d = prof?.footprint.depth.value_mm ?? 120;
+  return (
+    <div className="flex flex-col gap-1">
+      <JackEditor widthMm={w} depthMm={d} ports={ports} onChange={onChange} selectedId={sel} onSelect={setSel} />
+      <p className="text-[11px] text-neutral-500">Unrotated device frame. Dashed jacks have no documented position; dragging stores a user-specified position on this instance only.</p>
+    </div>
   );
 }

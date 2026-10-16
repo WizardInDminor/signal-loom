@@ -5,7 +5,7 @@ import type { DeviceSceneState, Scene } from "@/lib/types";
 import { Badge, Button, DiagnosticList, Field, Panel } from "@/components/ui/basics";
 
 export function ScenesTab() {
-  const { rig, analysis, profiles, selectedSceneId, selectScene, addScene, removeScene, update } = useRigStore();
+  const { rig, analysis, profiles, selectedSceneId, selectScene, addScene, duplicateScene, removeScene, update, assignSceneToSwitch } = useRigStore();
   if (!rig) return null;
   const scenes = [...rig.scenes].sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
   const scene = rig.scenes.find((s) => s.id === selectedSceneId) ?? scenes[0];
@@ -33,6 +33,16 @@ export function ScenesTab() {
       sorted.forEach((x, k) => { x.order = k; });
     });
   const loopNames = analysis?.ml10x.topology?.loops ?? [];
+  const assignment = scene ? rig.controllers.mc8.banks.flatMap((b) => b.presets.filter((p) => p.scene_id === scene.id).map((p) => ({ bank: b.number, position: p.position }))) : [];
+  const positions = analysis?.compiled.mc8.limits.footswitch_positions ?? "ABCDEFGHIJKLMNOP".split("");
+  const switchOptions = (rig.controllers.mc8.banks.length ? rig.controllers.mc8.banks : [{ number: 1, name: "Bank 1", presets: [] }]).flatMap((b) =>
+    positions.map((pos) => {
+      const taken = b.presets.find((p) => p.position === pos);
+      const takenBy = taken?.scene_id && taken.scene_id !== scene?.id ? rig.scenes.find((s) => s.id === taken.scene_id)?.name : null;
+      return { value: `${b.number}:${pos}`, label: `Bank ${b.number} · ${pos}${takenBy ? ` (used by ${takenBy})` : taken?.short_name && !taken.scene_id ? ` (${taken.short_name})` : ""}`, disabled: !!takenBy };
+    }),
+  );
+  const presetSummary = analysis?.ml10x.preset_paths.find((pp) => pp.preset_number === scene?.ml10x.preset_number);
 
   return (
     <div className="grid lg:grid-cols-[220px_1fr_1fr] gap-3 items-start">
@@ -53,8 +63,14 @@ export function ScenesTab() {
       </Panel>
       {scene ? (
         <>
-          <Panel title="Desired state" actions={<Button variant="danger" onClick={() => window.confirm(`Delete scene "${scene.name}"?`) && removeScene(scene.id)}>Delete</Button>}>
+          <Panel title="Desired state" actions={<div className="flex gap-1"><Button onClick={() => duplicateScene(scene.id)}>Duplicate</Button><Button variant="danger" onClick={() => window.confirm(`Delete scene "${scene.name}"?`) && removeScene(scene.id)}>Delete</Button></div>}>
             <div className="flex flex-col gap-2 text-xs">
+              <Field label="MC8 switch (bank · position)" hint={rig.controllers.mc8.instance_id ? "Assigning here updates the Controllers tab; a switch already used by another scene cannot be chosen." : "Assign an MC8 instance in the Controllers tab to compile a switch plan."}>
+                <select aria-label="MC8 switch" value={assignment[0] ? `${assignment[0].bank}:${assignment[0].position}` : ""} onChange={(e) => { const [b, pos] = e.target.value.split(":"); assignSceneToSwitch(scene.id, Number(b || 1), pos ?? ""); }}>
+                  <option value="">— not assigned —</option>
+                  {switchOptions.map((o) => <option key={o.value} value={o.value} disabled={o.disabled}>{o.label}</option>)}
+                </select>
+              </Field>
               <div className="grid grid-cols-3 gap-2">
                 <Field label="Name"><input value={scene.name} onChange={(e) => edit((s) => { s.name = e.target.value; })} /></Field>
                 <Field label="Song"><input value={scene.song ?? ""} onChange={(e) => edit((s) => { s.song = e.target.value || null; })} /></Field>
@@ -69,6 +85,11 @@ export function ScenesTab() {
                     {scene.ml10x.preset_number != null && !ml.presets.some((p) => p.number === scene.ml10x.preset_number) && <option value={scene.ml10x.preset_number}>{scene.ml10x.preset_number}: (undefined preset)</option>}
                   </select>
                 </Field>
+                {presetSummary && (
+                  <ul className="mt-1 text-[11px] text-neutral-600" data-testid="scene-preset-paths">
+                    {presetSummary.paths.map((path) => <li key={path.name}><b>{path.name}:</b> {path.summary}</li>)}
+                  </ul>
+                )}
                 <div className="mt-1">
                   <span className="text-neutral-600">Per-loop state via CC (Simple presets only): </span>
                   <div className="flex flex-wrap gap-1 mt-1">
@@ -99,7 +120,10 @@ export function ScenesTab() {
                       return (
                         <tr key={i.id} className="border-t border-line align-top">
                           <td className="py-1">{i.label}<div className="text-[10px] text-neutral-500">{hasMidi ? `MIDI ch ${i.midi_channel ?? prof?.midi.default_channel ?? "?"}` : "no MIDI — manual"}</div></td>
-                          <td>{hasMidi && <input aria-label={`${i.label} program`} type="number" min={0} max={127} className="w-16" value={st?.program?.pc ?? ""} onChange={(e) => setState(i.id, (d) => { d.program = e.target.value === "" ? null : { pc: Number(e.target.value), bank_msb: d.program?.bank_msb ?? null, bank_lsb: d.program?.bank_lsb ?? null }; })} />}</td>
+                          <td>
+                            {hasMidi && <input aria-label={`${i.label} program`} type="number" min={prof?.midi.program_change.min ?? 0} max={prof?.midi.program_change.max ?? 127} className="w-16" value={st?.program?.pc ?? ""} onChange={(e) => setState(i.id, (d) => { d.program = e.target.value === "" ? null : { pc: Number(e.target.value), bank_msb: d.program?.bank_msb ?? null, bank_lsb: d.program?.bank_lsb ?? null }; })} />}
+                            {hasMidi && st?.program && <div className="text-[10px] text-neutral-500">{prof?.midi.program_change.display_numbering === "one_based" ? `shown as preset ${st.program.pc + 1} on the device` : `PC ${st.program.pc} (zero-based)`}{prof?.midi.program_change.supported === null ? " · PC support unverified" : ""}</div>}
+                          </td>
                           <td>{hasMidi && st?.program && <input aria-label={`${i.label} bank MSB`} type="number" min={0} max={127} className="w-14" value={st.program.bank_msb ?? ""} onChange={(e) => setState(i.id, (d) => { if (d.program) d.program.bank_msb = e.target.value === "" ? null : Number(e.target.value); })} />}</td>
                           <td>
                             <select aria-label={`${i.label} state`} value={st?.enabled === true ? "on" : st?.enabled === false ? "off" : ""} onChange={(e) => setState(i.id, (d) => { d.enabled = e.target.value === "" ? null : e.target.value === "on"; })}>

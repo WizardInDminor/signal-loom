@@ -92,6 +92,18 @@ analysed:
 - Contradictions recorded: CC 30–39 output-cut polarity; preset name 16 vs 12 bytes; "Mute"
   semantics.
 
+### ML10X routing field: Session 2 analysis
+
+The one real backup available locally (512 presets) contains only three non-empty presets;
+their `matrixArray` entries (`{"0": [4,0,0]}`, `{"0": [0,64,0], "2": [4,0,0], "3": [2,0,0],
+"8": [1,0,0]}`, …) do not map onto the 14-connector numbering in any consistent way, and a
+third-party wire-format note says the device rebuilds this matrix from per-connector chain
+segments that the JSON backup does not include. With three samples and no controlled pair of
+exports there is no basis for a decoder. Session 2 therefore ships the **backup comparison
+tool** (`POST /api/rigs/inspect/backup-diff`, Exports tab) so the user can produce the
+controlled pairs (change one loop, export again) that a decoder would need. Status unchanged:
+**blocked**, read-only inspector only.
+
 ### ML10X editor backup format — blocked for writing
 
 One real `dumpType: full` backup (deviceModel 7, 4 × 128 presets, 14 named connectors,
@@ -101,6 +113,14 @@ encodes the routing and **nobody public has decoded it**; the file `hash` algori
 model is unverified. Therefore Signal Loom does **not** write ML10X files. It ships a defensive
 *reader* (`POST /api/rigs/inspect/ml10x-backup`) validated locally against that file (not
 committed because of its license) and a synthetic-shape test. Native ML10X export status: **blocked**.
+
+### MC8 bank import (Session 2)
+
+`bank_dump_to_plan` reads an editor "Current Bank" file into Signal Loom's MC8 plan. On the
+real public fixture (`Mainstage FX`) every PC/CC message slot round-trips byte-for-byte through
+export (`test_real_mc8_bank_round_trip`). Message types other than PC/CC are listed as skipped
+with their third-party type name. Evidence level for import: **fixture-validated** on PC/CC
+content; names are carried verbatim; expression presets and bank messages are not imported.
 
 ## 5. What the user can do to raise the evidence level
 
@@ -127,4 +147,4 @@ committed because of its license) and a synthetic-shape test. Native ML10X expor
 Next.js 16 / React 19 / TypeScript with zustand; plain SVG for the board and the signal
 diagram (predictable geometry, no heavy canvas dependency; React Flow/Konva were evaluated
 and rejected for Session 1 as unnecessary). FastAPI + Pydantic v2 + SQLite with file-based
-migrations. Pytest (50 tests) and Playwright (12 scenarios) cover the rules and the demo path.
+migrations. Pytest (64 tests) and Playwright (20 scenarios) cover the rules and the demo path.
