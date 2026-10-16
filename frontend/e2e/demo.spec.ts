@@ -88,10 +88,14 @@ test("wiring: an incompatible connection is flagged, not silently accepted", asy
   await expect(page.getByText(/DIN to TRS MIDI needs an adapter cable/).first()).toBeVisible();
   // Audio into a MIDI jack is impossible: the form only offers same-kind ports, and the
   // backend rejects a cross-kind cable if one is forced through the API.
+  // Let the page's own (debounced) save of the new cable land first, so the forced PUT below is not
+  // refused as a stale revision and silently leaves the rig without the bad cable.
+  await expect(page.getByText("Saved", { exact: true })).toBeVisible({ timeout: 10_000 });
   const rigId = page.url().split("/rigs/")[1].split("#")[0];
   const rig = await (await page.request.get(`/api/rigs/${rigId}`)).json();
   rig.connections.push({ id: "conn_bad", kind: "audio", source: { instance_id: "inst_guitar", port_id: "out" }, target: { instance_id: "inst_mc8", port_id: "midi_in" }, intentional: false });
-  await page.request.put(`/api/rigs/${rigId}`, { data: rig });
+  rig.revision += 1;
+  expect((await page.request.put(`/api/rigs/${rigId}`, { data: rig })).ok()).toBeTruthy();
   const analysis = await (await page.request.get(`/api/rigs/${rigId}/analysis`)).json();
   expect(analysis.diagnostics.some((d: { code: string }) => d.code === "connection.kind_mismatch")).toBeTruthy();
 });
