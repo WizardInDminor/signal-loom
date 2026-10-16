@@ -96,7 +96,7 @@ export interface Mc8Preset { position: string; short_name: string; long_name?: s
 export interface Mc8Bank { number: number; name: string; presets: Mc8Preset[] }
 export interface Ml10xPreset { number: number; name: string; mode: "simple" | "advanced"; chain: number[]; bypassed_loops: number[]; advanced_edges: string[][]; notes?: string | null }
 export interface Rig {
-  id: string; name: string; description?: string | null; created_at: string; updated_at: string;
+  id: string; name: string; description?: string | null; created_at: string; updated_at: string; revision: number;
   board: Board; instances: DeviceInstance[]; connections: Connection[]; scenes: Scene[];
   controllers: {
     mc8: { instance_id: string | null; banks: Mc8Bank[]; firmware_version: string | null };
@@ -104,7 +104,7 @@ export interface Rig {
   };
   notes?: string | null;
 }
-export interface RigSummary { id: string; name: string; description?: string | null; created_at: string; updated_at: string; instance_count: number; scene_count: number }
+export interface RigSummary { id: string; name: string; description?: string | null; created_at: string; updated_at: string; revision: number; instance_count: number; scene_count: number }
 
 export interface Diagnostic { code: string; severity: Severity; message: string; subject_type: string; subject_id: string | null; related_ids: string[] }
 export interface PlacedPort { port_id: string; label: string; kind: SignalKind; direction: PortDirection; x_mm: number; y_mm: number; edge: Edge; estimated: boolean; plug_clearance_mm: number | null; role: string | null; loop: number | null }

@@ -188,6 +188,10 @@ class Rig(StrictModel):
     description: str | None = None
     created_at: str = Field(default_factory=utcnow_iso)
     updated_at: str = Field(default_factory=utcnow_iso)
+    # Monotonic per-rig revision. Every client edit increments it; the server refuses a PUT
+    # whose revision is lower than the stored one, so a late, out-of-order save can never
+    # overwrite newer state and a second browser tab is told the rig changed elsewhere.
+    revision: int = Field(default=0, ge=0)
     board: Board = Field(default_factory=Board)
     instances: list[DeviceInstance] = Field(default_factory=list)
     connections: list[Connection] = Field(default_factory=list)
@@ -214,6 +218,7 @@ class RigSummary(StrictModel):
     description: str | None = None
     created_at: str
     updated_at: str
+    revision: int = 0
     instance_count: int
     scene_count: int
 

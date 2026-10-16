@@ -127,4 +127,4 @@ committed because of its license) and a synthetic-shape test. Native ML10X expor
 Next.js 16 / React 19 / TypeScript with zustand; plain SVG for the board and the signal
 diagram (predictable geometry, no heavy canvas dependency; React Flow/Konva were evaluated
 and rejected for Session 1 as unnecessary). FastAPI + Pydantic v2 + SQLite with file-based
-migrations. Pytest (47 tests) and Playwright (9 scenarios) cover the rules and the demo path.
+migrations. Pytest (50 tests) and Playwright (12 scenarios) cover the rules and the demo path.

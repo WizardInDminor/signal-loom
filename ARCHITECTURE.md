@@ -19,6 +19,15 @@ same document, so moving a pedal on the board moves the same `DeviceInstance` th
 planner cables and the scene compiler addresses. Live feedback comes from
 `POST /api/rigs/analyze`, which runs the full analysis on the unsaved document.
 
+**Save ordering.** Every edit increments the document's `revision`. The store runs a
+single-writer queue: at most one PUT is in flight, and when it returns the queue sends the
+newest document again if a newer revision appeared meanwhile, so "Saved" is shown only once
+the latest revision is confirmed. The server refuses a PUT whose revision is lower than the
+stored one (`409 stale_revision`), which makes a late, out-of-order write harmless and tells a
+second tab that the rig changed elsewhere. On page unload the newest document is flushed with
+a keepalive request. Exports are computed server-side from the persisted rig, so the Exports
+tab awaits a confirmed save before producing any file and blocks the download if saving fails.
+
 ## Three layers, common ids
 
 1. **Physical layout and ports** — `Board`, `DeviceInstance` (x/y/rotation, off-board flag,

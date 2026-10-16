@@ -36,7 +36,7 @@ class RigRepository:
     # -- rigs -----------------------------------------------------------------------
     def list(self) -> list[RigSummary]:
         rows = self.db.conn.execute(
-            "SELECT r.id, r.name, r.description, r.created_at, r.updated_at, "
+            "SELECT r.id, r.name, r.description, r.created_at, r.updated_at, r.revision, "
             "(SELECT COUNT(*) FROM device_instances i WHERE i.rig_id = r.id) AS n_inst, "
             "(SELECT COUNT(*) FROM scenes s WHERE s.rig_id = r.id) AS n_scenes "
             "FROM rigs r ORDER BY r.updated_at DESC"
@@ -48,6 +48,7 @@ class RigRepository:
                 description=r["description"],
                 created_at=r["created_at"],
                 updated_at=r["updated_at"],
+                revision=r["revision"],
                 instance_count=r["n_inst"],
                 scene_count=r["n_scenes"],
             )
@@ -77,6 +78,7 @@ class RigRepository:
             description=row["description"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
+            revision=row["revision"],
             board=Board.model_validate(json.loads(row["board"])),
             controllers=Controllers.model_validate(json.loads(row["controllers"])),
             notes=row["notes"],
@@ -95,10 +97,10 @@ class RigRepository:
         with self.db.tx() as c:
             c.execute(
                 "INSERT INTO rigs(id, name, description, board, controllers, notes, created_at, "
-                "updated_at) VALUES (?,?,?,?,?,?,?,?) "
+                "updated_at, revision) VALUES (?,?,?,?,?,?,?,?,?) "
                 "ON CONFLICT(id) DO UPDATE SET name=excluded.name, description=excluded.description, "
                 "board=excluded.board, controllers=excluded.controllers, notes=excluded.notes, "
-                "updated_at=excluded.updated_at",
+                "updated_at=excluded.updated_at, revision=excluded.revision",
                 (
                     rig.id,
                     rig.name,
@@ -108,6 +110,7 @@ class RigRepository:
                     rig.notes,
                     rig.created_at,
                     rig.updated_at,
+                    rig.revision,
                 ),
             )
             self._sync_children(

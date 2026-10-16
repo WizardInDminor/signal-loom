@@ -195,9 +195,55 @@ def test_catalog_custom_device_crud_and_pedalplayground_import(client):
 
 def test_migrations_are_idempotent(tmp_path):
     db = Database(tmp_path / "m.sqlite3")
-    assert db.migrate() == ["0001_initial"]
+    assert db.migrate() == ["0001_initial", "0002_rig_revision"]
     assert db.migrate() == []
     seed(db)
     seed(db)
     assert len(RigRepository(db).list()) == 1
     db.close()
+
+
+def test_put_rejects_stale_revision_and_accepts_newer(client):
+    rig_id = client.get("/api/rigs").json()[0]["id"]
+    rig = client.get(f"/api/rigs/{rig_id}").json()
+    assert rig["revision"] == 0
+    newer = dict(rig, revision=2, name="rev 2")
+    older = dict(rig, revision=1, name="rev 1 (late)")
+    assert client.put(f"/api/rigs/{rig_id}", json=newer).status_code == 200
+    r = client.put(f"/api/rigs/{rig_id}", json=older)
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "stale_revision"
+    assert client.get(f"/api/rigs/{rig_id}").json()["name"] == "rev 2"
+    # Equal revision (same client retrying) and higher revisions are accepted.
+    assert client.put(f"/api/rigs/{rig_id}", json=dict(newer, name="rev 2 again")).status_code == 200
+    assert client.put(f"/api/rigs/{rig_id}", json=dict(newer, revision=3, name="rev 3")).status_code == 200
+    assert client.get(f"/api/rigs/{rig_id}").json()["revision"] == 3
+    # Duplicates and imports start a fresh revision line.
+    assert client.post(f"/api/rigs/{rig_id}/duplicate").json()["revision"] == 0
+
+
+def test_revision_survives_restart(db_path):
+    with TestClient(create_app(db_path)) as c:
+        rig_id = c.get("/api/rigs").json()[0]["id"]
+        rig = c.get(f"/api/rigs/{rig_id}").json()
+        c.put(f"/api/rigs/{rig_id}", json=dict(rig, revision=7))
+    with TestClient(create_app(db_path)) as c2:
+        assert c2.get(f"/api/rigs/{rig_id}").json()["revision"] == 7
+        assert c2.get("/api/rigs").json()[0]["revision"] == 7
+
+
+def test_mc8_bank_export_refused_on_wiring_errors_even_when_bank_compiles(client):
+    rig_id = client.get("/api/rigs").json()[0]["id"]
+    rig = client.get(f"/api/rigs/{rig_id}").json()
+    rig["connections"] = [c for c in rig["connections"] if c.get("label") != "Plumes -> Return A"]
+    assert client.put(f"/api/rigs/{rig_id}", json=rig).status_code == 200
+    compiled = client.get(f"/api/rigs/{rig_id}/exports/compiled.json").json()
+    bank = compiled["mc8"]["banks"][0]
+    # The switch plan itself still compiles without errors...
+    assert not any(d["severity"] == "error" for s in bank["switches"] for d in s["diagnostics"])
+    # ...but the physical rig is broken, so the native export is refused and says why.
+    r = client.get(f"/api/rigs/{rig_id}/exports/mc8-bank/1")
+    assert r.status_code == 409
+    codes = {d["code"] for d in r.json()["detail"]["diagnostics"]}
+    assert "switcher.loop_open" in codes
+    # Human-readable reports stay available so the user can see what to fix.
+    assert client.get(f"/api/rigs/{rig_id}/exports/scenes.md").status_code == 200

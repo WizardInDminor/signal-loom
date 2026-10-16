@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, downloadText } from "@/lib/api";
+import { api, ApiError, downloadText } from "@/lib/api";
 import { useRigStore } from "@/store/rigStore";
 import type { ExportStatus } from "@/lib/types";
 import { Badge, Button, Panel } from "@/components/ui/basics";
@@ -11,20 +11,43 @@ type Mc8Inspect = Awaited<ReturnType<typeof api.rigs.inspectMc8>>;
 type MlInspect = Awaited<ReturnType<typeof api.rigs.inspectMl10x>>;
 
 export function ExportsTab() {
-  const { rig, analysis } = useRigStore();
+  const { rig, analysis, saving, dirty, conflict, ensureSaved } = useRigStore();
   const [status, setStatus] = useState<ExportStatus | null>(null);
   const [mc8, setMc8] = useState<Record<number, Mc8Result | { error: string }>>({});
   const [mc8Inspect, setMc8Inspect] = useState<Mc8Inspect | null>(null);
   const [mlInspect, setMlInspect] = useState<MlInspect | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   useEffect(() => {
     if (rig) api.rigs.exportStatus(rig.id).then(setStatus).catch((e) => setErr(String(e.message)));
   }, [rig?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!rig) return null;
-  const fetchText = async (path: string, filename: string, type = "text/markdown") => {
-    const res = await fetch(path);
-    downloadText(filename, await res.text(), type);
+  // Every export is computed server-side from the persisted rig, so the latest revision must be
+  // confirmed saved first. A failed save blocks the download instead of handing out stale data.
+  const withSaved = async (action: () => Promise<void>) => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const ok = await ensureSaved();
+      if (!ok) {
+        setErr("Export blocked: the latest edits could not be saved, so the export would not match what you see. Fix the save error first.");
+        return;
+      }
+      await action();
+    } catch (e) {
+      setErr(`Export failed: ${(e as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
   };
+  const fetchText = (path: string, filename: string, type = "text/markdown") =>
+    withSaved(async () => {
+      const res = await fetch(path);
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      downloadText(filename, await res.text(), type);
+    });
+  const errorCount = analysis?.summary.errors ?? 0;
+  const exportsLocked = busy || conflict;
   const safe = rig.name.replace(/[^a-z0-9-_ ]/gi, "_");
   const levelTone = (l: string) => (l === "hardware_validated" || l === "editor_validated" ? "ok" : l === "fixture_validated" ? "warn" : l === "blocked" ? "bad" : "neutral");
 
@@ -32,18 +55,20 @@ export function ExportsTab() {
     <div className="grid lg:grid-cols-2 gap-3 items-start">
       <Panel title="Human-readable configuration package">
         <div className="flex flex-col gap-2 text-xs">
-          <p className="text-neutral-600">Everything here is derived from the single rig model and refreshes with your edits.</p>
+          <p className="text-neutral-600">Everything here is derived from the single rig model. Pending edits are saved and confirmed before any file is produced, so a download always matches what you see.</p>
+          <p className="text-neutral-500" aria-live="polite" data-testid="export-save-state">{saving ? "Saving latest edits…" : dirty ? "Unsaved edits will be saved before export." : `Saved (revision ${rig.revision}).`}</p>
+          {err && <p role="alert" data-testid="export-error" className="text-red-700">{err}</p>}
           <div className="flex flex-wrap gap-2">
-            <Button onClick={() => fetchText(`/api/rigs/${rig.id}/exports/wiring.md`, `${safe}-wiring.md`)}>Wiring manifest (.md)</Button>
-            <Button onClick={() => fetchText(`/api/rigs/${rig.id}/exports/wiring.csv`, `${safe}-wiring.csv`, "text/csv")}>Wiring manifest (.csv)</Button>
-            <Button onClick={() => fetchText(`/api/rigs/${rig.id}/exports/scenes.md`, `${safe}-scenes.md`)}>Scene & action report (.md)</Button>
-            <Button onClick={() => fetchText(`/api/rigs/${rig.id}/exports/mc8-switch-map.md`, `${safe}-mc8-switch-map.md`)}>MC8 switch map (.md)</Button>
-            <Button onClick={() => fetchText(`/api/rigs/${rig.id}/exports/mc8-switch-map.csv`, `${safe}-mc8-switch-map.csv`, "text/csv")}>MC8 switch map (.csv)</Button>
-            <Button onClick={() => fetchText(`/api/rigs/${rig.id}/exports/compiled.json`, `${safe}-compiled.json`, "application/json")}>Compiled plan (.json)</Button>
+            <Button disabled={exportsLocked} onClick={() => fetchText(`/api/rigs/${rig.id}/exports/wiring.md`, `${safe}-wiring.md`)}>Wiring manifest (.md)</Button>
+            <Button disabled={exportsLocked} onClick={() => fetchText(`/api/rigs/${rig.id}/exports/wiring.csv`, `${safe}-wiring.csv`, "text/csv")}>Wiring manifest (.csv)</Button>
+            <Button disabled={exportsLocked} onClick={() => fetchText(`/api/rigs/${rig.id}/exports/scenes.md`, `${safe}-scenes.md`)}>Scene & action report (.md)</Button>
+            <Button disabled={exportsLocked} onClick={() => fetchText(`/api/rigs/${rig.id}/exports/mc8-switch-map.md`, `${safe}-mc8-switch-map.md`)}>MC8 switch map (.md)</Button>
+            <Button disabled={exportsLocked} onClick={() => fetchText(`/api/rigs/${rig.id}/exports/mc8-switch-map.csv`, `${safe}-mc8-switch-map.csv`, "text/csv")}>MC8 switch map (.csv)</Button>
+            <Button disabled={exportsLocked} onClick={() => fetchText(`/api/rigs/${rig.id}/exports/compiled.json`, `${safe}-compiled.json`, "application/json")}>Compiled plan (.json)</Button>
           </div>
           <h3 className="font-semibold mt-2">Signal Loom project file</h3>
           <p className="text-neutral-600">Versioned JSON with the rig and every device profile it uses. Re-import it from the Rigs page.</p>
-          <div><Button variant="primary" onClick={async () => downloadText(`${safe}.signal-loom.json`, JSON.stringify(await api.rigs.exportProject(rig.id), null, 2), "application/json")}>Export project (.signal-loom.json)</Button></div>
+          <div><Button variant="primary" disabled={exportsLocked} onClick={() => withSaved(async () => downloadText(`${safe}.signal-loom.json`, JSON.stringify(await api.rigs.exportProject(rig.id), null, 2), "application/json"))}>Export project (.signal-loom.json)</Button></div>
         </div>
       </Panel>
       <Panel title="Native Morningstar formats — evidence levels">
@@ -61,9 +86,14 @@ export function ExportsTab() {
           )}
           <h3 className="font-semibold mt-2">MC8 editor bank backup (.json)</h3>
           <p className="text-neutral-600">Shape and integrity hash reproduced from real editor exports, but <b>never loaded into the official editor or an MC8 by us</b>. Before trying: back up your MC8 with the editor (Controller Backup → All Banks), then restore this file as a <em>single bank</em> and inspect it in the editor before saving to the controller.</p>
+          {errorCount > 0 && (
+            <p className="text-red-700" data-testid="native-export-blocked">
+              The rig has {errorCount} error-level diagnostic{errorCount === 1 ? "" : "s"} (board, wiring, ML10X, MIDI or compile). The native export is refused until they are fixed; the human-readable reports above still work and list them.
+            </p>
+          )}
           <div className="flex flex-wrap gap-2">
             {rig.controllers.mc8.banks.map((b) => (
-              <Button key={b.number} onClick={async () => { try { setMc8((m) => ({ ...m, [b.number]: { error: "…" } })); const r = await api.rigs.mc8Bank(rig.id, b.number); setMc8((m) => ({ ...m, [b.number]: r })); } catch (e) { setMc8((m) => ({ ...m, [b.number]: { error: (e as Error).message } })); } }}>
+              <Button key={b.number} disabled={exportsLocked || errorCount > 0} onClick={() => withSaved(async () => { setMc8((m) => ({ ...m, [b.number]: { error: "…" } })); try { const r = await api.rigs.mc8Bank(rig.id, b.number); setMc8((m) => ({ ...m, [b.number]: r })); } catch (e) { const d = (e as ApiError).detail as { message?: string; diagnostics?: { message: string }[] } | string; const text = typeof d === "object" && d?.diagnostics ? `${d.message} ${d.diagnostics.map((x) => x.message).join(" ")}` : (e as Error).message; setMc8((m) => ({ ...m, [b.number]: { error: text } })); } })}>
                 Prepare bank {b.number} “{b.name}”
               </Button>
             ))}
@@ -71,7 +101,7 @@ export function ExportsTab() {
           </div>
           {Object.entries(mc8).map(([n, r]) => (
             <div key={n} className="border border-line rounded p-2">
-              {"error" in r ? <span className="text-red-700">Bank {n}: {r.error}</span> : (
+              {"error" in r ? <span className="text-red-700" data-testid={`mc8-bank-error-${n}`}>Bank {n}: {r.error}</span> : (
                 <div className="flex flex-col gap-1">
                   <div>Bank {n}: <code>{r.filename}</code> · self-check {r.self_check.ok ? <Badge tone="ok">structure + hash OK</Badge> : <Badge tone="bad">{r.self_check.problems.join("; ")}</Badge>} · <Badge tone="warn">{r.evidence_level.replace("_", " ")}</Badge></div>
                   <Button variant="primary" onClick={() => downloadText(r.filename, JSON.stringify(r.dump), "application/json")}>Download {r.filename}</Button>
@@ -98,7 +128,6 @@ export function ExportsTab() {
               <div className="text-neutral-500">Routing is not decoded (matrixArray semantics unknown) — this is why no ML10X file is written.</div>
             </div>
           )}
-          {analysis && analysis.summary.errors > 0 && <p className="text-red-700">The rig has {analysis.summary.errors} error(s); native export is refused until they are fixed.</p>}
         </div>
       </Panel>
     </div>

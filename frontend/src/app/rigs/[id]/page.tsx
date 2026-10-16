@@ -16,7 +16,7 @@ type Tab = (typeof TABS)[number];
 
 export default function RigPage() {
   const { id } = useParams<{ id: string }>();
-  const { rig, analysis, loading, error, saving, dirty, load, clearError, update, flush } = useRigStore();
+  const { rig, analysis, loading, error, saving, dirty, conflict, load, clearError, update, flush } = useRigStore();
   const [tab, setTab] = useState<Tab>("board");
 
   useEffect(() => {
@@ -46,7 +46,10 @@ export default function RigPage() {
           value={rig.name}
           onChange={(e) => update((r) => { r.name = e.target.value; })}
         />
-        <span className="text-xs text-neutral-500" aria-live="polite">{saving ? "Saving…" : dirty ? "Unsaved changes" : "Saved"}</span>
+        <span className="text-xs text-neutral-500" aria-live="polite" data-testid="save-state">
+          {conflict ? "Changed elsewhere — reload" : saving ? "Saving…" : dirty ? "Unsaved changes" : "Saved"}
+        </span>
+        {conflict && <Button onClick={() => window.location.reload()}>Reload</Button>}
         <div className="ml-auto flex gap-2 text-xs">
           {s && (
             <>

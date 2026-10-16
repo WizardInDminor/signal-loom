@@ -23,20 +23,39 @@ A working local-first rig design application:
   message counts/limits, ML10X preset chains with firmware gate); exports with explicit
   evidence levels; device library with provenance display and custom profiles.
 - **Docs**: `README.md`, `ARCHITECTURE.md`, `docs/research.md` (+ raw notes), this file.
-- **Quality gates**: 47 pytest tests, 9 Playwright scenarios, ruff, eslint, tsc, `next build`,
+- **Quality gates**: 50 pytest tests, 12 Playwright scenarios, ruff, eslint, tsc, `next build`,
   GitHub Actions workflow running all of them.
 
 ## Verification evidence (from this session)
 
 | Check | Result |
 |---|---|
-| `backend: pytest -q` | 47 passed (includes fixture round-trip tests against real MC8 editor exports downloaded locally; those two tests skip in CI unless `scripts/fetch-fixtures.sh` is run) |
+| `backend: pytest -q` | 50 passed (includes fixture round-trip tests against real MC8 editor exports downloaded locally; those two tests skip in CI unless `scripts/fetch-fixtures.sh` is run) |
 | `backend: ruff check` / `ruff format --check` | clean |
 | `frontend: npm run lint` / `npm run typecheck` / `npm run build` | clean; build produces `/`, `/catalog`, `/rigs/[id]` |
-| `frontend: npm run test:e2e` (backend :8000 + frontend :3000, Chromium) | 9 passed |
+| `frontend: npm run test:e2e` (backend :8000 + frontend :3000, Chromium) | 12 passed |
 | Manual browser pass (screenshots of every workspace) | all five workspaces render the demo rig without console errors |
 | MC8 export self-check against real files | all three public exports parse, 30/1/1 banks, `hash` reproduced, byte-identical re-serialization |
 | ML10X backup reader against a real file (local only, GPL-licensed source, not committed) | 14 connectors, 512 presets read; routing field left undecoded |
+
+## Review follow-ups (PR #1, 2026-10-16)
+
+The repository owner's review asked for three fixes; all are in and regression-tested:
+
+1. **Exports could be stale right after an edit.** Exports are computed server-side from the
+   persisted rig. The Exports tab now awaits a confirmed save of the latest revision before any
+   download and blocks with a visible error if the save fails (e2e: edit, slow PUT, immediate
+   bank export reflects the edit).
+2. **Concurrent saves could overwrite newer state and "Saved" could be wrong.** The store is a
+   single-writer queue over a monotonic per-rig `revision`; the server refuses older revisions
+   with `409 stale_revision` (new migration `0002_rig_revision`), a second tab is told to reload,
+   and unload flushes the newest document (backend tests for stale/newer/equal revisions and
+   restart; e2e: second edit during a slow save, final state and status checked, stale PUT
+   refused).
+3. **Native MC8 export gating matched only compile errors.** It now refuses on every
+   error-level diagnostic on the rig (board, wiring, ML10X, MIDI, compile) and the UI says so;
+   human-readable reports stay available (backend + e2e: missing ML10X return cable blocks the
+   bank export while the switch plan still compiles).
 
 ## Acceptance tests (charter §8) — status
 

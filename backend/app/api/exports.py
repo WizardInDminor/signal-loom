@@ -33,7 +33,8 @@ EXPORT_STATUS = {
         "available": True,
         "note": "Shape, codes and integrity hash reproduced from three real MC8 editor bank/all-banks exports "
         "(third-party public files). NOT editor-validated, NOT hardware-validated. Only singleBank files "
-        "(PC/CC messages) are produced; restoring one replaces that bank only. Back up your MC8 first.",
+        "(PC/CC messages) are produced; restoring one replaces that bank only. Back up your MC8 first. "
+        "Refused while any error-level diagnostic (board, wiring, ML10X, MIDI or compile) exists on the rig.",
     },
     "ml10x_native": {
         "level": "blocked",
@@ -43,6 +44,38 @@ EXPORT_STATUS = {
         "Morningstar editor; a user-supplied backup can be inspected read-only.",
     },
 }
+
+
+def native_export_blockers(analysis: dict, bank_plan: dict) -> list[dict]:
+    """Every error-level diagnostic on the rig blocks a native export, not only compile errors.
+
+    A switch plan can compile cleanly while a loop return cable is missing or two devices
+    collide; a file produced in that state would encode a configuration the physical rig
+    cannot honour. The UI promises "N errors; native export is refused", so the exporter
+    enforces exactly that: board + wiring + ML10X + MIDI diagnostics, the rig-level compile
+    diagnostics, and the bank's own switch diagnostics.
+    """
+    seen: set[tuple] = set()
+    out: list[dict] = []
+
+    def add(d: dict) -> None:
+        if d.get("severity") != "error":
+            return
+        key = (d.get("code"), d.get("subject_id"), d.get("message"))
+        if key not in seen:
+            seen.add(key)
+            out.append(d)
+
+    for d in analysis["diagnostics"]:
+        add(d)
+    for d in analysis["compiled"]["diagnostics"]:
+        add(d)
+    for d in bank_plan["diagnostics"]:
+        add(d)
+    for sw in bank_plan["switches"]:
+        for d in sw["diagnostics"]:
+            add(d)
+    return out
 
 
 @router.get("/{rig_id}/exports/status")
@@ -109,12 +142,14 @@ def mc8_bank_backup(rig_id: str, bank_number: int, request: Request, download: b
     bank_plan = next((b for b in a["compiled"]["mc8"]["banks"] if b["number"] == bank_number), None)
     if bank_plan is None:
         raise HTTPException(status_code=404, detail=f"Bank {bank_number} is not configured")
-    blocking = [d for s in bank_plan["switches"] for d in s["diagnostics"] if d["severity"] == "error"]
-    blocking += [d for d in bank_plan["diagnostics"] if d["severity"] == "error"]
+    blocking = native_export_blockers(a, bank_plan)
     if blocking:
         raise HTTPException(
             status_code=409,
-            detail={"message": "Bank has compile errors; fix them before exporting.", "diagnostics": blocking},
+            detail={
+                "message": "The rig has error-level diagnostics; the native export is refused until they are fixed.",
+                "diagnostics": blocking,
+            },
         )
     dump, diags = build_single_bank_dump(
         bank_plan, description=f"Signal Loom export of '{rig.name}' bank {bank_number}"

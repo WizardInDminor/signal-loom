@@ -12,13 +12,18 @@ interface RigState {
   loading: boolean;
   saving: boolean;
   dirty: boolean;
+  /** Highest revision the server has confirmed for the loaded rig. */
+  savedRevision: number;
   error: string | null;
+  /** Set when the server rejected our revision: another tab/session changed the rig. */
+  conflict: boolean;
   selectedInstanceId: string | null;
   selectedSceneId: string | null;
   load: (id: string) => Promise<void>;
   refreshCatalog: () => Promise<void>;
   update: (fn: (rig: Rig) => void) => void;
-  saveNow: () => Promise<void>;
+  /** Persist every pending edit, in order. Resolves true once the latest revision is saved. */
+  ensureSaved: () => Promise<boolean>;
   flush: () => void;
   select: (id: string | null) => void;
   selectScene: (id: string | null) => void;
@@ -31,17 +36,27 @@ interface RigState {
   clearError: () => void;
 }
 
+const SAVE_DEBOUNCE_MS = 500;
+const ANALYZE_DEBOUNCE_MS = 250;
+
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let analyzeTimer: ReturnType<typeof setTimeout> | null = null;
 let analyzeSeq = 0;
+// Single writer: at most one PUT in flight; a newer revision waits for it and is sent after.
+let writer: Promise<boolean> | null = null;
 
 function errorText(e: unknown): string {
   if (e instanceof ApiError) {
     if (typeof e.detail === "string") return e.detail;
     if (Array.isArray(e.detail)) return e.detail.map((d: { loc?: unknown[]; msg?: string }) => `${(d.loc ?? []).join(".")}: ${d.msg}`).join("; ");
+    if (e.detail && typeof e.detail === "object" && "message" in e.detail) return String((e.detail as { message: unknown }).message);
     return e.message;
   }
   return e instanceof Error ? e.message : String(e);
+}
+
+function isStale(e: unknown): boolean {
+  return e instanceof ApiError && e.status === 409 && !!e.detail && typeof e.detail === "object" && (e.detail as { code?: string }).code === "stale_revision";
 }
 
 export const useRigStore = create<RigState>((set, get) => ({
@@ -52,17 +67,21 @@ export const useRigStore = create<RigState>((set, get) => ({
   loading: false,
   saving: false,
   dirty: false,
+  savedRevision: 0,
   error: null,
+  conflict: false,
   selectedInstanceId: null,
   selectedSceneId: null,
 
   async load(id) {
-    set({ loading: true, error: null, rig: null, analysis: null, selectedInstanceId: null, selectedSceneId: null });
+    // Never drop pending edits of the previous rig when switching.
+    if (get().rig && get().dirty) await get().ensureSaved();
+    set({ loading: true, error: null, conflict: false, rig: null, analysis: null, selectedInstanceId: null, selectedSceneId: null });
     try {
       const [rig, analysis, catalog] = await Promise.all([api.rigs.get(id), api.rigs.analysis(id), api.catalog.list()]);
       const profiles: Record<string, DeviceProfile> = {};
       for (const p of catalog) profiles[p.id] = p;
-      set({ rig, analysis, catalog, profiles, loading: false, dirty: false, selectedSceneId: rig.scenes[0]?.id ?? null });
+      set({ rig, analysis, catalog, profiles, loading: false, dirty: false, savedRevision: rig.revision, selectedSceneId: rig.scenes[0]?.id ?? null });
     } catch (e) {
       set({ loading: false, error: errorText(e) });
     }
@@ -77,13 +96,13 @@ export const useRigStore = create<RigState>((set, get) => ({
 
   update(fn) {
     const current = get().rig;
-    if (!current) return;
+    if (!current || get().conflict) return;
     const next: Rig = structuredClone(current);
     fn(next);
+    next.revision = current.revision + 1; // monotonic: the server refuses anything older
     set({ rig: next, dirty: true });
-    // Debounced persistence of the single underlying model, then live re-analysis.
     if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => void get().saveNow(), 500);
+    saveTimer = setTimeout(() => void get().ensureSaved(), SAVE_DEBOUNCE_MS);
     if (analyzeTimer) clearTimeout(analyzeTimer);
     const seq = ++analyzeSeq;
     analyzeTimer = setTimeout(async () => {
@@ -93,27 +112,59 @@ export const useRigStore = create<RigState>((set, get) => ({
       } catch (e) {
         set({ error: errorText(e) });
       }
-    }, 250);
+    }, ANALYZE_DEBOUNCE_MS);
   },
 
-  async saveNow() {
-    const rig = get().rig;
-    if (!rig) return;
-    set({ saving: true });
-    try {
-      const saved = await api.rigs.put(rig);
-      // Keep local edits made while the request was in flight; only adopt server timestamps.
-      set((s) => ({ saving: false, dirty: s.rig !== rig ? s.dirty : false, rig: s.rig ? { ...s.rig, updated_at: saved.updated_at } : saved }));
-    } catch (e) {
-      set({ saving: false, error: `Save failed: ${errorText(e)}` });
+  ensureSaved() {
+    if (saveTimer) {
+      clearTimeout(saveTimer);
+      saveTimer = null;
     }
+    if (writer) return writer; // the running writer drains every revision that exists when it loops
+    writer = (async () => {
+      let ok = true;
+      try {
+        // Drain: keep sending the newest document until the server has confirmed it.
+        for (;;) {
+          const snapshot = get().rig;
+          if (!snapshot || snapshot.revision <= get().savedRevision) break;
+          set({ saving: true });
+          try {
+            const saved = await api.rigs.put(snapshot);
+            set((s) => ({
+              savedRevision: Math.max(s.savedRevision, saved.revision),
+              dirty: (s.rig?.revision ?? 0) > Math.max(s.savedRevision, saved.revision),
+              // Adopt the server timestamp only if nothing newer was edited meanwhile.
+              rig: s.rig && s.rig.revision === saved.revision ? { ...s.rig, updated_at: saved.updated_at } : s.rig,
+            }));
+          } catch (e) {
+            const latest = get().rig;
+            if (isStale(e) && latest && latest.revision > snapshot.revision) continue; // superseded locally; send the newer one
+            ok = false;
+            set({
+              error: isStale(e)
+                ? "This rig was changed elsewhere (another tab or session). Reload the page to continue; your unsaved edits here are not applied."
+                : `Save failed: ${errorText(e)}`,
+              conflict: isStale(e),
+            });
+            break;
+          }
+        }
+      } finally {
+        set({ saving: false });
+        writer = null;
+      }
+      return ok;
+    })();
+    return writer;
   },
 
   flush() {
-    // Called on page unload: push the pending document with a keepalive request.
+    // Page unload: send the newest document with a keepalive request. The server's revision
+    // rule guarantees an older in-flight PUT cannot overwrite it.
     if (saveTimer) clearTimeout(saveTimer);
     const rig = get().rig;
-    if (!rig || !get().dirty) return;
+    if (!rig || !get().dirty || get().conflict) return;
     void fetch(`/api/rigs/${rig.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(rig), keepalive: true });
   },
 

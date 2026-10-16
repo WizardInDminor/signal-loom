@@ -162,3 +162,64 @@ test("usability: build a small rig from scratch through the UI", async ({ page }
   await page.getByRole("listitem").filter({ hasText: "E2E scratch rig" }).getByRole("button", { name: "Delete" }).click();
   await expect(page.getByRole("link", { name: "E2E scratch rig" })).toHaveCount(0);
 });
+
+test("exports: an export made right after an edit reflects the edit, even while the save is slow", async ({ page }) => {
+  await openDemo(page);
+  const rigId = page.url().split("/rigs/")[1];
+  // Make the persistence slow so the export would read stale data without the save barrier.
+  await page.route(`**/api/rigs/${rigId}`, async (route) => {
+    if (route.request().method() === "PUT") await new Promise((r) => setTimeout(r, 1500));
+    await route.continue();
+  });
+  await page.getByRole("tab", { name: "controllers" }).click();
+  await page.getByLabel("Switch A short name").fill("Intro");
+  await page.getByRole("tab", { name: "exports" }).click();
+  await page.getByRole("button", { name: /Prepare bank 1/ }).click();
+  await expect(page.getByText("structure + hash OK")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId("export-save-state")).toHaveText(/Saved \(revision \d+\)/);
+  const bank = await (await page.request.get(`/api/rigs/${rigId}/exports/mc8-bank/1`)).json();
+  expect(bank.dump.data.bank.presetArray[0].shortName).toBe("Intro");
+});
+
+test("saves: edits during an in-flight save are persisted in order and 'Saved' is only shown once the latest revision is stored", async ({ page }) => {
+  await openDemo(page);
+  const rigId = page.url().split("/rigs/")[1];
+  let puts = 0;
+  await page.route(`**/api/rigs/${rigId}`, async (route) => {
+    if (route.request().method() === "PUT") {
+      puts += 1;
+      if (puts === 1) await new Promise((r) => setTimeout(r, 2500)); // first save is slow
+    }
+    await route.continue();
+  });
+  await page.getByRole("tab", { name: "controllers" }).click();
+  const field = page.getByLabel("Switch A short name");
+  await field.fill("One");
+  await expect(page.getByTestId("save-state")).toHaveText("Saving…", { timeout: 5_000 });
+  await field.fill("Two"); // second edit while the first PUT is still in flight
+  await expect(page.getByTestId("save-state")).not.toHaveText("Saved");
+  await expect(page.getByTestId("save-state")).toHaveText("Saved", { timeout: 15_000 });
+  const stored = await (await page.request.get(`/api/rigs/${rigId}`)).json();
+  expect(stored.controllers.mc8.banks[0].presets.find((p: { position: string }) => p.position === "A").short_name).toBe("Two");
+  expect(stored.revision).toBeGreaterThanOrEqual(2);
+  expect(puts).toBe(2);
+  // An older revision arriving late (e.g. from another tab) is refused by the server.
+  const stale = await page.request.put(`/api/rigs/${rigId}`, { data: { ...stored, revision: 1, name: "stale" } });
+  expect(stale.status()).toBe(409);
+  expect((await (await page.request.get(`/api/rigs/${rigId}`)).json()).name).not.toBe("stale");
+});
+
+test("exports: a wiring error blocks the native MC8 export even though the switches compile", async ({ page }) => {
+  await openDemo(page);
+  await page.getByRole("tab", { name: "wiring" }).click();
+  await page.getByRole("button", { name: "Remove cable Plumes -> Return A" }).click();
+  await expect(page.getByText(/loop 1: Send is cabled but Return is not/)).toBeVisible();
+  await page.getByRole("tab", { name: "exports" }).click();
+  await expect(page.getByTestId("native-export-blocked")).toBeVisible();
+  await expect(page.getByRole("button", { name: /Prepare bank 1/ })).toBeDisabled();
+  const rigId = page.url().split("/rigs/")[1];
+  await expect.poll(async () => (await page.request.get(`/api/rigs/${rigId}/exports/mc8-bank/1`)).status()).toBe(409);
+  // Human-readable reports remain available and list the problem.
+  const md = await (await page.request.get(`/api/rigs/${rigId}/exports/wiring.md`)).text();
+  expect(md).toContain("switcher.loop_open");
+});

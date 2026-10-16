@@ -60,6 +60,16 @@ def put_rig(rig_id: str, rig: Rig, request: Request):
         raise HTTPException(status_code=404, detail=f"Rig '{rig_id}' not found")
     if rig.id != rig_id:
         raise HTTPException(status_code=400, detail="Rig id in body does not match URL")
+    if rig.revision < existing.revision:
+        # A save that was overtaken by a newer one (or another tab) must not win.
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "stale_revision",
+                "message": f"Rig revision {rig.revision} is older than the stored revision {existing.revision}; reload before editing.",
+                "stored_revision": existing.revision,
+            },
+        )
     rig.created_at = existing.created_at
     _validate_references(rig)
     return repo.save(rig)
@@ -102,6 +112,7 @@ def duplicate_rig(rig_id: str, request: Request):
     copy_rig = copy.deepcopy(rig)
     copy_rig.id = new_id("rig")
     copy_rig.name = f"{rig.name} (copy)"
+    copy_rig.revision = 0
     copy_rig.created_at = copy_rig.updated_at = utcnow_iso()
     return rig_repo(request).save(copy_rig)
 
@@ -143,5 +154,6 @@ async def import_rig(request: Request, keep_id: bool = False, name: str | None =
         rig.id = new_id("rig")
     if name:
         rig.name = name
+    rig.revision = 0
     rig.created_at = rig.updated_at = utcnow_iso()
     return ImportResult(rig=repo.save(rig, touch=False), warnings=warnings, imported_profiles=imported)
