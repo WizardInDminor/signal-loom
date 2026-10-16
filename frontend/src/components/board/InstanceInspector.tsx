@@ -6,6 +6,7 @@ import { Badge, Button, DiagnosticList, EvidenceBadge, Field, Panel } from "@/co
 import { PortEditor } from "./PortEditor";
 import { JackEditor } from "./JackEditor";
 import { DeviceImageSection } from "@/components/images/DeviceImageSection";
+import { ConfigureJacksButton, JackMapper } from "@/components/images/JackMapper";
 import { api } from "@/lib/api";
 import { enclosureFill } from "@/lib/boardLayout";
 import { useState } from "react";
@@ -13,6 +14,7 @@ import type { PortDef } from "@/lib/types";
 
 export function InstanceInspector() {
   const { rig, analysis, profiles, selectedInstanceId, update, removeInstance, refreshCatalog, reanalyze } = useRigStore();
+  const [mapping, setMapping] = useState(false);
   const inst = rig?.instances.find((i) => i.id === selectedInstanceId);
   if (!rig || !inst) return <Panel title="Device inspector"><p className="text-xs text-neutral-500">Select a device on the board.</p></Panel>;
   const profile = profiles[inst.profile_id];
@@ -103,8 +105,25 @@ export function InstanceInspector() {
             </div>
           </details>
         </div>
+        <div className="flex flex-col gap-1">
+          <ConfigureJacksButton image={profile?.image} count={profile?.ports.length ?? 0} onOpen={() => setMapping(true)} />
+          {profile?.image && <p className="text-[11px] text-neutral-500">Edits the profile, so every {profile.model} gets the jacks. Per-unit tweaks stay below.</p>}
+        </div>
+        {mapping && profile?.image && (
+          <JackMapper
+            profileId={profile.id}
+            title={`${profile.manufacturer} ${profile.model}`}
+            ports={profile.ports}
+            image={profile.image}
+            widthMm={profile.footprint.width.value_mm}
+            depthMm={profile.footprint.depth.value_mm}
+            footprintEvidence={profile.footprint.width.evidence}
+            onSaved={async () => { await refreshCatalog(); await reanalyze(); }}
+            onClose={() => setMapping(false)}
+          />
+        )}
         <div>
-          <h3 className="font-semibold mb-1">Jack positions (drag on the outline)</h3>
+          <h3 className="font-semibold mb-1">Jack positions on this unit (drag on the outline)</h3>
           <JackEditorForInstance inst={inst} onChange={savePort} />
         </div>
         <PortEditor inst={inst} />

@@ -20,11 +20,16 @@ export const CATEGORIES = ["instrument", "controller", "switcher", "effect", "am
 export interface Measure { value_mm: number | null; evidence: Evidence; note?: string | null }
 export interface Footprint { width: Measure; depth: Measure; height: Measure; includes_jacks: boolean | null; display_unit: string }
 
+/** Where a connector appears in the device's photograph (stored-image coordinates, 0–1; may lie outside the crop). */
+export interface ImageAnchor { x: number; y: number; asset_id: string }
 export interface PortDef {
   id: string;
   label: string;
   kind: SignalKind;
   direction: PortDirection;
+  /** Provenance of the connector's description; null = shares the profile's provenance, "user" = entered by the user. */
+  evidence?: Evidence | null;
+  image_anchor?: ImageAnchor | null;
   connector: Connector;
   audio_channel?: (typeof AUDIO_CHANNELS)[number] | null;
   trs_role?: (typeof TRS_ROLES)[number] | null;

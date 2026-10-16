@@ -1,4 +1,6 @@
-import type { Analysis, AssetRecord, DeviceProfile, ExportStatus, Rig, RigSummary } from "./types";
+import type { Analysis, AssetRecord, DeviceProfile, ExportStatus, PortDef, Rig, RigSummary } from "./types";
+
+export interface PortUsage { rig_id: string; rig_name: string; connection_id: string; connection_label: string | null; instance_id: string; instance_label: string; other_label: string; port_id?: string }
 
 export class ApiError extends Error {
   status: number;
@@ -96,6 +98,9 @@ export const api = {
     create: (p: DeviceProfile) => request<DeviceProfile>("/api/catalog/devices", { method: "POST", body: JSON.stringify(profileBody(p)) }),
     update: (p: DeviceProfile) => request<DeviceProfile>(`/api/catalog/devices/${p.id}`, { method: "PUT", body: JSON.stringify(profileBody(p)) }),
     remove: (id: string) => request<void>(`/api/catalog/devices/${id}`, { method: "DELETE" }),
+    /** Replace only the jack list; 409 (code ports_in_use, with `affected` cables) unless `force`. */
+    updatePorts: (id: string, ports: PortDef[], force = false) => request<DeviceProfile>(`/api/catalog/devices/${id}/ports`, { method: "PUT", body: JSON.stringify({ ports, force }) }),
+    portUsage: (id: string) => request<Record<string, PortUsage[]>>(`/api/catalog/devices/${id}/port-usage`),
     importPedalPlayground: (text: string) => request<{ imported: number; skipped_existing: number; problems: string[] }>("/api/catalog/import/pedalplayground", { method: "POST", body: text }),
   },
 };

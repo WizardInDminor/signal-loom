@@ -149,6 +149,30 @@ next to the database, named by id. Project files stay format 1 and carry only th
 (format 2) for a backup or another computer. You are responsible for having the right to use any
 photograph you upload; Signal Loom never downloads or redistributes product photography.
 
+## Configure jacks by pointing at them (Session 3)
+
+Imported catalogs (Pedal Playground) bring dimensions but no jacks. Once a profile has a
+picture, press **Configure jacks on the photo** (Device library, or the Board inspector). The
+whole photograph is shown, with the enclosure crop and its top edge drawn on it, so plugs that
+stick out of the enclosure are still visible. Pick a starter template (mono, stereo, mono with
+MIDI, or empty) or just click: each click on a connector places a marker and opens a compact
+editor with sensible defaults (audio in, TS, mono). Change the type with one select, the audio
+channel with one tap (mono · L · R · TRS L+R), drag markers to adjust, and save. Every board
+that uses the profile gets the jacks; the per-unit jack editor and the table editor remain for
+fine work.
+
+What a marker is, and is not: it records where the connector *appears* in the photo. The cable
+in the board model starts at the point the thin lead points to: the nearest enclosure edge (or
+the side a plug protrudes from), or a top-face jack when the connector sits deep inside the
+outline. Override the edge with the ▲ ▶ ▼ ◀ ◎ buttons if the guess is wrong. Positions and
+connector facts you enter are stored with *user* evidence, separate from the catalog's
+third-party dimensions. Markers are kept in photo coordinates, so recropping the picture never
+moves a jack; a replaced photograph flags markers that were placed on the previous one.
+
+Jack ids are stable handles for cables. Removing or renaming a jack that a cable in any of your
+rigs uses is refused with the list of affected cables until you explicitly choose *Remove
+anyway*; the cables are then flagged by the wiring check, never deleted silently.
+
 ## A short tour: the three-scene demo
 
 1. **Rigs** — open *Demo rig: three-scene song* (or create a new rig, optionally "from the demo").

@@ -158,6 +158,35 @@ computer without the asset keeps the metadata and warns. `?include_images=1` pro
 file with the assets base64-bundled; import restores them through the same sanitizer under the
 same ids (local library still wins for existing profiles).
 
+## Image-assisted jack mapping (Session 3)
+
+Two coordinate systems, kept apart on purpose (`frontend/src/lib/jackMapping.ts`):
+
+- **Image space**: `PortDef.image_anchor = {x, y, asset_id}`, a normalized point in the stored,
+  orientation-corrected photograph. It records where the connector *appears* and may lie outside
+  the enclosure crop. It is a visual annotation only: `placed_ports` never reads it. `asset_id`
+  says which picture it was placed on, so a replaced photograph is flagged for reconciliation.
+- **Enclosure space**: `PortDef.edge` + `position`, the wiring fact the board, the cable kit and
+  the exports already use. The bridge from image to enclosure space is exactly the crop, the
+  quarter turn and the fit mode the board uses to draw the picture (`imageToEnclosure` /
+  `enclosureToImage`), so a marker and its lead agree with what the Board shows.
+
+`suggestPlacement` proposes the edge (nearest edge within about 12 mm on a calibrated device,
+the protruding side for a point outside the crop, `top_face` deep inside) and the normalized
+position; the user can pin a different edge, and the position is then the projection of the
+anchor on that edge. Nothing is invented beyond the click itself; positions set this way carry
+`position_evidence = user`, connector facts `evidence = user` (hand-authored builtins keep
+`evidence = None`, meaning "shares the profile's provenance").
+
+Persistence goes through `PUT /api/catalog/devices/{id}/ports`, which replaces only the jack
+list (dimensions, provenance, picture, MIDI and power data are untouched). Jack ids are stable
+handles for cables: `ProfileRepository.port_usage` lists every cable, in every rig, plugged into
+each jack, and the endpoint refuses (409 `ports_in_use`, affected cables listed) to drop an id a
+cable uses unless `force` is set; the cable is then flagged by the existing
+`connection.port_missing` diagnostic rather than deleted. TRS semantics are untouched: a stereo
+TRS jack is one port with `audio_channel = stereo_trs`; an L/R pair is two ports sharing a
+`pair_group`; per-conductor ML10X ports keep their `pair_group`/`loop` facts.
+
 ## Scenes and the compiler
 
 A scene is intent, not bytes. The compiler is deterministic for equal inputs (ordering is

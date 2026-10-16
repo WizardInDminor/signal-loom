@@ -7,6 +7,7 @@ import { CATEGORIES } from "@/lib/types";
 import { Badge, Button, ErrorBanner, EvidenceBadge, Field, Panel } from "@/components/ui/basics";
 import { JackEditor } from "@/components/board/JackEditor";
 import { DeviceImageSection } from "@/components/images/DeviceImageSection";
+import { ConfigureJacksButton, JackMapper } from "@/components/images/JackMapper";
 import { enclosureFill } from "@/lib/boardLayout";
 import type { PortDef, SignalKind, PortDirection, Edge } from "@/lib/types";
 import { CONNECTORS } from "@/lib/types";
@@ -31,6 +32,7 @@ export default function CatalogPage() {
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<string | null>(null);
   const [assets, setAssets] = useState<(AssetRecord & { referenced: boolean })[] | null>(null);
+  const [mapping, setMapping] = useState(false);
   const refresh = () => api.catalog.list(q, category || undefined).then(setItems).catch((e) => setError(e.message));
   const refreshAssets = () => api.assets.list().then(setAssets).catch(() => setAssets(null));
   useEffect(() => { void refresh(); }, [q, category]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -180,9 +182,27 @@ export default function CatalogPage() {
               }}
             />
             <div>
-              <h3 className="font-semibold mb-1">Jack layout (read-only; Edit or Duplicate to change)</h3>
+              <div className="flex flex-wrap items-center gap-2 mb-1">
+                <h3 className="font-semibold">Jacks ({sel.ports.length})</h3>
+                <ConfigureJacksButton image={sel.image} count={sel.ports.length} onOpen={() => setMapping(true)} />
+                {sel.ports.length === 0 && sel.image && <span className="text-[11px] text-neutral-500">This profile has no jacks yet (imported catalogs carry dimensions only).</span>}
+              </div>
+              <h4 className="text-[11px] text-neutral-500 mb-1">Outline view (read-only; Edit or Duplicate for the table editor)</h4>
               <JackEditor widthMm={sel.footprint.width.value_mm ?? 70} depthMm={sel.footprint.depth.value_mm ?? 120} ports={sel.ports} onChange={() => undefined} />
             </div>
+            {mapping && sel.image && (
+              <JackMapper
+                profileId={sel.id}
+                title={`${sel.manufacturer} ${sel.model}`}
+                ports={sel.ports}
+                image={sel.image}
+                widthMm={sel.footprint.width.value_mm}
+                depthMm={sel.footprint.depth.value_mm}
+                footprintEvidence={sel.footprint.width.evidence}
+                onSaved={(saved) => { setSel(saved); void refresh(); }}
+                onClose={() => setMapping(false)}
+              />
+            )}
           </div>
         </Panel>
       ) : <Panel title="Device"><p className="text-xs text-neutral-500">Pick a device to see its specification and evidence levels, or create a custom one.</p></Panel>}

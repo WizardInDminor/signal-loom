@@ -202,6 +202,58 @@ The owner's review asked for three narrow changes; all three are in and tested:
 
 Counts after the follow-up: **77** backend tests, **28** browser scenarios.
 
+## Part three: image-assisted jack mapping (same branch, same PR)
+
+The owner's Pedal Playground import populated dimensions for many pedals but no jacks, and the
+table editor made configuring them tedious. Part three makes pointing at the photograph the
+primary way to describe a device's connectors.
+
+### What a user does
+
+Profile with a picture → **Configure jacks on the photo** (Device library or Board inspector) →
+the whole photograph with the enclosure crop and its top edge drawn → optional starter template
+(mono / stereo / mono + MIDI / empty; proposals, stored as user entries) → click each connector:
+a marker appears with a thin lead to where the cable will start in the board model, and a compact
+editor opens (label, type, mono · L · R · TRS L+R, cable-exit edge, *more…* for id, direction,
+connector, TRS MIDI wiring, pair group, clearance, notes) → drag to adjust, arrows nudge, Ctrl+Z
+undoes → **Save jacks**. Existing jacks are drawn dashed at their wiring position until confirmed
+on the photo; unknown-position jacks are listed "to place" and placed by clicking. Removing a jack
+cables use shows the affected cables and requires *Remove anyway*.
+
+### Architecture decisions
+
+- **Annotation vs. wiring fact.** `image_anchor` lives on the port, in photo coordinates, next to
+  the `edge`/`position` the wiring model reads. Recropping never moves a jack; replacing the photo
+  flags markers for reconciliation (they keep working from their wiring position meanwhile).
+- **Suggestion, never invention.** The nearest edge (≈12 mm on a calibrated device), the
+  protruding side outside the crop, or top-face deep inside; position = projection of the click.
+  The user can pin any edge. Everything entered carries *user* evidence, separate from the
+  import's third-party dimensions and attribution, which are preserved byte for byte.
+- **Ports-only update with cable protection.** `PUT …/ports` keeps every other profile fact and
+  refuses to drop an id that any rig's cable uses until the user confirms; cables are flagged,
+  never deleted.
+- **TRS stays one socket.** Stereo TRS is one port (`stereo_trs`), L/R pairs are two ports with a
+  pair group; the conductor-aware routing and the stereo demo are unchanged (test).
+- **Editor placement.** The contextual card floats next to the marker when the photo is wide
+  enough and otherwise lives at the top of the side column, so it never covers a connector; at
+  zoom 1 the whole photo fits the visible area, zoom enlarges and scrolls.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| `pytest -q` | **83 passed** (6 new in `tests/test_jack_mapping.py`: anchor ≠ geometry, anchor validation incl. asset presence, ports-only enrichment of an imported profile preserving its facts, rename/remove refused with affected cables then forced with `connection.port_missing`, stereo/TRS semantics and the stereo demo intact, builtins carry no separate evidence) |
+| Playwright | **31 passed** (3 new: imported pedal → template → three clicks → move + relabel → save → placed on a Board with an amp → wired by dragging the new jack → reload keeps cable, positions and picture; existing jacks shown and dragged, unused removed, wired removal refused → keep → forced with the cable flagged; stereo template + TRS L+R, anchors outside the crop survive a recrop) |
+| Screenshots | catalog with templates, markers after three clicks (DC anchored above the crop, lead to the top edge), expanded editor, the pedal wired on the Board |
+
+### Known limitations
+
+- No perspective correction or image recognition: the user points, Signal Loom suggests edges.
+- Per-instance jack overrides are still edited with the existing outline/table editors; the
+  mapper writes the profile.
+- The "to place" flow places template jacks in list order; reordering is by removing and
+  re-adding.
+
 ## Two next ideas
 
 1. **Visual Advanced-mode editor on the Stage canvas**: drag from a Return jack to a Send jack
