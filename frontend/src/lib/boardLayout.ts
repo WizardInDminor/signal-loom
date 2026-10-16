@@ -4,6 +4,7 @@
 // Board draws.
 
 import type { Analysis, DeviceInstance, PlacedPort, Rig } from "./types";
+import { surfaceOf } from "./mounting";
 
 export const OFFBOARD_GAP = 40;
 export const BOARD_MARGIN = 30;
@@ -17,7 +18,7 @@ export interface PortAt {
 
 export function boardViewBox(rig: Rig, analysis: Analysis | null) {
   const margin = BOARD_MARGIN;
-  const offboard = rig.instances.filter((i) => i.off_board);
+  const offboard = rig.instances.filter((i) => surfaceOf(i) === "off_board");
   const offboardWidth = offboard.length ? 200 : 0;
   const vbW = rig.board.width_mm + margin * 2 + offboardWidth + (offboard.length ? OFFBOARD_GAP : 0);
   const vbH = Math.max(rig.board.depth_mm, offboard.reduce((acc, i) => acc + (analysis?.instances[i.id]?.height_mm ?? 60) + 20, 0)) + margin * 2;
@@ -58,13 +59,13 @@ export function boardLayout(rig: Rig, analysis: Analysis | null): BoardLayout {
     offboardPos[i.id] = { x: margin + board.width_mm + OFFBOARD_GAP, y: offY };
     offY += (analysis?.instances[i.id]?.height_mm ?? 60) + 20;
   }
-  const originOf = (inst: DeviceInstance) => (inst.off_board ? offboardPos[inst.id] : { x: margin + inst.x_mm, y: margin + inst.y_mm });
+  const originOf = (inst: DeviceInstance) => (surfaceOf(inst) === "off_board" ? offboardPos[inst.id] : { x: margin + inst.x_mm, y: margin + inst.y_mm });
   const ports: Record<string, PortAt> = {};
   for (const inst of rig.instances) {
     const geo = analysis?.instances[inst.id];
     if (!geo) continue;
     const o = originOf(inst);
-    const base = inst.off_board ? { x: 0, y: 0 } : { x: inst.x_mm, y: inst.y_mm };
+    const base = surfaceOf(inst) === "off_board" ? { x: 0, y: 0 } : { x: inst.x_mm, y: inst.y_mm };
     for (const p of geo.ports) ports[`${inst.id}:${p.port_id}`] = { x: o.x + (p.x_mm - base.x), y: o.y + (p.y_mm - base.y), port: p, inst };
   }
   const cx = margin + board.width_mm / 2;

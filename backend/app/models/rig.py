@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from .common import Rotation, SignalKind, StrictModel, new_id
 from .profile import DeviceImage, PortDef
+
+# Where a device is mounted. "top": on the board's upper surface; "underside": under the board,
+# in the same x/y coordinate system seen through the board from above (not mirrored);
+# "off_board": not on the board at all (guitar, amp, a supply on the floor).
+Surface = Literal["top", "underside", "off_board"]
 
 PROJECT_FORMAT = "signal-loom-project"
 PROJECT_FORMAT_VERSION = 1  # plain project files
@@ -23,6 +29,12 @@ class Board(StrictModel):
     width_mm: float = Field(default=600.0, gt=0)
     depth_mm: float = Field(default=300.0, gt=0)
     grid_mm: float = Field(default=5.0, gt=0)
+    # Manufacturer pedalboard this board is (catalog id, see ``catalog/boards.py``); None = custom.
+    model_id: str | None = None
+    # Usable height under the board as the user measured or found it. Takes precedence over the
+    # catalog's figure; None = not stated (the catalog's value is used when it has one).
+    underside_clearance_mm: float | None = Field(default=None, gt=0)
+    underside_clearance_note: str | None = None
     notes: str | None = None
 
 
@@ -36,7 +48,11 @@ class DeviceInstance(StrictModel):
     y_mm: float = 0.0
     rotation: Rotation = 0
     intentional_overlap: bool = False  # user accepts overlapping/stacking this device
-    off_board: bool = False  # guitar, amp, under-board supply: not subject to board bounds
+    # Legacy flag kept for every rig saved before mounting surfaces existed: True meant "guitar, amp,
+    # or a supply drawn beside the board". It is never rewritten by loading; ``surface`` refines it.
+    off_board: bool = False
+    # Mounting surface. None = not stated (older rig): derived from ``off_board`` by ``mount``.
+    surface: Surface | None = None
     midi_channel: int | None = Field(default=None, ge=1, le=16)
     # Overrides/additions of ports by id. A port with an id that exists on the profile
     # replaces it; a new id adds a user-defined jack. Removed ids hide profile ports.
@@ -46,6 +62,23 @@ class DeviceInstance(StrictModel):
     # profile's image is used. Never affects geometry.
     image: DeviceImage | None = None
     notes: str | None = None
+
+    @model_validator(mode="after")
+    def _surface_and_flag_agree(self) -> DeviceInstance:
+        # An explicit surface is the user's statement; the legacy flag follows it so code that still
+        # reads ``off_board`` sees the same fact. A missing surface leaves the flag exactly as saved.
+        if self.surface is not None:
+            want = self.surface == "off_board"
+            if self.off_board != want:  # assignment re-validates; only touch it when it changes
+                self.off_board = want
+        return self
+
+    @property
+    def mount(self) -> Surface:
+        """Effective mounting surface, honouring rigs saved before ``surface`` existed."""
+        if self.surface is not None:
+            return self.surface
+        return "off_board" if self.off_board else "top"
 
 
 class PortRef(StrictModel):
@@ -226,6 +259,7 @@ class PreviewDevice(StrictModel):
     height_mm: float
     category: str
     off_board: bool = False
+    surface: str = "top"
     placeholder: bool = False
     rotation: int = 0
     image: dict | None = None

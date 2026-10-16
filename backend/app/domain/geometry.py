@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ..models.board import PedalboardSpec
 from ..models.common import Diagnostic, Edge, Evidence, Severity
 from ..models.profile import DeviceProfile, PortDef
 from ..models.rig import Board, DeviceInstance, Rig
@@ -168,11 +169,31 @@ def placed_ports(inst: DeviceInstance, profile: DeviceProfile | None) -> list[Pl
     return out
 
 
-def board_diagnostics(rig: Rig, profiles: dict[str, DeviceProfile]) -> list[Diagnostic]:
-    """Out-of-bounds, collisions (vs intentional overlaps), unknown footprints."""
+def underside_clearance(board: Board, spec: PedalboardSpec | None) -> tuple[float | None, str]:
+    """Usable height under the board and where the figure comes from: the user's own statement
+    wins, then the catalog's documented value; otherwise unknown."""
+    if board.underside_clearance_mm is not None:
+        return board.underside_clearance_mm, "user"
+    if spec is not None and spec.underside_clearance.value_mm is not None:
+        return spec.underside_clearance.value_mm, spec.underside_clearance.evidence.value
+    return None, "unknown"
+
+
+def board_diagnostics(
+    rig: Rig, profiles: dict[str, DeviceProfile], spec: PedalboardSpec | None = None
+) -> list[Diagnostic]:
+    """Out-of-bounds, collisions (vs intentional overlaps), unknown footprints, and whether what
+    hangs under the board can actually fit there.
+
+    Top and underside share one coordinate system and one perimeter; they are checked for
+    bounds alike and for collisions only against devices on the same surface. A footprint inside
+    the perimeter is never taken as proof that a device fits underneath: that needs the device's
+    height and the board's usable clearance, and both must be known."""
     diags: list[Diagnostic] = []
     board: Board = rig.board
     rects: list[tuple[DeviceInstance, Rect, bool]] = []
+    clearance, clearance_src = underside_clearance(board, spec)
+    underside_seen = False
     for inst in rig.instances:
         profile = profiles.get(inst.profile_id)
         if profile is None:
@@ -200,9 +221,11 @@ def board_diagnostics(rig: Rig, profiles: dict[str, DeviceProfile]) -> list[Diag
                     subject_id=inst.id,
                 )
             )
-        if inst.off_board:
+        surface = inst.mount
+        if surface == "off_board":
             rects.append((inst, rect, placeholder))
             continue
+        where = "under" if surface == "underside" else "on"
         if rect.x < -0.01 or rect.y < -0.01 or rect.x2 > board.width_mm + 0.01 or rect.y2 > board.depth_mm + 0.01:
             diags.append(
                 Diagnostic(
@@ -210,28 +233,32 @@ def board_diagnostics(rig: Rig, profiles: dict[str, DeviceProfile]) -> list[Diag
                     severity=Severity.ERROR,
                     message=(
                         f"'{inst.label}' extends outside the {board.width_mm:.0f} x {board.depth_mm:.0f} mm board "
-                        f"(occupies x {rect.x:.0f}-{rect.x2:.0f}, y {rect.y:.0f}-{rect.y2:.0f})."
+                        f"({where} it; occupies x {rect.x:.0f}-{rect.x2:.0f}, y {rect.y:.0f}-{rect.y2:.0f})."
                     ),
                     subject_type="instance",
                     subject_id=inst.id,
                 )
             )
+        if surface == "underside":
+            underside_seen = True
+            diags.extend(_underside_fit(inst, profile, spec, clearance, clearance_src))
         rects.append((inst, rect, placeholder))
     for i in range(len(rects)):
         for j in range(i + 1, len(rects)):
             a, ra, _ = rects[i]
             b, rb, _ = rects[j]
-            if a.off_board or b.off_board:
+            if a.mount == "off_board" or b.mount == "off_board" or a.mount != b.mount:
                 continue
             if ra.intersects(rb):
                 area = ra.intersection_area(rb)
                 intentional = a.intentional_overlap or b.intentional_overlap
+                side = " under the board" if a.mount == "underside" else ""
                 diags.append(
                     Diagnostic(
                         code="instance.overlap_intentional" if intentional else "instance.collision",
                         severity=Severity.INFO if intentional else Severity.ERROR,
                         message=(
-                            f"'{a.label}' and '{b.label}' overlap by {area:.0f} mm²"
+                            f"'{a.label}' and '{b.label}' overlap by {area:.0f} mm²{side}"
                             + (
                                 " (marked intentional)."
                                 if intentional
@@ -243,4 +270,95 @@ def board_diagnostics(rig: Rig, profiles: dict[str, DeviceProfile]) -> list[Diag
                         related_ids=[b.id],
                     )
                 )
+    if underside_seen and spec is not None and spec.rails and spec.rail_pitch.value_mm is None:
+        diags.append(
+            Diagnostic(
+                code="board.underside_mounting_unverified",
+                severity=Severity.INFO,
+                message=(
+                    f"{spec.display_name} has {spec.rails} rails but their spacing is not published, so bracket fit "
+                    "and the gap a device must span are not checked. Verify against the board itself."
+                ),
+                subject_type="rig",
+            )
+        )
     return diags
+
+
+def _underside_fit(
+    inst: DeviceInstance,
+    profile: DeviceProfile | None,
+    spec: PedalboardSpec | None,
+    clearance: float | None,
+    clearance_src: str,
+) -> list[Diagnostic]:
+    """Can this device hang under the board? Needs its height and the board's usable clearance."""
+    out: list[Diagnostic] = []
+    if spec is not None and spec.underside_mountable is False:
+        out.append(
+            Diagnostic(
+                code="instance.underside_unavailable",
+                severity=Severity.ERROR,
+                message=f"'{inst.label}' is mounted under the board, but {spec.display_name} has no room underneath.",
+                subject_type="instance",
+                subject_id=inst.id,
+            )
+        )
+        return out
+    height = profile.footprint.height.value_mm if profile else None
+    if height is None:
+        out.append(
+            Diagnostic(
+                code="instance.underside_height_unknown",
+                severity=Severity.WARNING,
+                message=(
+                    f"'{inst.label}' has no documented height, so whether it fits under the board is unverified. "
+                    "A footprint inside the perimeter is not enough."
+                ),
+                subject_type="instance",
+                subject_id=inst.id,
+            )
+        )
+    if clearance is None:
+        out.append(
+            Diagnostic(
+                code="instance.underside_clearance_unverified",
+                severity=Severity.WARNING,
+                message=(
+                    f"The usable height under this board is not known, so '{inst.label}'"
+                    + (f" ({height:g} mm tall)" if height is not None else "")
+                    + " is unverified underneath. Measure it (or enter the board's clearance) before mounting."
+                ),
+                subject_type="instance",
+                subject_id=inst.id,
+            )
+        )
+    elif height is not None:
+        src = {"user": "your measurement", "documented": "the manufacturer's figure"}.get(clearance_src, clearance_src)
+        if height > clearance + 0.01:
+            out.append(
+                Diagnostic(
+                    code="instance.underside_too_tall",
+                    severity=Severity.ERROR,
+                    message=(
+                        f"'{inst.label}' is {height:g} mm tall but only {clearance:g} mm is available under the board "
+                        f"({src}). It will not fit underneath."
+                    ),
+                    subject_type="instance",
+                    subject_id=inst.id,
+                )
+            )
+        else:
+            out.append(
+                Diagnostic(
+                    code="instance.underside_fits",
+                    severity=Severity.INFO,
+                    message=(
+                        f"'{inst.label}' ({height:g} mm tall) clears the {clearance:g} mm under the board ({src}) by "
+                        f"{clearance - height:g} mm. Cable plugs and brackets still need their own room."
+                    ),
+                    subject_type="instance",
+                    subject_id=inst.id,
+                )
+            )
+    return out

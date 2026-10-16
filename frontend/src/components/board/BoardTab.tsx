@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRigStore } from "@/store/rigStore";
-import type { SignalKind } from "@/lib/types";
-import { Badge, Button, DiagnosticList, Field, KIND_COLOR, Panel } from "@/components/ui/basics";
+import type { PedalboardSpec, SignalKind } from "@/lib/types";
+import { Badge, Button, DiagnosticList, EvidenceBadge, Field, KIND_COLOR, Panel } from "@/components/ui/basics";
 import { BoardCanvas, boardViewBox } from "./BoardCanvas";
 import { InstanceInspector } from "./InstanceInspector";
+import { api } from "@/lib/api";
+import { surfaceOf } from "@/lib/mounting";
 
 const KINDS: SignalKind[] = ["audio", "midi", "expression", "power", "usb"];
 const ZOOM_MIN = 0.3;
@@ -35,6 +37,12 @@ export function BoardTab() {
   const [cableKinds, setCableKinds] = useState<Set<SignalKind>>(new Set(["audio", "midi"]));
   const [showLabels, setShowLabels] = useState(false);
   const [showClearance, setShowClearance] = useState(true);
+  // Which surface of the board is being edited. Both views share x/y (the underside is seen
+  // through the board from above, not mirrored); off-board devices appear in both.
+  const [viewSurface, setViewSurface] = useState<"top" | "underside">("top");
+  const [showGhosts, setShowGhosts] = useState(true);
+  const [boards, setBoards] = useState<PedalboardSpec[]>([]);
+  useEffect(() => { api.catalog.boards().then(setBoards).catch(() => setBoards([])); }, []);
   const containerRef = useRef<HTMLDivElement>(null);
   // Normal layout: the canvas area runs from where it starts down to the bottom of the window, so
   // "fit" means the board is fully on screen without scrolling the page. Re-measured on window
@@ -97,9 +105,52 @@ export function BoardTab() {
   const boardDiags = analysis?.diagnostics.filter((d) => d.code.startsWith("instance.")) ?? [];
   const matches = catalog.filter((p) => `${p.manufacturer} ${p.model}`.toLowerCase().includes(q.toLowerCase())).slice(0, 12);
   const toggleKind = (k: SignalKind) => setCableKinds((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; });
+  const counts = { top: rig.instances.filter((i) => surfaceOf(i) === "top").length, underside: rig.instances.filter((i) => surfaceOf(i) === "underside").length };
+  const spec = analysis?.mounting?.spec ?? null;
+  const clearance = analysis?.mounting?.clearance_mm ?? null;
+  const pickBoard = (id: string) => {
+    const b = boards.find((x) => x.id === id);
+    update((r) => {
+      r.board.model_id = id || null;
+      if (b?.width.value_mm && b.depth.value_mm) { r.board.width_mm = b.width.value_mm; r.board.depth_mm = b.depth.value_mm; }
+      if (b && !r.board.name.trim()) r.board.name = `${b.manufacturer} ${b.model}`;
+    });
+  };
+
+  const surfaceSwitch = (
+    <div role="group" aria-label="Board surface" className="flex rounded border border-line overflow-hidden text-xs self-end" data-testid="surface-switch">
+      {(["top", "underside"] as const).map((sf) => (
+        <button key={sf} type="button" aria-pressed={viewSurface === sf} data-testid={`surface-${sf}`} onClick={() => setViewSurface(sf)} className={`px-2 py-1 ${viewSurface === sf ? "bg-accent text-white" : "bg-panel hover:bg-neutral-100"}`}>
+          {sf === "top" ? "Top" : "Underside"} <span className="opacity-70">{counts[sf]}</span>
+        </button>
+      ))}
+    </div>
+  );
+  const boardModel = (
+    <>
+      <Field label="Pedalboard">
+        <select value={rig.board.model_id ?? ""} onChange={(e) => pickBoard(e.target.value)} data-testid="board-model" aria-label="Pedalboard model">
+          <option value="">Custom</option>
+          {boards.map((b) => <option key={b.id} value={b.id}>{b.manufacturer} {b.model}</option>)}
+        </select>
+      </Field>
+      <Field label="Clearance under (mm)" hint={clearance == null ? "unverified" : analysis?.mounting?.clearance_source === "user" ? "your measurement" : analysis?.mounting?.clearance_source}>
+        <input type="number" className="w-20" min={1} value={rig.board.underside_clearance_mm ?? ""} placeholder="?" aria-label="Clearance under the board (mm)" data-testid="board-clearance" onChange={(e) => update((r) => { r.board.underside_clearance_mm = e.target.value === "" ? null : Math.max(1, Number(e.target.value)); })} />
+      </Field>
+    </>
+  );
+  const specLine = spec && (
+    <div className="text-[11px] text-neutral-600 flex flex-wrap items-center gap-x-2 gap-y-1" data-testid="board-spec">
+      <span><b>{spec.manufacturer} {spec.model}</b>{spec.width.value_mm && spec.depth.value_mm ? ` · ${spec.width.value_mm} × ${spec.depth.value_mm} mm` : ""}{spec.height.value_mm ? ` · ${spec.height.value_mm} mm tall` : ""} <EvidenceBadge evidence={spec.width.evidence} /></span>
+      {spec.rails != null && <span>· {spec.rails} rails{spec.rail_pitch.value_mm == null && <> <Badge tone="warn">spacing unverified</Badge></>}</span>}
+      <span>· underside {spec.underside_mountable === false ? <Badge tone="bad">none</Badge> : spec.underside_mountable ? <Badge tone="ok">mountable</Badge> : <Badge tone="warn">unknown</Badge>}{spec.underside_mountable !== false && <>, clearance {spec.underside_clearance.value_mm != null ? `${spec.underside_clearance.value_mm} mm` : <Badge tone="warn">unverified</Badge>}</>}</span>
+      {spec.compatible_brackets.length > 0 && <span className="text-neutral-500" title={spec.compatible_brackets.join("; ")}>· brackets: third-party list</span>}
+    </div>
+  );
 
   const viewControls = (
     <>
+      {surfaceSwitch}
       <Field label={`Zoom ${zoom.toFixed(1)} px/mm`}><input type="range" min={ZOOM_MIN} max={ZOOM_MAX} step={0.1} value={zoom} onChange={(e) => { setManualZoomRig(rigId ?? null); setZoom(Number(e.target.value)); }} aria-label="Zoom" /></Field>
       <Button onClick={pressFit} title="Fit the whole board into the visible area" aria-pressed={fitted} data-testid="board-fit">Fit</Button>
       <Button onClick={() => setExpanded((x) => !x)} aria-pressed={expanded} title={expanded ? "Back to the normal layout (Esc)" : "Give the board the whole window"} data-testid="board-expand">{expanded ? "⤡ Exit" : "⤢ Expand"}</Button>
@@ -115,6 +166,7 @@ export function BoardTab() {
       ))}
       <label className="flex items-center gap-1 ml-2"><input type="checkbox" checked={showLabels} onChange={(e) => setShowLabels(e.target.checked)} /> jack labels</label>
       <label className="flex items-center gap-1"><input type="checkbox" checked={showClearance} onChange={(e) => setShowClearance(e.target.checked)} /> plug clearance</label>
+      <label className="flex items-center gap-1" title="Draw the other surface's devices faintly for reference"><input type="checkbox" checked={showGhosts} onChange={(e) => setShowGhosts(e.target.checked)} data-testid="show-ghosts" /> show {viewSurface === "top" ? "underside" : "top"} as ghosts</label>
     </>
   );
   const canvasArea = (
@@ -127,7 +179,7 @@ export function BoardTab() {
       )}
       {/* A definite height (not max-height) so Fit can measure the space the board may use. */}
       <div ref={containerRef} className={`overflow-auto border border-line rounded bg-white p-2 ${expanded ? "flex-1 min-h-0" : "min-h-[320px]"}`} style={expanded ? undefined : { height: canvasH ?? "60vh" }} data-testid="board-viewport">
-        <BoardCanvas view={{ zoom, cableKinds, showLabels, showClearance }} />
+        <BoardCanvas view={{ zoom, cableKinds, showLabels, showClearance, surface: viewSurface, showGhosts }} />
       </div>
     </div>
   );
@@ -142,7 +194,7 @@ export function BoardTab() {
                 {p.manufacturer} {p.model}{" "}
                 {p.footprint.width.value_mm == null && <Badge tone="warn">size unknown</Badge>}
               </span>
-              <Button onClick={() => addInstance(p)} aria-label={`Add ${p.manufacturer} ${p.model}`}>+ Add</Button>
+              <Button onClick={() => addInstance(p, viewSurface)} aria-label={`Add ${p.manufacturer} ${p.model}`} title={`Add to the ${viewSurface === "top" ? "top of the board" : "underside"}`}>+ Add</Button>
             </li>
           ))}
           {!matches.length && <li className="text-xs text-neutral-500">No match. Create custom devices in the Device library.</li>}
@@ -185,8 +237,10 @@ export function BoardTab() {
           <Field label="Width (mm)"><input type="number" className="w-20" value={rig.board.width_mm} min={50} onChange={(e) => update((r) => { r.board.width_mm = Math.max(50, Number(e.target.value)); })} /></Field>
           <Field label="Depth (mm)"><input type="number" className="w-20" value={rig.board.depth_mm} min={50} onChange={(e) => update((r) => { r.board.depth_mm = Math.max(50, Number(e.target.value)); })} /></Field>
           <Field label="Grid (mm)"><input type="number" className="w-16" value={rig.board.grid_mm} min={1} onChange={(e) => update((r) => { r.board.grid_mm = Math.max(1, Number(e.target.value)); })} /></Field>
+          {boardModel}
           {viewControls}
         </div>
+        {specLine}
         <div className="flex flex-wrap items-center gap-3 text-xs">
           {cableControls}
           <span className="text-neutral-500 ml-auto">Drag device to move (edges snap to neighbours) · arrows nudge · R rotates · Delete removes · Ctrl+Z / Ctrl+Shift+Z undo/redo · <b>drag from a jack to a compatible jack to add a cable</b></span>

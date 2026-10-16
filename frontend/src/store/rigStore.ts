@@ -2,7 +2,8 @@
 
 import { create } from "zustand";
 import { api, ApiError, newId } from "@/lib/api";
-import type { Analysis, Connection, DeviceInstance, DeviceProfile, PortDirection, Rig, Scene, SignalKind } from "@/lib/types";
+import type { Analysis, Connection, DeviceInstance, DeviceProfile, PortDirection, Rig, Scene, SignalKind, Surface } from "@/lib/types";
+import { surfaceOf } from "@/lib/mounting";
 
 interface RigState {
   rig: Rig | null;
@@ -43,7 +44,8 @@ interface RigState {
   flush: () => void;
   select: (id: string | null) => void;
   selectScene: (id: string | null) => void;
-  addInstance: (profile: DeviceProfile) => string;
+  /** Place a device; `surface` defaults by category (instrument/amp off-board, otherwise top). */
+  addInstance: (profile: DeviceProfile, surface?: Surface) => string;
   removeInstance: (id: string) => void;
   addConnection: (c: Omit<Connection, "id" | "intentional"> & { intentional?: boolean }) => string;
   removeConnection: (id: string) => void;
@@ -277,10 +279,12 @@ export const useRigStore = create<RigState>((set, get) => ({
   select: (id) => set({ selectedInstanceId: id }),
   selectScene: (id) => set({ selectedSceneId: id }),
 
-  addInstance(profile) {
+  addInstance(profile, surface) {
     const id = newId("inst");
     const rig = get().rig;
-    const n = rig?.instances.length ?? 0;
+    const external = ["instrument", "amp"].includes(profile.category);
+    const where: Surface = external ? "off_board" : (surface ?? "top");
+    const n = rig?.instances.filter((i) => surfaceOf(i) === where).length ?? 0;
     get().update((r) => {
       r.instances.push({
         id,
@@ -290,7 +294,8 @@ export const useRigStore = create<RigState>((set, get) => ({
         y_mm: 20 + Math.floor(n / 4) * 130,
         rotation: 0,
         intentional_overlap: false,
-        off_board: ["instrument", "amp"].includes(profile.category),
+        off_board: where === "off_board",
+        surface: where,
         midi_channel: profile.midi.default_channel ?? null,
         port_overrides: [],
         removed_port_ids: [],

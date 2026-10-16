@@ -9,6 +9,8 @@ import { DeviceImageSection } from "@/components/images/DeviceImageSection";
 import { ConfigureJacksButton, JackMapper } from "@/components/images/JackMapper";
 import { api } from "@/lib/api";
 import { enclosureFill } from "@/lib/boardLayout";
+import { SURFACES, SURFACE_LABEL, setSurface, surfaceOf } from "@/lib/mounting";
+import type { Surface } from "@/lib/types";
 import { useState } from "react";
 import type { PortDef } from "@/lib/types";
 
@@ -36,18 +38,24 @@ export function InstanceInspector() {
         </div>
         <Field label="Label"><input value={inst.label} onChange={(e) => edit((i) => { i.label = e.target.value; })} /></Field>
         <div className="grid grid-cols-3 gap-2">
-          <Field label="X (mm)"><input type="number" value={inst.x_mm} onChange={(e) => edit((i) => { i.x_mm = Number(e.target.value); })} disabled={inst.off_board} /></Field>
-          <Field label="Y (mm)"><input type="number" value={inst.y_mm} onChange={(e) => edit((i) => { i.y_mm = Number(e.target.value); })} disabled={inst.off_board} /></Field>
+          <Field label="X (mm)"><input type="number" value={inst.x_mm} onChange={(e) => edit((i) => { i.x_mm = Number(e.target.value); })} disabled={surfaceOf(inst) === "off_board"} /></Field>
+          <Field label="Y (mm)"><input type="number" value={inst.y_mm} onChange={(e) => edit((i) => { i.y_mm = Number(e.target.value); })} disabled={surfaceOf(inst) === "off_board"} /></Field>
           <Field label="Rotation">
             <select value={inst.rotation} onChange={(e) => edit((i) => { i.rotation = Number(e.target.value) as Rotation; })}>
               {[0, 90, 180, 270].map((r) => <option key={r} value={r}>{r}°</option>)}
             </select>
           </Field>
         </div>
+        <Field label="Mounted on" hint={surfaceOf(inst) === "underside" ? "Same x/y as the top view, seen through the board from above (not mirrored). Fit under the board is checked against the device's height and the board's clearance." : undefined}>
+          <select value={surfaceOf(inst)} onChange={(e) => edit((i) => setSurface(i, e.target.value as Surface))} data-testid="inst-surface" aria-label="Mounted on">
+            {SURFACES.map((sf) => <option key={sf} value={sf}>{SURFACE_LABEL[sf]}</option>)}
+          </select>
+        </Field>
         <div className="text-neutral-600">
           Footprint: {geo ? `${Math.round(geo.width_mm * 10) / 10} × ${Math.round(geo.height_mm * 10) / 10} mm (rotated)` : "?"}{" "}
           {profile && <EvidenceBadge evidence={profile.footprint.width.evidence} />}{" "}
           {profile?.footprint.includes_jacks === null && <Badge tone="warn">jack inclusion unknown</Badge>}
+          {" · "}height {geo?.tall_mm != null ? `${geo.tall_mm} mm` : <Badge tone="warn">unknown</Badge>}{profile?.footprint.height.value_mm != null && <> <EvidenceBadge evidence={profile.footprint.height.evidence} /></>}
         </div>
         <div className="grid grid-cols-2 gap-2">
           <Field label="MIDI channel" hint={profile?.midi.interfaces.length ? `profile default: ${profile.midi.default_channel ?? "unknown"}` : "no MIDI interface"}>
@@ -55,7 +63,6 @@ export function InstanceInspector() {
           </Field>
           <div className="flex flex-col gap-1 pt-4">
             <label className="flex items-center gap-1"><input type="checkbox" checked={inst.intentional_overlap} onChange={(e) => edit((i) => { i.intentional_overlap = e.target.checked; })} /> Overlap is intentional</label>
-            <label className="flex items-center gap-1"><input type="checkbox" checked={inst.off_board} onChange={(e) => edit((i) => { i.off_board = e.target.checked; })} /> Off-board (guitar, amp, under-board)</label>
           </div>
         </div>
         <Field label="Notes"><textarea rows={2} value={inst.notes ?? ""} onChange={(e) => edit((i) => { i.notes = e.target.value || null; })} /></Field>

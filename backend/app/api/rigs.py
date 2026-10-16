@@ -47,6 +47,7 @@ def rig_preview(rig: Rig, profiles, assets=None) -> RigPreview:
                 height_mm=h,
                 category=prof.category.value if prof else "other",
                 off_board=inst.off_board,
+                surface=inst.mount,
                 placeholder=placeholder,
                 rotation=inst.rotation,
                 image=img if img and not img.get("missing") else None,

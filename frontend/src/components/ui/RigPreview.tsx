@@ -12,7 +12,7 @@ export function RigPreview({ preview, className = "" }: { preview: Preview | nul
   const pad = 8;
   const w = preview.width_mm + pad * 2;
   const h = preview.depth_mm + pad * 2;
-  const onBoard = preview.devices.filter((d) => !d.off_board);
+  const onBoard = preview.devices.filter((d) => (d.surface ?? (d.off_board ? "off_board" : "top")) === "top");
   return (
     <svg
       viewBox={`0 0 ${w} ${h}`}

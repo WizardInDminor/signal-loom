@@ -99,10 +99,34 @@ export interface DeviceProfile {
   source?: string;
 }
 
-export interface Board { name: string; width_mm: number; depth_mm: number; grid_mm: number; notes?: string | null }
+/** Where a device is mounted: on the board, under it (same x/y, seen through the board from above, not mirrored), or off the board. */
+export type Surface = "top" | "underside" | "off_board";
+export interface Board {
+  name: string; width_mm: number; depth_mm: number; grid_mm: number;
+  /** Manufacturer pedalboard (catalog id) or null for a custom board. */
+  model_id?: string | null;
+  /** Usable height under the board as measured by the user; null = not stated. */
+  underside_clearance_mm?: number | null; underside_clearance_note?: string | null;
+  notes?: string | null;
+}
+/** A manufacturer pedalboard as the catalog describes it (every figure with its evidence). */
+export interface PedalboardSpec {
+  id: string; manufacturer: string; model: string;
+  width: Measure; depth: Measure; height: Measure;
+  rails: number | null; rail_pitch: Measure;
+  underside_mountable: boolean | null; underside_clearance: Measure; open_front: boolean | null;
+  mounting_notes?: string | null; compatible_brackets: string[];
+  provenance: { source: string; url?: string | null; evidence: Evidence; license?: string | null; attribution?: string | null; retrieved?: string | null };
+  declared_unknowns: string[]; tags: string[];
+}
 export interface DeviceInstance {
   id: string; profile_id: string; label: string; x_mm: number; y_mm: number; rotation: Rotation;
-  intentional_overlap: boolean; off_board: boolean; midi_channel: number | null;
+  intentional_overlap: boolean;
+  /** Legacy flag (pre-surfaces rigs). Read the effective surface with `surfaceOf()`. */
+  off_board: boolean;
+  /** Mounting surface; null/absent on older rigs (derived from off_board). */
+  surface?: Surface | null;
+  midi_channel: number | null;
   port_overrides: PortDef[]; removed_port_ids: string[]; image?: DeviceImage | null; notes?: string | null;
 }
 export interface PortRef { instance_id: string; port_id: string }
@@ -131,7 +155,7 @@ export interface Rig {
   };
   notes?: string | null;
 }
-export interface PreviewDevice { x_mm: number; y_mm: number; width_mm: number; height_mm: number; category: string; off_board: boolean; placeholder: boolean; rotation: number; image: ResolvedImage | null }
+export interface PreviewDevice { x_mm: number; y_mm: number; width_mm: number; height_mm: number; category: string; off_board: boolean; surface: Surface; placeholder: boolean; rotation: number; image: ResolvedImage | null }
 export interface RigPreview { width_mm: number; depth_mm: number; devices: PreviewDevice[]; cable_count: number }
 export interface RigSummary { id: string; name: string; description?: string | null; created_at: string; updated_at: string; revision: number; instance_count: number; scene_count: number; preview?: RigPreview | null }
 
@@ -160,7 +184,9 @@ export interface Analysis {
   cable_kit: CableItem[];
   /** MIDI cables from the MC8 to every device it reaches, in order (through MIDI Thru and the Omniport). */
   midi: { controller_id: string | null; routes: Record<string, string[]> };
-  instances: Record<string, { width_mm: number; height_mm: number; placeholder: boolean; ports: PlacedPort[]; effective_ports: PortDef[]; unknowns: string[]; image: ResolvedImage | null }>;
+  /** The board as a physical object: its catalog spec (if any) and the usable height underneath. */
+  mounting: { spec: PedalboardSpec | null; clearance_mm: number | null; clearance_source: string; counts: Record<Surface, number> };
+  instances: Record<string, { width_mm: number; height_mm: number; placeholder: boolean; surface: Surface; tall_mm: number | null; ports: PlacedPort[]; effective_ports: PortDef[]; unknowns: string[]; image: ResolvedImage | null }>;
   compiled: { scenes: ScenePlan[]; mc8: { instance_id: string | null; firmware_assumed: string; limits: { banks: number; presets_per_bank: number; messages_per_preset: number; footswitch_positions: string[] }; banks: { number: number; name: string; diagnostics: Diagnostic[]; switches: SwitchPlan[] }[] }; diagnostics: Diagnostic[] };
 }
 export interface ExportStatus { [key: string]: { level: string; available: boolean; note: string } }

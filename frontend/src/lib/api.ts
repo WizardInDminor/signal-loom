@@ -1,4 +1,4 @@
-import type { Analysis, AssetRecord, DeviceProfile, ExportStatus, PortDef, Rig, RigSummary } from "./types";
+import type { Analysis, AssetRecord, DeviceProfile, ExportStatus, PedalboardSpec, PortDef, Rig, RigSummary } from "./types";
 
 export interface PortUsage { rig_id: string; rig_name: string; connection_id: string; connection_label: string | null; instance_id: string; instance_label: string; other_label: string; port_id?: string; change?: string }
 
@@ -87,6 +87,7 @@ export const api = {
     remove: (id: string) => request<void>(`/api/assets/images/${encodeURIComponent(id)}`, { method: "DELETE" }),
   },
   catalog: {
+    boards: () => request<PedalboardSpec[]>("/api/catalog/boards"),
     list: (q?: string, category?: string) => {
       const p = new URLSearchParams();
       if (q) p.set("q", q);

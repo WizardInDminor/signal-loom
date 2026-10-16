@@ -6,7 +6,9 @@ from enum import Enum
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from ..catalog.boards import builtin_boards
 from ..catalog.pedalplayground import parse_pedalplayground
+from ..models.board import PedalboardSpec
 from ..models.profile import DeviceProfile, PortDef
 from .deps import profile_repo
 
@@ -20,6 +22,12 @@ class ProfileOut(DeviceProfile):
 
 def _out(p: DeviceProfile, source: str) -> ProfileOut:
     return ProfileOut(**p.model_dump(), unknown_attributes=p.unknowns(), source=source)
+
+
+@router.get("/boards", response_model=list[PedalboardSpec])
+def list_boards():
+    """Manufacturer pedalboards (hand-authored, with evidence per figure)."""
+    return builtin_boards()
 
 
 @router.get("/devices", response_model=list[ProfileOut])
