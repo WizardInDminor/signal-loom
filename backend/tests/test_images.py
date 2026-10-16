@@ -224,3 +224,23 @@ def test_existing_rigs_without_images_are_unchanged(client):
     assert a["summary"]["errors"] == 0
     exported = client.get("/api/rigs/rig_demo_stereo/export").json()
     assert exported["format_version"] == 1 and "assets" in exported and exported["assets"] == []
+
+
+def test_unreferenced_assets_are_listed_and_cleaned_without_touching_used_ones(client):
+    used = _upload(client).json()
+    orphan_a = _upload(client).json()
+    orphan_b = _upload(client, _png_with_alpha(), name="o.png", ctype="image/png").json()
+    prof = client.get("/api/catalog/devices/eqd-plumes").json()
+    prof.pop("unknown_attributes")
+    prof.pop("source")
+    prof["image"] = {"asset_id": used["id"], "crop": CROP, "calibrated": True}
+    assert client.put("/api/catalog/devices/eqd-plumes", json=prof).status_code == 200
+    listed = {a["id"]: a["referenced"] for a in client.get("/api/assets/images").json()}
+    assert listed == {used["id"]: True, orphan_a["id"]: False, orphan_b["id"]: False}
+    r = client.delete("/api/assets/images/unreferenced")
+    assert r.status_code == 200 and sorted(r.json()["removed"]) == sorted([orphan_a["id"], orphan_b["id"]])
+    assert client.get(used["url"]).status_code == 200
+    assert client.get(orphan_a["url"]).status_code == 404 and client.get(orphan_b["url"]).status_code == 404
+    # Idempotent, and the literal path never collides with an asset id (ids are img_ + 12 hex).
+    assert client.delete("/api/assets/images/unreferenced").json()["count"] == 0
+    assert client.delete(used["url"]).status_code == 409

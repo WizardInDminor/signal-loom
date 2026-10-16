@@ -88,3 +88,30 @@ export function roundCrop(c: ImageCrop): ImageCrop {
   const r = (v: number) => Math.round(v * 10000) / 10000;
   return { x: r(c.x), y: r(c.y), w: r(c.w), h: r(c.h) };
 }
+
+/**
+ * Re-fit a selection to a target pixel aspect while keeping its centre and, where possible,
+ * its width: used when the lock is switched on, the picture is turned, or a replacement
+ * photograph has different pixel dimensions than the one the crop was made on.
+ */
+export function reconcileCrop(crop: ImageCrop, targetAspectPx: number, imgW: number, imgH: number): ImageCrop {
+  const cx = crop.x + crop.w / 2;
+  const cy = crop.y + crop.h / 2;
+  let w = crop.w;
+  let h = heightForWidth(w, targetAspectPx, imgW, imgH);
+  if (h > 1) {
+    h = 1;
+    w = widthForHeight(h, targetAspectPx, imgW, imgH);
+  }
+  if (w > 1) {
+    w = 1;
+    h = heightForWidth(w, targetAspectPx, imgW, imgH);
+  }
+  return clampCrop({ x: cx - w / 2, y: cy - h / 2, w, h });
+}
+
+/** True when the selection already has the target pixel aspect (within 1%). */
+export function cropMatches(crop: ImageCrop, targetAspectPx: number, imgW: number, imgH: number): boolean {
+  const sel = (crop.w * imgW) / (crop.h * imgH);
+  return Math.abs(sel / targetAspectPx - 1) < 0.01;
+}

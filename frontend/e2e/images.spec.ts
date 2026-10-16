@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import fs from "node:fs";
 import path from "node:path";
 
 // Session 3b: user device pictures. A guitarist photographs a pedal, draws a box around the
@@ -6,6 +7,7 @@ import path from "node:path";
 // layer only, so jacks, rotation and persistence behave exactly as before.
 
 const FIXTURE = path.join(__dirname, "fixtures", "pedal-photo.jpg");
+const LANDSCAPE = path.join(__dirname, "fixtures", "pedal-photo-landscape.jpg"); // 1200 × 900, pedal lying sideways
 const created: string[] = [];
 const createdProfiles: string[] = [];
 
@@ -98,7 +100,8 @@ test("pictures: upload, crop with handles and lock, save, see it at scale on the
   expect(Number(await rect.getAttribute("data-x"))).toBeGreaterThan(xBefore);
   // Unlock and draw a fresh, deliberately wide box: the report explains the margins instead of stretching.
   await editor.getByTestId("crop-lock").uncheck();
-  const ov2 = await page.getByTestId("crop-overlay").boundingBox(); // unchecking may have scrolled the page
+  await page.getByTestId("crop-overlay").scrollIntoViewIfNeeded(); // unchecking scrolled the page; bring the photo back
+  const ov2 = await page.getByTestId("crop-overlay").boundingBox();
   await page.mouse.move(ov2!.x + 10, ov2!.y + 10);
   await page.mouse.down();
   await page.mouse.move(ov2!.x + ov2!.width - 10, ov2!.y + ov2!.height / 2, { steps: 6 });
@@ -220,4 +223,143 @@ test("pictures: a device without dimensions can be cropped but is not called cal
   const bundled = await (await page.request.get(`/api/rigs/${rigId}/export?include_images=1`)).json();
   expect(bundled.format_version).toBe(2);
   expect(bundled.assets.length).toBeGreaterThanOrEqual(1);
+});
+
+/** A throwaway profile with Plumes' dimensions, visible in the Device library. */
+async function createTestProfile(page: Page) {
+  const plumes = await (await page.request.get("/api/catalog/devices/eqd-plumes")).json();
+  delete plumes.unknown_attributes;
+  delete plumes.source;
+  const profileId = `e2e-pedal-${Date.now().toString(36)}`;
+  const copy = { ...plumes, id: profileId, manufacturer: "E2E", model: `Test pedal ${profileId}`, builtin: false, provenance: { ...plumes.provenance, source: "user", evidence: "user" } };
+  expect((await page.request.post("/api/catalog/devices", { data: copy })).ok()).toBeTruthy();
+  createdProfiles.push(profileId);
+  return profileId;
+}
+
+const assetCount = async (page: Page) => ((await (await page.request.get("/api/assets/images")).json()) as unknown[]).length;
+const pxAspect = async (page: Page, imgW: number, imgH: number) => {
+  const r = page.getByTestId("crop-rect");
+  return (Number(await r.getAttribute("data-w")) * imgW) / (Number(await r.getAttribute("data-h")) * imgH);
+};
+
+test("pictures: the crop editor is usable at phone width with a landscape photograph, without horizontal overflow", async ({ page }) => {
+  const profileId = await createTestProfile(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/catalog");
+  await page.getByRole("button", { name: new RegExp(`Test pedal ${profileId}`) }).click();
+  const section = page.getByTestId("device-image-section");
+  await section.scrollIntoViewIfNeeded();
+  await section.getByTestId("device-image-section-file").setInputFiles(LANDSCAPE);
+  const editor = page.getByTestId("image-crop-editor");
+  await expect(editor).toBeVisible({ timeout: 15_000 });
+  // The canvas shrinks to the phone's width and the page does not scroll sideways.
+  const frame = await page.getByTestId("crop-frame").boundingBox();
+  expect(frame!.width).toBeLessThanOrEqual(390);
+  expect(frame!.width).toBeGreaterThan(250);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+  // The lock is on and the selection has the 64 × 121 proportions in the landscape picture's pixels.
+  await expect(editor.getByTestId("crop-lock")).toBeChecked();
+  expect(Math.abs((await pxAspect(page, 1200, 900)) - 64 / 121)).toBeLessThan(0.01);
+  // Resizing with a handle works at this scale: the normalized coordinates stay exact and in bounds.
+  const rect = editor.getByTestId("crop-rect");
+  const wBefore = Number(await rect.getAttribute("data-w"));
+  await editor.getByTestId("crop-handle-se").scrollIntoViewIfNeeded();
+  await dragBy(page, "crop-handle-se", -25, -25);
+  const after = { x: Number(await rect.getAttribute("data-x")), y: Number(await rect.getAttribute("data-y")), w: Number(await rect.getAttribute("data-w")), h: Number(await rect.getAttribute("data-h")) };
+  expect(after.w).toBeLessThan(wBefore);
+  expect(after.x).toBeGreaterThanOrEqual(0);
+  expect(after.x + after.w).toBeLessThanOrEqual(1.0001);
+  expect(after.y + after.h).toBeLessThanOrEqual(1.0001);
+  expect(Math.abs((await pxAspect(page, 1200, 900)) - 64 / 121)).toBeLessThan(0.01);
+  // Move it by dragging inside (touch-sized target), then save: the stored crop equals what was shown.
+  const frame2 = await page.getByTestId("crop-frame").boundingBox();
+  const cx = frame2!.x + (after.x + after.w / 2) * frame2!.width;
+  const cy = frame2!.y + (after.y + after.h / 2) * frame2!.height;
+  await page.mouse.move(cx, cy);
+  await page.mouse.down();
+  await page.mouse.move(cx + 30, cy, { steps: 4 });
+  await page.mouse.up();
+  const shown = { x: Number(await rect.getAttribute("data-x")), w: Number(await rect.getAttribute("data-w")) };
+  expect(shown.x).toBeGreaterThan(after.x);
+  await editor.getByTestId("crop-save").click();
+  await expect(editor).toHaveCount(0, { timeout: 15_000 });
+  const prof = await (await page.request.get(`/api/catalog/devices/${profileId}`)).json();
+  expect(prof.image.crop.x).toBeCloseTo(shown.x, 3);
+  expect(prof.image.crop.w).toBeCloseTo(shown.w, 3);
+  expect(prof.image.calibrated).toBe(true);
+});
+
+test("pictures: cancelled and replaced uploads are reclaimed; the library offers cleanup of unused pictures", async ({ page }) => {
+  const profileId = await createTestProfile(page);
+  await page.goto("/catalog");
+  await page.getByRole("button", { name: new RegExp(`Test pedal ${profileId}`) }).click();
+  const section = page.getByTestId("device-image-section");
+  await section.scrollIntoViewIfNeeded();
+  const baseline = await assetCount(page);
+  // Upload, replace twice inside the editor, then cancel: every upload of this attempt is gone.
+  await section.getByTestId("device-image-section-file").setInputFiles(FIXTURE);
+  const editor = page.getByTestId("image-crop-editor");
+  await expect(editor).toBeVisible({ timeout: 15_000 });
+  await expect.poll(() => assetCount(page)).toBe(baseline + 1);
+  await editor.locator('input[type="file"]').setInputFiles(LANDSCAPE);
+  await expect.poll(() => assetCount(page)).toBe(baseline + 2);
+  await editor.getByRole("button", { name: "Cancel" }).click();
+  await expect(editor).toHaveCount(0);
+  await expect.poll(() => assetCount(page)).toBe(baseline);
+  expect((await (await page.request.get(`/api/catalog/devices/${profileId}`)).json()).image).toBeNull();
+  // Save one, then replace it: the old picture is reclaimed because nothing uses it any more.
+  await section.getByTestId("device-image-section-file").setInputFiles(FIXTURE);
+  await expect(editor).toBeVisible({ timeout: 15_000 });
+  await editor.getByTestId("crop-save").click();
+  await expect(section.getByTestId("device-image-section-thumb")).toBeVisible({ timeout: 15_000 });
+  const first = (await (await page.request.get(`/api/catalog/devices/${profileId}`)).json()).image.asset_id as string;
+  await section.getByRole("button", { name: "Replace…" }).click({ trial: true }); // the button exists; the hidden input does the work
+  await section.getByTestId("device-image-section-file").setInputFiles(LANDSCAPE);
+  await expect(editor).toBeVisible({ timeout: 15_000 });
+  await editor.getByTestId("crop-save").click();
+  await expect(editor).toHaveCount(0, { timeout: 15_000 });
+  await expect.poll(async () => (await page.request.get(`/api/assets/images/${first}`)).status()).toBe(404);
+  await expect.poll(() => assetCount(page)).toBe(baseline + 1);
+  // An orphan created outside the editor shows up in the library's cleanup panel and can be removed there.
+  const unusedBefore = ((await (await page.request.get("/api/assets/images")).json()) as { referenced: boolean }[]).filter((a) => !a.referenced).length;
+  const orphan = await page.request.post("/api/assets/images", { multipart: { file: { name: "orphan.jpg", mimeType: "image/jpeg", buffer: fs.readFileSync(FIXTURE) } } });
+  expect(orphan.ok()).toBeTruthy();
+  await page.reload();
+  await expect(page.getByTestId("asset-unused-count")).toHaveText(String(unusedBefore + 1));
+  page.once("dialog", (d) => d.accept());
+  await page.getByTestId("asset-cleanup-remove").click();
+  await expect(page.getByTestId("asset-unused-count")).toHaveText("0");
+  const remaining = (await (await page.request.get("/api/assets/images")).json()) as { id: string; referenced: boolean }[];
+  expect(remaining.every((a) => a.referenced)).toBe(true); // only pictures still in use survive
+  const usedId = (await (await page.request.get(`/api/catalog/devices/${profileId}`)).json()).image.asset_id as string;
+  expect(remaining.some((a) => a.id === usedId)).toBe(true);
+});
+
+test("pictures: replacing a photograph with different proportions keeps the lock honest", async ({ page }) => {
+  const profileId = await createTestProfile(page);
+  await page.goto("/catalog");
+  await page.getByRole("button", { name: new RegExp(`Test pedal ${profileId}`) }).click();
+  const section = page.getByTestId("device-image-section");
+  await section.scrollIntoViewIfNeeded();
+  await section.getByTestId("device-image-section-file").setInputFiles(FIXTURE); // 900 × 1200 portrait
+  const editor = page.getByTestId("image-crop-editor");
+  await expect(editor).toBeVisible({ timeout: 15_000 });
+  const portrait = { w: Number(await editor.getByTestId("crop-rect").getAttribute("data-w")), h: Number(await editor.getByTestId("crop-rect").getAttribute("data-h")) };
+  expect(Math.abs((portrait.w * 900) / (portrait.h * 1200) - 64 / 121)).toBeLessThan(0.01);
+  // Replace inside the editor with the 1200 × 900 landscape picture: the same normalized crop
+  // would no longer have the footprint's proportions, so it is reconciled while the lock stays on.
+  await editor.locator('input[type="file"]').setInputFiles(LANDSCAPE);
+  await expect(editor.getByText("1200 × 900 px stored copy")).toBeVisible({ timeout: 15_000 });
+  await expect(editor.getByTestId("crop-lock")).toBeChecked();
+  expect(Math.abs((await pxAspect(page, 1200, 900)) - 64 / 121)).toBeLessThan(0.01);
+  await expect(editor.getByTestId("crop-fit-report")).toContainText("fills the footprint exactly");
+  // Same guarantee when a saved picture is replaced from the section (editor opens on the saved crop).
+  await editor.getByTestId("crop-save").click();
+  await expect(section.getByTestId("device-image-section-thumb")).toBeVisible({ timeout: 15_000 });
+  await section.getByTestId("device-image-section-file").setInputFiles(FIXTURE);
+  await expect(editor.getByText("900 × 1200 px stored copy")).toBeVisible({ timeout: 15_000 });
+  await expect(editor.getByTestId("crop-lock")).toBeChecked();
+  expect(Math.abs((await pxAspect(page, 900, 1200)) - 64 / 121)).toBeLessThan(0.01);
+  await editor.getByRole("button", { name: "Cancel" }).click();
 });

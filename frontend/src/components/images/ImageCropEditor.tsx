@@ -1,9 +1,9 @@
 "use client";
 
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { AssetRecord, DeviceImage, Evidence, ImageCrop, PortDef } from "@/lib/types";
 import { Badge, Button, EvidenceBadge, KIND_COLOR } from "@/components/ui/basics";
-import { centredCrop, clampCrop, fitReport, heightForWidth, MIN_CROP, roundCrop, targetSelectionAspect, widthForHeight } from "@/lib/imageFit";
+import { centredCrop, clampCrop, cropMatches, fitReport, heightForWidth, MIN_CROP, reconcileCrop, roundCrop, targetSelectionAspect, widthForHeight } from "@/lib/imageFit";
 import { DeviceImageGlyph } from "./DeviceImageGlyph";
 
 type Handle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
@@ -40,15 +40,41 @@ export function ImageCropEditor({ asset, initial, widthMm, depthMm, evidence, po
   const [fit, setFit] = useState<"contain" | "cover">(initial?.fit ?? "contain");
   const [lock, setLock] = useState(dims);
   const target = dims ? targetSelectionAspect(widthMm!, depthMm!, q) : null;
-  const [crop, setCrop] = useState<ImageCrop>(() => (initial ? initial.crop : dims ? centredCrop(targetSelectionAspect(widthMm!, depthMm!, 0), asset.width, asset.height) : { x: 0.1, y: 0.1, w: 0.8, h: 0.8 }));
+  // The initial selection: the saved crop, reconciled to this picture's pixel aspect when the
+  // lock is on (a replacement photograph may have different proportions than the one the crop
+  // was drawn on, and a locked checkbox must never sit next to an unlocked selection).
+  const [crop, setCrop] = useState<ImageCrop>(() => {
+    if (initial) {
+      const t = dims ? targetSelectionAspect(widthMm!, depthMm!, initial.rotation_quarter) : null;
+      return t && !cropMatches(initial.crop, t, asset.width, asset.height) ? reconcileCrop(initial.crop, t, asset.width, asset.height) : initial.crop;
+    }
+    return dims ? centredCrop(targetSelectionAspect(widthMm!, depthMm!, 0), asset.width, asset.height) : { x: 0.1, y: 0.1, w: 0.8, h: 0.8 };
+  });
   const [mode, setMode] = useState<Mode | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
+  const frameRef = useRef<HTMLDivElement>(null);
   const uid = useId().replace(/[^a-zA-Z0-9_-]/g, "");
 
-  // Displayed size of the photograph.
+  // Drawing space of the overlay (viewBox units). The frame itself is fluid: it fills the
+  // available width up to MAX_W and keeps the photograph's aspect, so on a phone or in the
+  // board inspector the canvas shrinks instead of overflowing. Pointer positions are mapped
+  // through the SVG's own screen transform, so normalized coordinates stay exact at any size.
   const scale = Math.min(MAX_W / asset.width, MAX_H / asset.height, 1);
   const dw = Math.round(asset.width * scale);
   const dh = Math.round(asset.height * scale);
+  const [renderW, setRenderW] = useState(dw);
+  useEffect(() => {
+    const el = frameRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width;
+      if (w) setRenderW(w);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  // Handles stay finger-sized (≈12 px) whatever the rendered scale.
+  const hs = 12 * (dw / Math.max(1, renderW));
 
   const toNorm = (e: React.PointerEvent): { x: number; y: number } => {
     const svg = svgRef.current!;
@@ -140,26 +166,11 @@ export function ImageCropEditor({ asset, initial, widthMm, depthMm, evidence, po
   const rotate = (dir: 1 | -1) => {
     const nq = (q + dir + 4) % 4;
     setQ(nq);
-    if (lock && dims) {
-      const t = targetSelectionAspect(widthMm!, depthMm!, nq);
-      const cx = crop.x + crop.w / 2;
-      const cy = crop.y + crop.h / 2;
-      let w = crop.w;
-      let h = heightForWidth(w, t, asset.width, asset.height);
-      if (h > 1) { h = 1; w = widthForHeight(h, t, asset.width, asset.height); }
-      setCrop(clampCrop({ x: cx - w / 2, y: cy - h / 2, w, h }));
-    }
+    if (lock && dims) setCrop(reconcileCrop(crop, targetSelectionAspect(widthMm!, depthMm!, nq), asset.width, asset.height));
   };
   const applyLock = (on: boolean) => {
     setLock(on);
-    if (on && target) {
-      const cx = crop.x + crop.w / 2;
-      const cy = crop.y + crop.h / 2;
-      let w = crop.w;
-      let h = heightForWidth(w, target, asset.width, asset.height);
-      if (h > 1) { h = 1; w = widthForHeight(h, target, asset.width, asset.height); }
-      setCrop(clampCrop({ x: cx - w / 2, y: cy - h / 2, w, h }));
-    }
+    if (on && target) setCrop(reconcileCrop(crop, target, asset.width, asset.height));
   };
 
   const report = dims ? fitReport({ crop, rotation_quarter: q, fit }, asset.width, asset.height, widthMm, depthMm) : null;
@@ -188,16 +199,17 @@ export function ImageCropEditor({ asset, initial, widthMm, depthMm, evidence, po
 
   return (
     <div className="flex flex-col gap-3 text-xs" data-testid="image-crop-editor">
-      <div className="grid lg:grid-cols-[auto_1fr] gap-4 items-start">
-        <div className="flex flex-col gap-1">
-          <div className="relative select-none touch-none" style={{ width: dw, height: dh }}>
+      {/* Columns depend on the editor's own width (inspector column, catalog page or phone), not the viewport. */}
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-4 items-start">
+        <div className="flex flex-col gap-1 min-w-0">
+          <div ref={frameRef} className="relative select-none touch-none w-full" style={{ maxWidth: dw, aspectRatio: `${asset.width} / ${asset.height}` }} data-testid="crop-frame">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={asset.url} alt="Uploaded photograph" width={dw} height={dh} className="block rounded" draggable={false} />
+            <img src={asset.url} alt="Uploaded photograph" width={dw} height={dh} className="block rounded w-full h-auto" draggable={false} />
             <svg
               ref={svgRef}
               viewBox={`0 0 ${dw} ${dh}`}
-              width={dw}
-              height={dh}
+              width="100%"
+              height="100%"
               className="absolute inset-0 rounded outline-none focus-visible:ring-2 ring-accent"
               role="application"
               aria-label="Crop selection: drag to draw, drag inside to move, drag handles to resize, arrow keys nudge"
@@ -228,7 +240,7 @@ export function ImageCropEditor({ asset, initial, widthMm, depthMm, evidence, po
                   </g>
                 ))}
                 {HANDLES.map((hd) => (
-                  <rect key={hd} data-testid={`crop-handle-${hd}`} x={hx(hd) - 5} y={hy(hd) - 5} width={10} height={10} rx={2} fill="#fff" stroke="#0f172a" strokeWidth={1} style={{ cursor: cursorFor[hd] }} onPointerDown={(e) => onDown(e, hd)} />
+                  <rect key={hd} data-testid={`crop-handle-${hd}`} x={hx(hd) - hs / 2} y={hy(hd) - hs / 2} width={hs} height={hs} rx={hs / 5} fill="#fff" stroke="#0f172a" strokeWidth={hs / 10} style={{ cursor: cursorFor[hd] }} onPointerDown={(e) => onDown(e, hd)} />
                 ))}
               </g>
             </svg>
@@ -239,7 +251,7 @@ export function ImageCropEditor({ asset, initial, widthMm, depthMm, evidence, po
           </div>
         </div>
 
-        <div className="flex flex-col gap-3 min-w-[260px]">
+        <div className="flex flex-col gap-3 min-w-0">
           <div>
             <h4 className="font-semibold mb-1">On the board</h4>
             <svg viewBox={`0 0 ${(pw + pad * 2) * ps} ${(pd + pad * 2) * ps}`} width={(pw + pad * 2) * ps} height={(pd + pad * 2) * ps} className="bg-neutral-900 rounded" role="img" aria-label="Preview of the picture fitted to the enclosure" data-testid="crop-preview">

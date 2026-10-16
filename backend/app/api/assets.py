@@ -22,7 +22,18 @@ def _get_or_404(store: AssetStore, asset_id: str):
 
 @router.get("/images")
 def list_images(request: Request):
-    return [r.as_dict() for r in asset_store(request).list()]
+    """Every stored picture with whether anything still uses it (so the UI can offer cleanup)."""
+    store = asset_store(request)
+    return [{**r.as_dict(), "referenced": store.is_referenced(r.id)} for r in store.list()]
+
+
+@router.delete("/images/unreferenced")
+def delete_unreferenced_images(request: Request):
+    """Remove pictures that no profile or placed unit uses any more (aborted crops, replaced photos).
+    Referenced assets are never touched."""
+    store = asset_store(request)
+    removed = [r.id for r in store.unreferenced() if store.delete(r.id)]
+    return {"removed": removed, "count": len(removed)}
 
 
 @router.post("/images", status_code=201)

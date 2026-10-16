@@ -170,6 +170,38 @@ Acceptance criteria 1–10 from the request are each exercised by the tests abov
 - The asset directory is not part of the SQLite file: back it up alongside, or use the
   image-inclusive export.
 
+### Review follow-up (image layer, 2026-10-16)
+
+The owner's review asked for three narrow changes; all three are in and tested:
+
+- **Fluid crop canvas.** The editor's photo frame now fills the available width (up to its
+  natural size) and keeps the photo's aspect ratio; the overlay maps pointer positions through
+  the SVG's own screen transform, so normalized coordinates stay exact at any size, and handles
+  stay finger-sized via a resize observer. The editor's two columns depend on the editor's own
+  width, not the viewport, so it works in the 340 px board inspector and on a 390 px phone. The
+  Device library page itself now shrinks to phone width (its wide jack tables scroll inside their
+  panel). Browser scenario: phone width, landscape photograph, no horizontal page scroll, locked
+  resize and move with exact persisted coordinates.
+- **No orphaned uploads.** Cancel discards every picture uploaded during that attempt (including
+  replacements chosen inside the editor); saving keeps the chosen one and reclaims the ones not
+  chosen plus the previously saved picture once nothing refers to it; Remove reclaims the removed
+  picture. Reclaiming is best-effort through the normal delete, which the server refuses (409)
+  for anything still referenced by another profile or unit. The Device library gains a
+  **Pictures on this computer** panel (count, unused count and size, *Remove unused pictures*)
+  backed by `GET /api/assets/images` (with a `referenced` flag) and
+  `DELETE /api/assets/images/unreferenced`, which never touches a referenced asset (backend
+  test). Browser scenario: upload → replace twice → cancel leaves the asset count unchanged;
+  save → replace reclaims the old picture; an orphan shows up in the panel and is removed there
+  while the used picture survives.
+- **Lock stays honest on replacement.** When a replacement photograph has different pixel
+  proportions, the saved crop is reconciled to the footprint's ratio (centre and width kept)
+  while the lock remains checked; the editor is remounted per picture so this always runs.
+  Browser scenario: portrait → landscape inside the editor, and landscape → portrait from the
+  section, both end with the lock checked and the selection at 64 : 121 in the new picture's
+  pixels.
+
+Counts after the follow-up: **77** backend tests, **28** browser scenarios.
+
 ## Two next ideas
 
 1. **Visual Advanced-mode editor on the Stage canvas**: drag from a Return jack to a Send jack

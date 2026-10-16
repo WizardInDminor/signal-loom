@@ -78,6 +78,8 @@ export const api = {
     inspectMl10x: (text: string) => request<{ ok: boolean; problems: string[]; midi_channel: number | null; device_id: number | null; connectors: { id: number; name: string; short_name: string; trails: boolean }[]; presets: { bank: number; number: number; global_number: number; name: string; advanced_mode: boolean }[]; settings: Record<string, unknown> }>("/api/rigs/inspect/ml10x-backup", { method: "POST", body: text }),
   },
   assets: {
+    list: () => request<(AssetRecord & { referenced: boolean })[]>("/api/assets/images"),
+    removeUnreferenced: () => request<{ removed: string[]; count: number }>("/api/assets/images/unreferenced", { method: "DELETE" }),
     upload: (file: File) => upload<AssetRecord>("/api/assets/images", file),
     meta: (id: string) => request<AssetRecord & { referenced_by: { profiles: string[]; rigs: string[] } }>(`/api/assets/images/${encodeURIComponent(id)}/meta`),
     remove: (id: string) => request<void>(`/api/assets/images/${encodeURIComponent(id)}`, { method: "DELETE" }),

@@ -30,6 +30,9 @@ export function DeviceImageSection({ value, onSave, widthMm, depthMm, evidence, 
   const asset = meta && meta.id === value?.asset_id ? meta.rec : null;
   const missing = !!meta && meta.id === value?.asset_id && meta.rec === null;
   const [editing, setEditing] = useState<{ asset: AssetRecord; initial: DeviceImage | null } | null>(null);
+  // Pictures uploaded in this editing session that no device refers to yet. Cancel discards
+  // them; saving keeps the chosen one and discards the rest, so aborted attempts never pile up.
+  const pendingRef = useRef<string[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -46,12 +49,25 @@ export function DeviceImageSection({ value, onSave, widthMm, depthMm, evidence, 
 
   const fail = (e: unknown) => setError(e instanceof ApiError ? e.message : e instanceof Error ? e.message : String(e));
 
+  /** Best-effort removal of assets nothing refers to any more; the server refuses (409) anything still used. */
+  const discard = async (ids: string[]) => {
+    for (const id of ids) {
+      try {
+        await api.assets.remove(id);
+      } catch {
+        /* still referenced elsewhere, or already gone: leave it */
+      }
+    }
+  };
+
   const uploadAndEdit = async (file: File, keepCrop: boolean) => {
     setError(null);
     setBusy("Uploading and checking the picture…");
     try {
       const rec = await api.assets.upload(file);
-      setEditing({ asset: rec, initial: keepCrop && value ? { ...value, asset_id: rec.id } : null });
+      pendingRef.current.push(rec.id);
+      const base = editing?.initial ?? value; // keep the crop being edited (or the saved one) on the new picture
+      setEditing({ asset: rec, initial: keepCrop && base ? { ...base, asset_id: rec.id } : null });
     } catch (e) {
       fail(e);
     } finally {
@@ -72,13 +88,25 @@ export function DeviceImageSection({ value, onSave, widthMm, depthMm, evidence, 
     setError(null);
     setBusy("Saving…");
     try {
+      const previous = value?.asset_id ?? null;
       await onSave(img);
       setEditing(null);
+      // Reclaim: uploads that were not chosen, and the previous picture if it is now unused.
+      const leftovers = pendingRef.current.filter((id) => id !== img?.asset_id);
+      pendingRef.current = [];
+      const replaced = previous && previous !== img?.asset_id ? [previous] : [];
+      await discard([...leftovers, ...replaced]);
     } catch (e) {
       fail(e);
     } finally {
       setBusy(null);
     }
+  };
+  const cancel = async () => {
+    const ids = pendingRef.current;
+    pendingRef.current = [];
+    setEditing(null);
+    await discard(ids);
   };
 
   const thumb = value && asset ? { asset_id: asset.id, missing: false as const, source: "profile" as const, url: asset.url, width: asset.width, height: asset.height, crop: value.crop, rotation_quarter: value.rotation_quarter, fit: value.fit, calibrated: value.calibrated } : null;
@@ -93,6 +121,7 @@ export function DeviceImageSection({ value, onSave, widthMm, depthMm, evidence, 
       {busy && <div className="text-neutral-500" aria-live="polite">{busy}</div>}
       {editing ? (
         <ImageCropEditor
+          key={editing.asset.id} // a replacement photograph gets a fresh editor, so the crop is reconciled to its pixels
           asset={editing.asset}
           initial={editing.initial}
           widthMm={widthMm}
@@ -102,7 +131,7 @@ export function DeviceImageSection({ value, onSave, widthMm, depthMm, evidence, 
           fill={fill}
           busy={!!busy}
           onSave={save}
-          onCancel={() => setEditing(null)}
+          onCancel={() => void cancel()}
           onReplace={(f) => void uploadAndEdit(f, true)}
         />
       ) : (

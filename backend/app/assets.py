@@ -220,6 +220,14 @@ class AssetStore:
             pass
         return True
 
+    def is_referenced(self, asset_id: str) -> bool:
+        refs = self.referenced_by(asset_id)
+        return bool(refs["profiles"] or refs["rigs"])
+
+    def unreferenced(self) -> list[AssetRecord]:
+        """Assets no profile image and no instance override points at (safe to remove)."""
+        return [r for r in self.list() if not self.is_referenced(r.id)]
+
     def referenced_by(self, asset_id: str) -> dict[str, list[str]]:
         """Profiles and rigs whose JSON mentions the asset id (profile images and instance overrides)."""
         if not is_asset_id(asset_id):
