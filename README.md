@@ -8,8 +8,9 @@ wiring (audio / MIDI / expression / power), reusable **scenes** that describe th
 state, and a compiler that turns scenes into an inspectable Morningstar **MC8** switch plan and
 **ML10X** routing plan. Nothing is ever sent to hardware; the app plans, validates and exports.
 
-Session 1 status, evidence levels and the hardware verification procedure are in
-[SESSION-1-RESULTS.md](SESSION-1-RESULTS.md). The domain model is described in
+Session reports: [SESSION-1-RESULTS.md](SESSION-1-RESULTS.md) (foundation) and
+[SESSION-2-RESULTS.md](SESSION-2-RESULTS.md) (jack-aware wiring, stereo routing, Morningstar
+tools, evidence levels and the hardware verification procedure). The domain model is described in
 [ARCHITECTURE.md](ARCHITECTURE.md); research and licensing findings in
 [docs/research.md](docs/research.md).
 
@@ -52,14 +53,15 @@ cd frontend && npm run dev
 ```
 
 Open <http://localhost:3000>. On a fresh database the backend applies its migrations, seeds the
-hand-authored device catalog and creates the **demo rig** (ML10X + MC8 + Plumes + Sunset +
-BigSky MX + three scenes). Set `SIGNAL_LOOM_DB=/path/to/file.sqlite3` to use another database
+hand-authored device catalog and creates two example rigs: the **mono demo** (ML10X + MC8 +
+Plumes + Sunset + BigSky MX, three scenes) and the **stereo demo** (mono drives in ML10X loops
+A/B, the BigSky MX as a stereo pair in loop C, Output Tip/Ring to two amps, Advanced presets). Set `SIGNAL_LOOM_DB=/path/to/file.sqlite3` to use another database
 and `SIGNAL_LOOM_NO_DEMO=1` to skip the demo rig. API docs: <http://127.0.0.1:8000/docs>.
 
 ## Test, lint, build
 
 ```bash
-# Backend: 50 unit/integration tests + lint
+# Backend: 64 unit/integration tests + lint
 cd backend && .venv/bin/pytest -q && .venv/bin/ruff check app tests && .venv/bin/ruff format --check app tests
 
 # Optional: fixture validation against real MC8 editor exports (downloads two public files,
@@ -75,6 +77,28 @@ cd frontend && npm run test:e2e
 ```
 
 GitHub Actions runs the same gates on every push (`.github/workflows/ci.yml`).
+
+## Working with the board and the wiring (Session 2)
+
+- **Cables start at real jacks.** On the Board tab, press on a jack dot and drag to another
+  jack: only compatible targets light up (same signal kind, opposite direction, an input that
+  has no plug yet). Drop to create the cable; it is validated like any other. The Wiring tab's
+  diagram does the same with click-then-click. Cables can be shown on the board per signal kind.
+- **Jack positions are editable graphically.** Select a device and drag its jacks on the
+  outline in the inspector (stored on that instance as a user-specified position), or edit a
+  profile's jacks in the Device library. The board, the wiring diagram, the cable kit and the
+  manifest all use the same position.
+- **Undo/redo** (buttons or Ctrl+Z / Ctrl+Shift+Z) covers every edit of the rig document.
+  Devices snap to the grid and to the edges of their neighbours while dragging.
+- **Stereo is traced per conductor.** The Wiring tab lists, for each ML10X preset, the left
+  path (Input Tip … Output Tip) and the right path (e.g. the return-only loop that carries a
+  stereo pedal's second output to Output Ring), with the physical Send/Return jack of every
+  loop. The **cable kit** turns the connections into TS cables, TRS-to-dual-TS breakouts, DIN
+  or TRS MIDI cables and DC leads.
+- **Scenes to switches.** Duplicate a scene, then pick its MC8 bank/switch directly in the
+  scene; switches already used by other scenes are disabled.
+- **Morningstar tools** (Exports tab): import an MC8 "Current Bank" backup into the plan, and
+  compare any two editor backups (MC8 or ML10X) field by field for controlled experiments.
 
 ## A short tour: the three-scene demo
 

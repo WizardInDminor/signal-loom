@@ -265,7 +265,8 @@ export function BoardCanvas({ view }: { view: BoardViewOptions }) {
         const dir = p.edge === "top" ? [0, -1] : p.edge === "bottom" ? [0, 1] : p.edge === "left" ? [-1, 0] : p.edge === "right" ? [1, 0] : [0, 0];
         const isCompat = compatible(key);
         const isOrigin = pendingCable?.instance_id === v.inst.id && pendingCable?.port_id === p.port_id;
-        const showLabel = view.showLabels || v.inst.id === selectedInstanceId || isCompat || isOrigin;
+        const crowdedDevice = (analysis?.instances[v.inst.id]?.ports.length ?? 0) > 12;
+        const showLabel = view.showLabels || (v.inst.id === selectedInstanceId && !crowdedDevice) || isCompat || isOrigin;
         const lx = v.x + dir[0] * 4;
         const ly = v.y + dir[1] * 4 + (dir[1] === 0 ? 2 : dir[1] < 0 ? -1 : 5);
         return (

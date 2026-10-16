@@ -16,7 +16,7 @@ export function JackEditor({
   onChange,
   selectedId,
   onSelect,
-  maxWidthPx = 260,
+  maxWidthPx = 300,
 }: {
   widthMm: number;
   depthMm: number;
@@ -29,6 +29,11 @@ export function JackEditor({
   const svgRef = useRef<SVGSVGElement>(null);
   const [drag, setDrag] = useState<{ id: string; edge: Edge; t: number } | null>(null);
   const pad = 24;
+  // On crowded edges (e.g. the ML10X's 28 top jacks) only the selected jack gets a label;
+  // every jack still has a hover tooltip.
+  const perEdge: Record<string, number> = {};
+  for (const p of ports) perEdge[p.edge] = (perEdge[p.edge] ?? 0) + 1;
+  const crowded = (edge: Edge) => (perEdge[edge] ?? 0) > 8;
   const scale = Math.min(maxWidthPx / (widthMm + pad * 2), 220 / (depthMm + pad * 2));
   const W = (widthMm + pad * 2) * scale;
   const H = (depthMm + pad * 2) * scale;
@@ -97,6 +102,9 @@ export function JackEditor({
     >
       <rect x={toPx(pad)} y={toPx(pad)} width={toPx(widthMm)} height={toPx(depthMm)} fill="#f3f4f6" stroke="#374151" strokeWidth={1} rx={3} />
       <text x={toPx(pad) + 4} y={toPx(pad) + 11} fontSize={9} fill="#6b7280">{Math.round(widthMm * 10) / 10} × {Math.round(depthMm * 10) / 10} mm · top edge = away from player</text>
+      {selectedId && ports.some((p) => p.id === selectedId) && (
+        <text x={toPx(pad) + 4} y={toPx(pad) + 22} fontSize={9} fill="#2563eb">selected: {ports.find((p) => p.id === selectedId)!.label}</text>
+      )}
       {ports.map((p, idx) => {
         const live = drag?.id === p.id ? place(p, drag.edge, drag.t) : place(p);
         const sel = selectedId === p.id;
@@ -110,7 +118,9 @@ export function JackEditor({
             <circle cx={toPx(live.x)} cy={toPx(live.y)} r={sel ? 7 : 5.5} fill={KIND_COLOR[p.kind]} stroke={sel ? "#111" : "#fff"} strokeWidth={sel ? 2 : 1} strokeDasharray={unknown ? "2 2" : undefined} data-testid={`jack-${p.id}`}>
               <title>{`${p.label} (${p.kind} ${p.direction})${unknown ? " — position unknown; drag to set" : ""}`}</title>
             </circle>
-            <text x={toPx(live.x) + dx} y={toPx(live.y) + dy + 3} fontSize={8} textAnchor={p.edge === "left" ? "end" : p.edge === "right" ? "start" : "middle"} fill="#374151">{p.label}</text>
+            {(!crowded(p.edge) || sel) && (
+              <text x={toPx(live.x) + dx} y={toPx(live.y) + dy + 3} fontSize={8} fontWeight={sel ? 600 : 400} textAnchor={p.edge === "left" ? "end" : p.edge === "right" ? "start" : "middle"} fill="#374151">{p.label}</text>
+            )}
           </g>
         );
       })}
