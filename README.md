@@ -91,6 +91,12 @@ GitHub Actions runs the same gates on every push (`.github/workflows/ci.yml`).
   manifest all use the same position.
 - **Undo/redo** (buttons or Ctrl+Z / Ctrl+Shift+Z) covers every edit of the rig document.
   Devices snap to the grid and to the edges of their neighbours while dragging.
+- **Fit and Expand.** The canvas area runs to the bottom of the window, and **Fit** picks the
+  zoom from both its width and height (with a margin) so the whole board, off-board devices
+  included, is on screen without scrolling; it keeps following window resizes until you move the
+  zoom slider yourself, and pressing Fit again hands control back. **Expand** gives the board the
+  whole window: zoom, Fit, undo/redo and the cable switches stay in the toolbar, the Add-device
+  and inspector column can be hidden and shown, and Esc (or Exit) restores the normal layout.
 - **Stereo is traced per conductor.** The Wiring tab lists, for each ML10X preset, the left
   path (Input Tip … Output Tip) and the right path (e.g. the return-only loop that carries a
   stereo pedal's second output to Output Ring), with the physical Send/Return jack of every
@@ -168,6 +174,10 @@ outline. Override the edge with the ▲ ▶ ▼ ◀ ◎ buttons if the guess is 
 connector facts you enter are stored with *user* evidence, separate from the catalog's
 third-party dimensions. Markers are kept in photo coordinates, so recropping the picture never
 moves a jack; a replaced photograph flags markers that were placed on the previous one.
+
+The photograph sits centred in the mapping area with a margin on every side, so markers and
+labels on a top-mounted row are never pressed against the edge; a small picture is scaled up to
+the area, and zooming scrolls the whole picture including that margin.
 
 Jack ids are stable handles for cables. Removing or renaming a jack that a cable in any of your
 rigs uses, or changing what it is (an audio input becoming a MIDI input, an output becoming an

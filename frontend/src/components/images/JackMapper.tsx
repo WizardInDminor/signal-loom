@@ -25,6 +25,8 @@ import {
 } from "@/lib/jackMapping";
 
 const MAX_W = 760;
+/** CSS px of dark margin kept around the photograph in the mapping viewport at every zoom. */
+const FRAME_PAD = 36;
 const EDGES: { edge: Edge; glyph: string }[] = [
   { edge: "top", glyph: "▲" },
   { edge: "right", glyph: "▶" },
@@ -109,9 +111,11 @@ export function JackMapper({ profileId, title, ports, image, widthMm, depthMm, f
   const dw = asset ? Math.round(asset.width * scale) : 1;
   const dh = asset ? Math.round(asset.height * scale) : 1;
   const px = (n: number) => n * (dw / Math.max(1, renderW)); // n screen px → viewBox units
-  // At zoom 1 the whole photograph fits the visible area (plugs outside the crop included); zoom
-  // enlarges from there and the area scrolls.
-  const fitW = asset && viewport ? Math.max(120, Math.min(viewport.w - 2, (viewport.h - 2) * (asset.width / asset.height), dw)) : dw;
+  // At zoom 1 the whole photograph fits the visible area (plugs outside the crop included) with
+  // breathing room on every side, so markers and labels on a top-mounted row are not pressed
+  // against the viewport edge; zoom enlarges from there and the area scrolls. A small photo is
+  // scaled up to the area: this is an annotation surface, not a print.
+  const fitW = asset && viewport ? Math.max(120, Math.min(viewport.w - 2 * FRAME_PAD, (viewport.h - 2 * FRAME_PAD) * (asset.width / asset.height))) : dw;
   const frameW = Math.round(fitW * zoom);
 
   const commit = useCallback((next: PortDef[] | ((d: PortDef[]) => PortDef[])) => {
@@ -384,12 +388,16 @@ export function JackMapper({ profileId, title, ports, image, widthMm, depthMm, f
               )}
               <label className="ml-auto flex items-center gap-1">Zoom <input type="range" min={1} max={3} step={0.25} value={zoom} onChange={(e) => setZoom(Number(e.target.value))} aria-label="Zoom" /> {zoom.toFixed(2)}×</label>
             </div>
-            <div ref={scrollRef} className="overflow-auto h-[62vh] min-h-[320px] rounded border border-line bg-neutral-900/90 relative" data-testid="jacks-scroll">
+            {/* The photo sits centred in the dark area (auto margins inside a flex box: centred while it
+                fits, scrollable from the top-left corner once zoomed past the area), with FRAME_PAD of
+                margin on every side so markers and labels at the photo's edge stay visible. */}
+            <div ref={scrollRef} className="overflow-auto h-[62vh] min-h-[320px] rounded border border-line bg-neutral-900/90 relative flex" data-testid="jacks-scroll">
               {!asset ? <div className="p-6 text-xs text-neutral-300">Loading the picture…</div> : (
-                <div ref={frameRef} className="relative select-none touch-none mx-auto" style={{ width: frameW, aspectRatio: `${asset.width} / ${asset.height}` }} data-testid="jacks-frame">
+                <div className="m-auto shrink-0" style={{ padding: FRAME_PAD }}>
+                <div ref={frameRef} className="relative select-none touch-none" style={{ width: frameW, aspectRatio: `${asset.width} / ${asset.height}` }} data-testid="jacks-frame">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={asset.url} alt="Device photograph" width={dw} height={dh} className="block w-full h-auto" draggable={false} />
-                  <svg ref={svgRef} viewBox={`0 0 ${dw} ${dh}`} width="100%" height="100%" className="absolute inset-0" style={{ cursor: mode === "add" ? "crosshair" : "default" }} data-testid="jacks-overlay" onPointerDown={onCanvasDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
+                  <svg ref={svgRef} viewBox={`0 0 ${dw} ${dh}`} width="100%" height="100%" className="absolute inset-0 overflow-visible" style={{ cursor: mode === "add" ? "crosshair" : "default" }} data-testid="jacks-overlay" onPointerDown={onCanvasDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
                     {/* enclosure crop and its top edge */}
                     {cropPts && (
                       <polygon points={cropPts.map((p) => `${p.x * dw},${p.y * dh}`).join(" ")} fill="none" stroke="#fbbf24" strokeWidth={px(1.5)} strokeDasharray={`${px(6)} ${px(4)}`} pointerEvents="none" data-testid="jacks-crop" />
@@ -435,6 +443,7 @@ export function JackMapper({ profileId, title, ports, image, widthMm, depthMm, f
                       {editorCard()}
                     </div>
                   )}
+                </div>
                 </div>
               )}
             </div>

@@ -287,6 +287,46 @@ The owner's review of the mapper found three narrow problems; all three are fixe
 
 Counts after the follow-up: 84 backend tests, 31 browser scenarios, lint/typecheck/build clean.
 
+## Usability pass after first hands-on use (2026-10-16)
+
+The owner populated a board with photographs of real pedals, mapped their jacks, and asked for
+three comfort fixes before evaluating wiring and scenes for real. No redesign; three targeted
+changes, each with a browser scenario at several window sizes.
+
+1. **Jack mapper: the photo hugged the top of the viewport.** The frame was centred
+   horizontally but anchored to the top, and a small picture was never scaled up, so a wide or
+   small photo left a slab of empty dark space below while a top-mounted jack row and its labels
+   were pressed against the upper edge (the SVG also clipped anything above the photo). The frame
+   now sits inside a flex box with auto margins (centred while it fits; scrollable from the
+   top-left once zoomed past the area) and 36 px of padding on every side, the fit ignores the
+   picture's natural size, and the marker layer may overflow the photo. Pointer coordinates go
+   through the SVG's screen transform as before, so anchors, crop boundary and cable-exit
+   positions are unchanged. Scenario: centred within 3 px at 1280×800, 1024×680 and 1600×1000;
+   a click 3 % from the top edge yields a marker with that exact anchor, fully visible; zoom 2.5×
+   scrolls in both axes and the far corner plus its margin is reachable; coordinates stay exact;
+   a second jack placed while zoomed lands where it was clicked.
+2. **Board Fit only looked at width.** It divided the container's width by the drawing's width,
+   rounded to 0.1 and ignored height, and the container's `max-height` made its visible height
+   depend on its content, so Fit could not know how much room there was. The canvas area now has
+   a definite height (from where it starts down to the bottom of the window in the normal
+   layout; the remaining flex space in the expanded one), `fitZoom()` takes the minimum of the
+   width and height ratios with a 16 px margin on every side, and a resize observer keeps
+   refitting while the zoom is "fitted"; moving the slider stops that for the current rig until
+   Fit is pressed again. Opening another rig starts fitted. The mm ↔ px transforms in
+   `BoardCanvas` are untouched (zoom is still px/mm). Scenario: fitted at 1280×800, 1400×640
+   (height-bound), 900×1000 (width-bound), canvas bottom inside the window each time; slider to
+   3.0 → overflow, a resize leaves 3.0 alone; Fit → fitted again and following resizes.
+3. **Expanded workspace.** *Expand* (next to Fit) renders the Board tab as a fixed, window-filling
+   region: the title, zoom, Fit, Exit, undo/redo and the cable/label/clearance switches stay in
+   the toolbar; the Add-device + inspector column is a toggle on the right; Esc (when no cable is
+   being drawn and no field has focus) or Exit returns to the normal layout, with diagnostics and
+   board fields back. Same `BoardCanvas`, same store, so dragging devices, selecting jacks and
+   drawing cables are unchanged. Scenario: the canvas area takes > 65 % of the window width with
+   the column open and > 95 % with it hidden, the fit follows; select a device (its label in the
+   inspector), drag it, wire Send D → BigSky In R, Esc, and the rig carries both edits.
+
+Counts after the pass: 84 backend tests, 34 browser scenarios (3 new), lint/typecheck/build clean.
+
 ## Two next ideas
 
 1. **Visual Advanced-mode editor on the Stage canvas**: drag from a Return jack to a Send jack
