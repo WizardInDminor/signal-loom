@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Literal
 
 from pydantic import Field, model_validator
@@ -202,6 +203,10 @@ class Provenance(StrictModel):
     retrieved: str | None = None
 
 
+# A declared unknown that is about the jack list itself ("ports (not in dataset)", "jacks").
+_PORTS_UNKNOWN = re.compile(r"^\s*(ports?|jacks?|connectors?)\b", re.IGNORECASE)
+
+
 class DeviceProfile(StrictModel):
     id: str
     manufacturer: str
@@ -232,6 +237,15 @@ class DeviceProfile(StrictModel):
             if p.id == port_id:
                 return p
         return None
+
+    def reconcile_declared_unknowns(self) -> None:
+        """Drop a declared "ports unknown" marker once the profile actually has jacks.
+
+        Importers declare e.g. ``"ports (not in dataset)"``; after the user maps the jacks that
+        claim is simply false, while separately declared power/MIDI facts stay unknown until
+        they are stated. Only the ports marker is touched."""
+        if self.ports:
+            self.declared_unknowns = [u for u in self.declared_unknowns if not _PORTS_UNKNOWN.match(u)]
 
     def unknowns(self) -> list[str]:
         """Compute the list of attributes that are unknown, for honest UI display."""

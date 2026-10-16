@@ -254,6 +254,39 @@ cables use shows the affected cables and requires *Remove anyway*.
 - The "to place" flow places template jacks in list order; reordering is by removing and
   re-adding.
 
+### Review follow-up (jack mapper, 2026-10-16)
+
+The owner's review of the mapper found three narrow problems; all three are fixed with tests.
+
+1. **Undo after a drag put the marker back where it already was.** The drag handler recorded
+   the *post*-drag jacks as the undo step. The jacks as they were when the pointer went down are
+   now captured in a ref and pushed on pointer-up. Writing the test exposed a second, quieter
+   bug: after choosing a template (its buttons unmount) or closing the popover, keyboard focus
+   fell to the document body, so Ctrl+Z, arrows and Delete did nothing until the user clicked a
+   button. Pointer work on the photo now refocuses the dialog. The first browser scenario drags
+   a marker, presses Ctrl+Z and asserts anchor, edge and position are exactly as before.
+2. **"ports (not in dataset)" survived the mapping.** The importer declares that string, and
+   `unknowns()` always echoed it. `DeviceProfile.reconcile_declared_unknowns()` drops only a
+   declared unknown that is *about the jack list* once the profile has jacks; the separately
+   declared power/MIDI unknowns stay until stated. Both the ports-only endpoint and the full
+   profile save call it. Backend and browser tests assert the ports marker is gone and the power
+   marker still shows after a mapping.
+3. **Retyping a wired jack slipped past the guard.** The ports-only endpoint now compares, per
+   retained id, what a cable relies on (`kind`, `direction`, `connector`, `audio_channel`,
+   `trs_role`, `midi_trs_type`, `pair_group`, `role`) and refuses a change on a jack that a cable
+   uses with the same 409 `ports_in_use` shape, each affected cable now carrying a `change`
+   string (`"removed"` or e.g. `"kind audio → midi; connector ts_1_4 → din5"`). Filling in or
+   un-stating a value (`unknown`/None on either side) is a refinement, not a contradiction, and
+   passes; so do labels, positions, anchors, clearance and notes. The mapper's dialog explains
+   the difference, offers *Keep those jacks as they were* (restores the original type while
+   keeping the label/anchor edits) or *Change anyway*; after a forced retype the wiring check
+   flags the cable with `connection.kind_mismatch`. Tests: audio→MIDI and out→in refused with
+   the right `change`, cosmetic/refining edits accepted, forced change flagged; the browser
+   scenario retypes the wired input from the dropdown, sees the dialog, keeps, and confirms the
+   type is back.
+
+Counts after the follow-up: 84 backend tests, 31 browser scenarios, lint/typecheck/build clean.
+
 ## Two next ideas
 
 1. **Visual Advanced-mode editor on the Stage canvas**: drag from a Return jack to a Send jack

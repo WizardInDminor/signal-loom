@@ -181,9 +181,16 @@ anchor on that edge. Nothing is invented beyond the click itself; positions set 
 Persistence goes through `PUT /api/catalog/devices/{id}/ports`, which replaces only the jack
 list (dimensions, provenance, picture, MIDI and power data are untouched). Jack ids are stable
 handles for cables: `ProfileRepository.port_usage` lists every cable, in every rig, plugged into
-each jack, and the endpoint refuses (409 `ports_in_use`, affected cables listed) to drop an id a
-cable uses unless `force` is set; the cable is then flagged by the existing
-`connection.port_missing` diagnostic rather than deleted. TRS semantics are untouched: a stereo
+each jack, and the endpoint refuses (409 `ports_in_use`, affected cables listed, each with a
+`change` of `"removed"` or the semantic diff) to drop an id a cable uses, or to change what a
+used jack *is* (`kind`, `direction`, `connector`, `audio_channel`, `trs_role`, `midi_trs_type`,
+`pair_group`, `role`; see `PORT_SEMANTIC_FIELDS`), unless `force` is set. Labels, positions,
+anchors and clearance change freely, and filling in or un-stating a value is not a change. A
+forced removal is then flagged by the existing `connection.port_missing` diagnostic and a forced
+retype by `connection.kind_mismatch`/`connection.direction`, rather than any cable being deleted.
+Saving jacks also calls `DeviceProfile.reconcile_declared_unknowns()`, which drops an importer's
+"ports (not in dataset)" marker once the profile has jacks while leaving the power/MIDI unknowns
+alone. TRS semantics are untouched: a stereo
 TRS jack is one port with `audio_channel = stereo_trs`; an L/R pair is two ports sharing a
 `pair_group`; per-conductor ML10X ports keep their `pair_group`/`loop` facts.
 

@@ -34,6 +34,8 @@ const EDGES: { edge: Edge; glyph: string }[] = [
 ];
 
 type Conflict = { message: string; affected: PortUsage[] };
+/** What a cable relies on about its jack; the server refuses to change these on a used jack until confirmed. */
+const SEMANTIC_FIELDS = ["kind", "direction", "connector", "audio_channel", "trs_role", "midi_trs_type", "pair_group", "role"] as const;
 
 /**
  * Configure Jacks: point at a connector in the photograph, say what it is, and get a wired
@@ -65,6 +67,7 @@ export function JackMapper({ profileId, title, ports, image, widthMm, depthMm, f
   const [pinned, setPinned] = useState<Set<string>>(new Set());
   const [drag, setDrag] = useState<string | null>(null);
   const [moved, setMoved] = useState(false);
+  const dragStart = useRef<PortDef[] | null>(null); // the jacks as they were when the drag began
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [conflict, setConflict] = useState<Conflict | null>(null);
@@ -147,9 +150,13 @@ export function JackMapper({ profileId, title, ports, image, widthMm, depthMm, f
 
   const unplaced = draft.filter((p) => p.position == null && !(p.image_anchor && p.image_anchor.asset_id === asset?.id));
 
+  // Pointer work on the photo brings keyboard focus back to the dialog (the template buttons or
+  // a closed popover may have left it on the document body), so arrows / Delete / Ctrl+Z work.
+  const focusPanel = () => { if (!panelRef.current?.contains(document.activeElement)) panelRef.current?.focus(); };
   const onCanvasDown = (e: React.PointerEvent) => {
     if (!frame || !asset) return;
     e.preventDefault();
+    focusPanel();
     const p = toNorm(e);
     if (mode === "select") { setSelected(null); return; }
     const pending = unplaced[0];
@@ -169,9 +176,11 @@ export function JackMapper({ profileId, title, ports, image, widthMm, depthMm, f
     e.stopPropagation();
     e.preventDefault();
     svgRef.current?.setPointerCapture?.(e.pointerId);
+    focusPanel();
     setSelected(id);
     setDrag(id);
     setMoved(false);
+    dragStart.current = draft;
   };
   const onMove = (e: React.PointerEvent) => {
     if (!drag || !frame) return;
@@ -180,7 +189,10 @@ export function JackMapper({ profileId, title, ports, image, widthMm, depthMm, f
     setDraft((d) => d.map((x) => (x.id === drag ? placeAt(x, p, frame, pinned.has(x.id)) : x)));
   };
   const onUp = () => {
-    if (drag && moved) setHistory((h) => [...h.slice(-49), draft]); // one undo step per drag
+    // One undo step per drag, recording where the marker *was* so Undo puts it back.
+    const start = dragStart.current;
+    if (drag && moved && start) setHistory((h) => [...h.slice(-49), start]);
+    dragStart.current = null;
     setDrag(null);
   };
 
@@ -235,10 +247,20 @@ export function JackMapper({ profileId, title, ports, image, widthMm, depthMm, f
     }
   };
   const keepRemoved = () => {
-    // Put back the original definitions of the jacks the user removed/renamed, then continue editing.
+    // Put back the jacks the user removed/renamed, and the original type of the ones they
+    // retyped (label, position and anchor edits are kept), then continue editing.
     const ids = new Set(conflict?.affected.map((a) => a.port_id));
     const originals = ports.filter((p) => ids.has(p.id) && !draft.some((d) => d.id === p.id));
-    commit((d) => [...d, ...originals]);
+    commit((d) => [
+      ...d.map((x) => {
+        const o = ids.has(x.id) ? ports.find((p) => p.id === x.id) : undefined;
+        if (!o) return x;
+        const back = { ...x };
+        for (const f of SEMANTIC_FIELDS) (back as Record<string, unknown>)[f] = o[f];
+        return back;
+      }),
+      ...originals,
+    ]);
     setConflict(null);
   };
 
@@ -473,15 +495,15 @@ export function JackMapper({ profileId, title, ports, image, widthMm, depthMm, f
         {/* ------------------------------------------------ conflict dialog */}
         {conflict && (
           <div className="absolute inset-0 z-20 bg-black/40 flex items-center justify-center p-4" role="presentation">
-            <div role="alertdialog" aria-modal="true" aria-label="Cables use the jacks you are removing" className="bg-panel rounded-lg shadow-xl max-w-[560px] w-full p-4 text-xs flex flex-col gap-2" data-testid="jacks-conflict">
-              <h3 className="font-semibold text-sm">Cables are plugged into jacks you are removing or renaming</h3>
-              <p>{conflict.message}. Those cables would be left pointing at a jack that no longer exists; the wiring check will flag each of them.</p>
+            <div role="alertdialog" aria-modal="true" aria-label="Cables use the jacks you are changing" className="bg-panel rounded-lg shadow-xl max-w-[560px] w-full p-4 text-xs flex flex-col gap-2" data-testid="jacks-conflict">
+              <h3 className="font-semibold text-sm">Cables are plugged into jacks you are {conflict.affected.every((a) => a.change && a.change !== "removed") ? "changing" : conflict.affected.some((a) => a.change && a.change !== "removed") ? "removing or changing" : "removing or renaming"}</h3>
+              <p>{conflict.message}. A removed jack leaves its cables pointing at nothing; a retyped one makes them join signals that do not match. Nothing is deleted, and the wiring check will flag each of them.</p>
               <ul className="list-disc pl-4 max-h-48 overflow-auto">
-                {conflict.affected.map((a) => <li key={a.connection_id}><b>{a.port_id}</b> · {a.rig_name}: {a.instance_label} → {a.other_label}{a.connection_label ? ` (“${a.connection_label}”)` : ""}</li>)}
+                {conflict.affected.map((a) => <li key={`${a.port_id}-${a.connection_id}`}><b>{a.port_id}</b>{a.change && a.change !== "removed" ? <span className="text-amber-700"> ({a.change})</span> : " (removed)"} · {a.rig_name}: {a.instance_label} → {a.other_label}{a.connection_label ? ` (“${a.connection_label}”)` : ""}</li>)}
               </ul>
               <div className="flex justify-end gap-2">
-                <Button onClick={keepRemoved} data-testid="jacks-conflict-keep">Keep those jacks</Button>
-                <Button variant="danger" onClick={() => void save(true)} data-testid="jacks-conflict-force">Remove anyway</Button>
+                <Button onClick={keepRemoved} data-testid="jacks-conflict-keep">Keep those jacks as they were</Button>
+                <Button variant="danger" onClick={() => void save(true)} data-testid="jacks-conflict-force">{conflict.affected.some((a) => a.change === "removed" || !a.change) ? "Remove anyway" : "Change anyway"}</Button>
               </div>
             </div>
           </div>

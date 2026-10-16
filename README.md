@@ -170,8 +170,12 @@ third-party dimensions. Markers are kept in photo coordinates, so recropping the
 moves a jack; a replaced photograph flags markers that were placed on the previous one.
 
 Jack ids are stable handles for cables. Removing or renaming a jack that a cable in any of your
-rigs uses is refused with the list of affected cables until you explicitly choose *Remove
-anyway*; the cables are then flagged by the wiring check, never deleted silently.
+rigs uses, or changing what it is (an audio input becoming a MIDI input, an output becoming an
+input, a different connector or channel), is refused with the list of affected cables until you
+explicitly choose *Remove anyway* / *Change anyway*; the cables are then flagged by the wiring
+check, never deleted silently. Labels, positions and photo markers change freely. Once an
+imported pedal has its jacks mapped, the import's "ports (not in dataset)" note disappears from
+its unknowns; power and MIDI stay marked unknown until you fill them in.
 
 ## A short tour: the three-scene demo
 

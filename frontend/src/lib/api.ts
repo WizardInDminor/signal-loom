@@ -1,6 +1,6 @@
 import type { Analysis, AssetRecord, DeviceProfile, ExportStatus, PortDef, Rig, RigSummary } from "./types";
 
-export interface PortUsage { rig_id: string; rig_name: string; connection_id: string; connection_label: string | null; instance_id: string; instance_label: string; other_label: string; port_id?: string }
+export interface PortUsage { rig_id: string; rig_name: string; connection_id: string; connection_label: string | null; instance_id: string; instance_label: string; other_label: string; port_id?: string; change?: string }
 
 export class ApiError extends Error {
   status: number;

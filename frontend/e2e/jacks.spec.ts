@@ -100,13 +100,18 @@ test("jack mapping: imported pedal → click In, Out, DC on the photo → move a
   expect(dc.y).toBeLessThan(CROP.y); // the anchor really is outside the enclosure crop
   await expect(page.getByTestId("jack-list")).not.toContainText("to place");
 
-  // Move "Out" down its edge by dragging; edit "In"'s label.
+  // Move "Out" down its edge by dragging; Undo puts it back exactly where it was; drag again.
   const before = await markerData(page, "out");
+  await dragMarker(page, "out", 0, 60);
+  expect((await markerData(page, "out")).y).toBeGreaterThan(before.y);
+  await page.keyboard.press("Control+z");
+  expect(await markerData(page, "out")).toEqual(before);
   await dragMarker(page, "out", 0, 60);
   const after = await markerData(page, "out");
   expect(after.y).toBeGreaterThan(before.y);
   expect(after.edge).toBe("left");
   expect(after.position).toBeGreaterThan(before.position);
+  // Edit "In"'s label.
   await marker(page, "in").locator("circle").click();
   await page.getByTestId("jack-label").fill("Input");
   // A pedal with the preset "keep adding" on still lets you switch the next jack's type.
@@ -127,6 +132,11 @@ test("jack mapping: imported pedal → click In, Out, DC on the photo → move a
   // Third-party dimensions and attribution are untouched.
   expect(saved.footprint.width.evidence).toBe("third_party");
   expect(saved.provenance.source).toBe("pedalplayground_import");
+  // The importer's "ports unknown" claim is gone (the jacks are mapped); power and MIDI stay unknown.
+  expect(saved.unknown_attributes).not.toContain("ports (not in dataset)");
+  expect(saved.unknown_attributes).toContain("power (not in dataset)");
+  await expect(page.getByText("power (not in dataset)")).toBeVisible();
+  await expect(page.getByText("ports (not in dataset)")).toHaveCount(0);
 
   // Place it on a board next to an amp and wire Out → amp input with the new jack.
   const rig = await (await page.request.post("/api/rigs", { data: { name: `E2E jacks ${Date.now()}` } })).json();
@@ -195,6 +205,21 @@ test("jack mapping: existing jacks are shown and improvable; removing a wired ja
   await expect(page.getByTestId("jack-row-in")).toContainText("🔌1");
   // Drag "in" onto the connector: it becomes placed on this photo with user evidence, same id.
   await dragMarker(page, "in", 30, 40);
+  await expect(marker(page, "in")).toHaveAttribute("data-derived", "false");
+  // Retype the wired "in" as a MIDI input (same id): the server refuses until confirmed; keep
+  // restores its type while the drag above (its anchor) is kept.
+  await marker(page, "in").locator("circle").click();
+  await page.getByTestId("jack-type").selectOption("midi_in");
+  await page.getByTestId("jacks-save").click();
+  const retype = page.getByTestId("jacks-conflict");
+  await expect(retype).toBeVisible();
+  await expect(retype).toContainText("changing");
+  await expect(retype).toContainText("kind audio → midi");
+  await expect(retype).toContainText("Guitar: out");
+  await page.getByTestId("jacks-conflict-keep").click();
+  await expect(retype).toHaveCount(0);
+  await marker(page, "in").locator("circle").click();
+  await expect(page.getByTestId("jack-type")).toHaveValue("audio_in");
   await expect(marker(page, "in")).toHaveAttribute("data-derived", "false");
   // Remove "out" (unused) outright; try to remove "in" (used): warned, then saved → server refuses → keep.
   await marker(page, "out").locator("circle").click();

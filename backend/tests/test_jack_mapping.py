@@ -83,6 +83,7 @@ def test_ports_only_update_enriches_an_imported_profile_without_touching_its_oth
     pid = _pp_import(client)
     before = client.get(f"/api/catalog/devices/{pid}").json()
     assert before["ports"] == [] and before["footprint"]["width"]["evidence"] == "third_party"
+    assert "ports (not in dataset)" in before["unknown_attributes"]
     asset = _upload(client)
     before.pop("unknown_attributes")
     before.pop("source")
@@ -109,6 +110,12 @@ def test_ports_only_update_enriches_an_imported_profile_without_touching_its_oth
     assert after["provenance"] == before["provenance"] and after["source"] == "imported"
     assert after["image"]["asset_id"] == asset["id"] and after["image"]["crop"] == before["image"]["crop"]
     assert "port.dc.position" not in after["unknown_attributes"]
+    # The importer's "ports unknown" claim is now false and goes; power/MIDI stay honestly unknown.
+    assert "ports (not in dataset)" not in after["unknown_attributes"]
+    assert "ports (not in dataset)" not in after["declared_unknowns"]
+    assert {"power (not in dataset)", "MIDI (not in dataset)", "whether dimensions include jacks"} <= set(
+        after["unknown_attributes"]
+    )
     # Recropping later leaves the jacks (anchors and wiring positions) untouched.
     after.pop("unknown_attributes")
     after.pop("source")
@@ -150,6 +157,43 @@ def test_removing_or_renaming_a_wired_jack_is_refused_until_confirmed(client):
     assert r.status_code == 200
     a = client.get("/api/rigs/rig_demo_signal_loom/analysis").json()
     assert "connection.port_missing" in {d["code"] for d in a["diagnostics"]}
+
+
+def test_retyping_a_wired_jack_is_refused_until_confirmed(client):
+    """Changing what a used jack *is* gets the same guard as removing it; label, position and
+    filling in a previously unknown connector do not."""
+    plumes = client.get("/api/catalog/devices/eqd-plumes").json()
+    by_id = {p["id"]: p for p in plumes["ports"]}
+    assert by_id["in"]["kind"] == "audio" and by_id["in"]["direction"] == "in"
+    # The mapper's type dropdown: the wired audio input becomes a MIDI input, same id.
+    retyped = [
+        dict(p, kind="midi", connector="din5", audio_channel=None, midi_trs_type="din") if p["id"] == "in" else p
+        for p in plumes["ports"]
+    ]
+    r = client.put("/api/catalog/devices/eqd-plumes/ports", json={"ports": retyped})
+    assert r.status_code == 409
+    detail = r.json()["detail"]
+    assert detail["code"] == "ports_in_use" and "changing the type of in" in detail["message"]
+    assert len(detail["affected"]) == 2 and {a["port_id"] for a in detail["affected"]} == {"in"}
+    assert detail["affected"][0]["change"].startswith("kind audio → midi; connector ts_1_4 → din5")
+    assert client.get("/api/catalog/devices/eqd-plumes").json()["ports"] == plumes["ports"]  # untouched
+    # Flipping direction on the wired output is refused too.
+    flipped = [dict(p, direction="in") if p["id"] == "out" else p for p in plumes["ports"]]
+    r = client.put("/api/catalog/devices/eqd-plumes/ports", json={"ports": flipped})
+    assert r.status_code == 409 and r.json()["detail"]["affected"][0]["change"] == "direction out → in"
+    # Cosmetic and refining edits on the same wired jacks need no confirmation.
+    unknown_conn = [dict(p, connector="unknown") for p in plumes["ports"]]
+    assert client.put("/api/catalog/devices/eqd-plumes/ports", json={"ports": unknown_conn}).status_code == 200
+    refined = [dict(p, connector="ts_1_4", label="INPUT", position=0.4, position_evidence="user") for p in unknown_conn]
+    assert client.put("/api/catalog/devices/eqd-plumes/ports", json={"ports": refined}).status_code == 200
+    assert client.get("/api/rigs/rig_demo_signal_loom/analysis").json()["summary"]["errors"] == 0
+    # Confirmed: the retype goes through and the wiring check now flags the mismatched cable.
+    r = client.put("/api/catalog/devices/eqd-plumes/ports", json={"ports": retyped, "force": True})
+    assert (
+        r.status_code == 200 and r.json()["ports"][[p["id"] for p in r.json()["ports"]].index("in")]["kind"] == "midi"
+    )
+    a = client.get("/api/rigs/rig_demo_signal_loom/analysis").json()
+    assert "connection.kind_mismatch" in {d["code"] for d in a["diagnostics"]}
 
 
 def test_stereo_and_trs_semantics_survive_the_ports_endpoint(client, profiles):
