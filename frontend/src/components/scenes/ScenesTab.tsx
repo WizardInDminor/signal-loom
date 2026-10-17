@@ -1,11 +1,15 @@
 "use client";
 
+import { useState } from "react";
 import { useRigStore } from "@/store/rigStore";
-import type { DeviceSceneState, Scene } from "@/lib/types";
+import type { CcValue, DeviceSceneState, Scene } from "@/lib/types";
 import { Badge, Button, DiagnosticList, Field, Panel } from "@/components/ui/basics";
+import { CommandPicker } from "./CommandPicker";
+import { applyCc, applyPc, commandStatus } from "@/lib/commands";
 
 export function ScenesTab() {
   const { rig, analysis, profiles, selectedSceneId, selectScene, addScene, duplicateScene, removeScene, update, assignSceneToSwitch } = useRigStore();
+  const [picking, setPicking] = useState<string | null>(null);
   if (!rig) return null;
   const scenes = [...rig.scenes].sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
   const scene = rig.scenes.find((s) => s.id === selectedSceneId) ?? scenes[0];
@@ -111,7 +115,7 @@ export function ScenesTab() {
               <fieldset className="border border-line rounded p-2">
                 <legend className="px-1 font-semibold">Devices</legend>
                 <table className="w-full">
-                  <thead><tr className="text-left text-neutral-500"><th>Device</th><th>Program (PC)</th><th>Bank MSB</th><th>State</th><th>CC values</th><th>Manual note</th></tr></thead>
+                  <thead><tr className="text-left text-neutral-500"><th>Device</th><th>Program (PC)</th><th>Bank MSB</th><th>State</th><th className="min-w-[190px]">CC values / commands</th><th>Manual note</th></tr></thead>
                   <tbody>
                     {midiDevices.map((i) => {
                       const prof = profiles[i.profile_id];
@@ -123,8 +127,9 @@ export function ScenesTab() {
                           <td>
                             {hasMidi && <input aria-label={`${i.label} program`} type="number" min={prof?.midi.program_change.min ?? 0} max={prof?.midi.program_change.max ?? 127} className="w-16" value={st?.program?.pc ?? ""} onChange={(e) => setState(i.id, (d) => { d.program = e.target.value === "" ? null : { pc: Number(e.target.value), bank_msb: d.program?.bank_msb ?? null, bank_lsb: d.program?.bank_lsb ?? null }; })} />}
                             {hasMidi && st?.program && <div className="text-[10px] text-neutral-500">{prof?.midi.program_change.display_numbering === "one_based" ? `shown as preset ${st.program.pc + 1} on the device` : `PC ${st.program.pc} (zero-based)`}{prof?.midi.program_change.supported === null ? " · PC support unverified" : ""}</div>}
+                            {hasMidi && st?.program?.command && <AppliedTag name={st.program.command.name} status={commandStatus(st.program.command, prof)} profile={prof} commandId={st.program.command.command_id} onReapply={() => { const live = prof?.midi.commands?.find((c) => c.id === st.program!.command!.command_id); if (live) setState(i.id, (d) => { d.program = applyPc(live); }); }} />}
                           </td>
-                          <td>{hasMidi && st?.program && <input aria-label={`${i.label} bank MSB`} type="number" min={0} max={127} className="w-14" value={st.program.bank_msb ?? ""} onChange={(e) => setState(i.id, (d) => { if (d.program) d.program.bank_msb = e.target.value === "" ? null : Number(e.target.value); })} />}</td>
+                          <td>{hasMidi && st?.program && <input aria-label={`${i.label} bank MSB`} type="number" min={0} max={127} className="w-14" value={st.program.bank_msb ?? ""} onChange={(e) => setState(i.id, (d) => { if (d.program) { d.program.bank_msb = e.target.value === "" ? null : Number(e.target.value); d.program.command = null; } })} />}</td>
                           <td>
                             <select aria-label={`${i.label} state`} value={st?.enabled === true ? "on" : st?.enabled === false ? "off" : ""} onChange={(e) => setState(i.id, (d) => { d.enabled = e.target.value === "" ? null : e.target.value === "on"; })}>
                               <option value="">—</option><option value="on">engaged</option><option value="off">bypassed</option>
@@ -132,15 +137,22 @@ export function ScenesTab() {
                           </td>
                           <td>
                             {hasMidi && (
-                              <div className="flex flex-col gap-0.5">
+                              <div className="flex flex-col gap-0.5" data-testid={`cc-values-${i.id}`}>
                                 {st?.cc_values.map((cv, k) => (
-                                  <div key={k} className="flex gap-1 items-center">
-                                    <input aria-label="CC number" type="number" min={0} max={127} className="w-12" value={cv.cc} onChange={(e) => setState(i.id, (d) => { d.cc_values[k].cc = Number(e.target.value); })} />=
-                                    <input aria-label="CC value" type="number" min={0} max={127} className="w-12" value={cv.value} onChange={(e) => setState(i.id, (d) => { d.cc_values[k].value = Number(e.target.value); })} />
-                                    <Button variant="ghost" aria-label="Remove CC" onClick={() => setState(i.id, (d) => { d.cc_values.splice(k, 1); })}>✕</Button>
+                                  <div key={k} className="flex flex-col">
+                                    <div className="flex gap-1 items-center">
+                                      {/* Typing a different number turns the row back into a hand-set value: the snapshot would no longer describe it. */}
+                                      <input aria-label="CC number" type="number" min={0} max={127} className="w-12" value={cv.cc} onChange={(e) => setState(i.id, (d) => { d.cc_values[k].cc = Number(e.target.value); d.cc_values[k].command = null; })} />=
+                                      <input aria-label="CC value" type="number" min={0} max={127} className="w-12" value={cv.value} onChange={(e) => setState(i.id, (d) => { d.cc_values[k].value = Number(e.target.value); d.cc_values[k].command = null; })} />
+                                      <Button variant="ghost" aria-label="Remove CC" onClick={() => setState(i.id, (d) => { d.cc_values.splice(k, 1); })}>✕</Button>
+                                    </div>
+                                    {cv.command && <AppliedTag name={cv.command.name} valueLabel={cv.command.value_label} status={commandStatus(cv.command, prof)} profile={prof} commandId={cv.command.command_id} onReapply={() => { const live = prof?.midi.commands?.find((c) => c.id === cv.command!.command_id); if (!live) return; try { const next = applyCc(live, live.value_mode === "fixed" ? undefined : cv.value); setState(i.id, (d) => { d.cc_values[k] = next; }); } catch (err) { window.alert((err as Error).message); } }} />}
                                   </div>
                                 ))}
-                                <Button variant="ghost" onClick={() => setState(i.id, (d) => { d.cc_values.push({ cc: prof?.midi.cc_map[0]?.cc ?? 1, value: 127 }); })}>+ CC</Button>
+                                <div className="flex gap-1 whitespace-nowrap">
+                                  <Button variant="primary" className="!py-0.5 !px-1.5 !text-[11px]" onClick={() => setPicking(i.id)} data-testid={`add-command-${i.id}`} title="Pick a named command from the device's library">+ Command</Button>
+                                  <Button variant="ghost" className="!py-0.5 !px-1.5 !text-[11px]" onClick={() => setState(i.id, (d) => { d.cc_values.push({ cc: prof?.midi.cc_map[0]?.cc ?? 1, value: 127 }); })} title="Type a CC number and value by hand">+ CC by number</Button>
+                                </div>
                                 {prof?.midi.cc_map.length ? <span className="text-[10px] text-neutral-400">documented: {prof.midi.cc_map.map((c) => `${c.cc} ${c.name}`).join(", ")}</span> : null}
                               </div>
                             )}
@@ -182,6 +194,37 @@ export function ScenesTab() {
           </Panel>
         </>
       ) : <Panel title="Scene"><p className="text-xs text-neutral-500">Create a scene to begin.</p></Panel>}
+      {picking && scene && (() => {
+        const inst = rig.instances.find((x) => x.id === picking);
+        const prof = inst ? profiles[inst.profile_id] : undefined;
+        if (!inst || !prof) return null;
+        return (
+          <CommandPicker
+            instance={inst}
+            profile={prof}
+            state={stateFor(inst.id)}
+            onClose={() => setPicking(null)}
+            onApplyPc={(p) => setState(inst.id, (d) => { d.program = p; })}
+            onApplyCc={(cv: CcValue, replace) => setState(inst.id, (d) => { if (replace) d.cc_values = d.cc_values.filter((x) => x.cc !== cv.cc); d.cc_values.push(cv); })}
+          />
+        );
+      })()}
+    </div>
+  );
+}
+
+/** Under a scene value: which library command it came from and whether that command still says the same. */
+function AppliedTag({ name, valueLabel, status, profile, commandId, onReapply }: { name: string; valueLabel?: string | null; status: "ok" | "changed" | "removed" | null; profile: import("@/lib/types").DeviceProfile | undefined; commandId: string; onReapply: () => void }) {
+  const live = profile?.midi.commands?.find((c) => c.id === commandId);
+  const cite = live?.citation;
+  const present = cite ? profile?.document_files?.find((f) => f.document_id === cite.document_id)?.present : false;
+  return (
+    <div className="text-[10px] text-neutral-500 flex flex-wrap items-center gap-1" data-testid="applied-command" data-status={status ?? ""}>
+      <span>{live?.favorite ? "★ " : ""}“{name}”{valueLabel ? ` · ${valueLabel}` : ""}</span>
+      {status === "changed" && <Badge tone="warn">definition changed — review</Badge>}
+      {status === "removed" && <Badge tone="warn">command removed</Badge>}
+      {status === "changed" && <button type="button" className="underline" onClick={onReapply} data-testid="reapply-command">reapply</button>}
+      {cite && present && <a className="underline" href={`/documents/${cite.document_id}${cite.page ? `?page=${cite.page}` : ""}`} target="_blank" rel="noreferrer" title="Open the cited manual page">manual{cite.page ? ` p. ${cite.page}` : ""} ↗</a>}
     </div>
   );
 }

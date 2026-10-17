@@ -23,6 +23,7 @@ from ..models.common import (
 from ..models.profile import DeviceProfile, PortDef
 from ..models.rig import Connection, DeviceInstance, Rig
 from .geometry import effective_ports
+from .power import EXPANSION_ROLE, effective_outlet, outlet_loads, voltage_accepted
 
 
 @dataclass
@@ -293,11 +294,41 @@ def _validate_pair_details(
         _validate_power(ctx, conn, src, tgt, label)
 
 
+def _word(v) -> str:
+    """Enum or plain string (an unvalidated override) as prose: 'center_negative' -> 'center negative'."""
+    return str(getattr(v, "value", v)).replace("_", " ")
+
+
 def _validate_power(ctx: WiringContext, conn: Connection, src: ResolvedEnd, tgt: ResolvedEnd, label: str) -> None:
+    """One power cable: outlet (as set in this rig) against the device's documented need.
+
+    Severities: a contradiction between two documented facts is an ERROR; a missing fact is a
+    WARNING, never an approval. Current figures are documented ratings and documented minimums,
+    not measurements, and the messages say so."""
     need = tgt.profile.power if tgt.profile else None
-    sv = src.port.supply_voltage_v
-    sp = src.port.supply_polarity
-    smax = src.port.supply_current_ma_max
+    outlet = effective_outlet(src.port, src.instance)
+    who = f"'{src.instance.label}:{src.port.label}'"
+    if src.port.role == EXPANSION_ROLE:
+        _diag(
+            ctx,
+            "power.expansion_outlet",
+            Severity.ERROR,
+            f"{who} is an expansion link for another supply (e.g. a Strymon Ojai), not a pedal outlet; "
+            f"'{tgt.instance.label}' must not be plugged into it.",
+            subject_id=conn.id,
+            related=[tgt.instance.id],
+        )
+        return
+    if not outlet.setting_valid:
+        _diag(
+            ctx,
+            "power.invalid_setting",
+            Severity.ERROR,
+            f"{who} is set to {outlet.selected_voltage_v:g} V, which is not one of its settings "
+            f"({', '.join(f'{o.voltage_v:g} V' for o in src.port.supply_options) or 'fixed'}). Its default is used until fixed.",
+            subject_id=conn.id,
+        )
+    sv, sp, smax = outlet.voltage_v, outlet.polarity, outlet.current_ma_max
     if need is None or need.voltage_v is None:
         _diag(
             ctx,
@@ -312,42 +343,65 @@ def _validate_power(ctx: WiringContext, conn: Connection, src: ResolvedEnd, tgt:
             ctx,
             "power.supply_unknown",
             Severity.WARNING,
-            f"Outlet '{src.instance.label}:{src.port.label}' has no documented voltage; cannot confirm it matches {need.voltage_v:g} V for '{tgt.instance.label}'.",
+            f"Outlet {who} has no documented voltage; cannot confirm it matches {need.voltage_v:g} V for '{tgt.instance.label}'.",
             subject_id=conn.id,
         )
-    elif abs(sv - need.voltage_v) > 0.01:
+    elif not voltage_accepted(need, sv):
+        rng = (
+            f"{need.voltage_v:g}-{need.voltage_max_v:g} V"
+            if need.voltage_max_v is not None
+            else f"{need.voltage_v:g} V"
+        )
         _diag(
             ctx,
             "power.voltage_mismatch",
             Severity.ERROR,
-            f"Outlet '{src.port.label}' supplies {sv:g} V but '{tgt.instance.label}' requires {need.voltage_v:g} V.",
+            f"Outlet '{src.port.label}' supplies {sv:g} V but '{tgt.instance.label}' requires {rng}.",
             subject_id=conn.id,
             related=[tgt.instance.id],
         )
     if need is not None and need.voltage_v is not None:
-        if need.polarity == Polarity.UNKNOWN or sp in (None, Polarity.UNKNOWN):
+        if need.ac_dc and outlet.ac_dc and need.ac_dc != outlet.ac_dc:
             _diag(
                 ctx,
-                "power.polarity_unknown",
-                Severity.WARNING,
-                f"Polarity of '{tgt.instance.label}' or outlet '{src.port.label}' is unknown; verify centre-negative/positive before plugging in.",
-                subject_id=conn.id,
-            )
-        elif sp != need.polarity:
-            _diag(
-                ctx,
-                "power.polarity_mismatch",
+                "power.ac_dc_mismatch",
                 Severity.ERROR,
-                f"Outlet '{src.port.label}' is {sp.value.replace('_', ' ')} but '{tgt.instance.label}' needs {need.polarity.value.replace('_', ' ')}.",
+                f"Outlet '{src.port.label}' is {outlet.ac_dc.upper()} but '{tgt.instance.label}' needs {need.ac_dc.upper()}.",
                 subject_id=conn.id,
                 related=[tgt.instance.id],
             )
+        elif need.ac_dc and outlet.ac_dc is None:
+            _diag(
+                ctx,
+                "power.ac_dc_unknown",
+                Severity.WARNING,
+                f"Outlet '{src.port.label}' does not say whether it is AC or DC; '{tgt.instance.label}' needs {need.ac_dc.upper()}.",
+                subject_id=conn.id,
+            )
+        if (need.ac_dc or "dc") == "dc" and (outlet.ac_dc or "dc") == "dc":
+            if need.polarity == Polarity.UNKNOWN or sp in (None, Polarity.UNKNOWN):
+                _diag(
+                    ctx,
+                    "power.polarity_unknown",
+                    Severity.WARNING,
+                    f"Polarity of '{tgt.instance.label}' or outlet '{src.port.label}' is unknown; verify centre-negative/positive before plugging in.",
+                    subject_id=conn.id,
+                )
+            elif sp != need.polarity:
+                _diag(
+                    ctx,
+                    "power.polarity_mismatch",
+                    Severity.ERROR,
+                    f"Outlet '{src.port.label}' is {_word(sp)} but '{tgt.instance.label}' needs {_word(need.polarity)}.",
+                    subject_id=conn.id,
+                    related=[tgt.instance.id],
+                )
         if need.current_ma_min is None:
             _diag(
                 ctx,
                 "power.current_unknown",
                 Severity.WARNING,
-                f"Current draw of '{tgt.instance.label}' is unknown; cannot confirm outlet '{src.port.label}' can supply it.",
+                f"The current '{tgt.instance.label}' needs is not documented; cannot confirm outlet '{src.port.label}' can supply it.",
                 subject_id=conn.id,
             )
         elif smax is None:
@@ -355,7 +409,9 @@ def _validate_power(ctx: WiringContext, conn: Connection, src: ResolvedEnd, tgt:
                 ctx,
                 "power.outlet_current_unknown",
                 Severity.WARNING,
-                f"Outlet '{src.port.label}' has no documented current rating; '{tgt.instance.label}' needs at least {need.current_ma_min} mA.",
+                f"Outlet '{src.port.label}' has no documented current rating"
+                + (f" at {sv:g} V" if sv is not None and outlet.selectable else "")
+                + f"; '{tgt.instance.label}' asks for at least {need.current_ma_min} mA.",
                 subject_id=conn.id,
             )
         elif smax < need.current_ma_min:
@@ -363,10 +419,85 @@ def _validate_power(ctx: WiringContext, conn: Connection, src: ResolvedEnd, tgt:
                 ctx,
                 "power.current_insufficient",
                 Severity.ERROR,
-                f"Outlet '{src.port.label}' supplies {smax} mA but '{tgt.instance.label}' needs at least {need.current_ma_min} mA.",
+                f"Outlet '{src.port.label}' is rated {smax} mA"
+                + (f" at {sv:g} V" if sv is not None and outlet.selectable else "")
+                + f" but '{tgt.instance.label}' documents a {need.current_ma_min} mA minimum requirement.",
                 subject_id=conn.id,
                 related=[tgt.instance.id],
             )
+
+
+def outlet_load_diagnostics(ctx: WiringContext) -> None:
+    """Outlets feeding several devices: add up the documented minimums (never pooling outlets),
+    say when the sum exceeds the rating or cannot be known, and note the lost isolation."""
+    for load in outlet_loads(ctx).values():
+        if len(load.connections) < 2:
+            continue
+        first = load.connections[0].connection.id
+        rest = [rc.connection.id for rc in load.connections[1:]]
+        names = ", ".join(rc.target.instance.label for rc in load.connections)
+        who = f"'{load.connections[0].source.instance.label}:{load.outlet.port.label}'"
+        cap = load.outlet.current_ma_max
+        if cap is not None and load.required_known_ma > cap:
+            _diag(
+                ctx,
+                "power.outlet_overloaded",
+                Severity.ERROR,
+                f"Outlet {who} is rated {cap} mA but the devices on it ({names}) document minimums adding up to "
+                f"{load.required_known_ma} mA"
+                + (f" plus {load.unknown_count} undocumented" if load.unknown_count else "")
+                + ". Documented minimums, not measured draw; still, this outlet cannot carry them.",
+                subject_id=first,
+                related=rest,
+            )
+        elif load.unknown_count:
+            _diag(
+                ctx,
+                "power.outlet_load_unknown",
+                Severity.WARNING,
+                f"Outlet {who} feeds {len(load.connections)} devices and {load.unknown_count} of them has no documented "
+                f"current requirement, so the total load (at least {load.required_known_ma} mA) cannot be checked"
+                + (f" against its {cap} mA rating." if cap is not None else "; its rating is also unknown."),
+                subject_id=first,
+                related=rest,
+            )
+        elif cap is None:
+            _diag(
+                ctx,
+                "power.outlet_load_unknown",
+                Severity.WARNING,
+                f"Outlet {who} feeds {len(load.connections)} devices needing at least {load.required_known_ma} mA together, "
+                "but its rating is not documented.",
+                subject_id=first,
+                related=rest,
+            )
+        _diag(
+            ctx,
+            "power.outlet_shared_assumption",
+            Severity.INFO,
+            f"{names} share outlet {who}: they are on one ground and are not isolated from each other, whatever the "
+            "supply's isolation between outlets. Assumed acceptable only if the pedals tolerate a shared ground.",
+            subject_id=first,
+            related=rest,
+        )
+    # Outlets documented as sharing a regulator or ground inside the supply.
+    by_group: dict[tuple[str, str], list] = {}
+    for key, load in outlet_loads(ctx).items():
+        if load.connections and load.outlet.shared_group:
+            by_group.setdefault((key.split(":")[0], load.outlet.shared_group), []).append(load)
+    for (inst_id, group), loads in by_group.items():
+        if len(loads) < 2:
+            continue
+        label = ctx.instances[inst_id].label
+        _diag(
+            ctx,
+            "power.outlets_share_regulator",
+            Severity.INFO,
+            f"On '{label}', outlets {', '.join(ld.outlet.port.label for ld in loads)} are documented as sharing "
+            f"('{group}'); the devices on them are not isolated from each other.",
+            subject_id=loads[0].connections[0].connection.id,
+            related=[rc.connection.id for ld in loads for rc in ld.connections][1:],
+        )
 
 
 # -- audio topology ---------------------------------------------------------------------
@@ -631,7 +762,8 @@ def power_diagnostics(ctx: WiringContext) -> None:
         if needs_power and inst.id not in powered:
             req = ""
             if prof and prof.power.voltage_v is not None:
-                req = f" (needs {prof.power.voltage_v:g} V"
+                req = f" (needs {prof.power.voltage_v:g}"
+                req += f"-{prof.power.voltage_max_v:g} V" if prof.power.voltage_max_v is not None else " V"
                 req += f", {prof.power.current_ma_min} mA+)" if prof.power.current_ma_min else ")"
             _diag(
                 ctx,
@@ -655,9 +787,32 @@ def midi_reachability(ctx: WiringContext, controller_id: str) -> set[str]:
     return reach
 
 
+def midi_routes(ctx: WiringContext, controller_id: str) -> dict[str, list[str]]:
+    """For every instance the controller reaches over MIDI cables, the cables the messages travel,
+    in order (breadth-first, so the shortest physical route; MIDI Thru hops are included)."""
+    g: dict[str, list[tuple[str, str]]] = defaultdict(list)
+    for rc in ctx.resolved:
+        if rc.connection.kind != SignalKind.MIDI:
+            continue
+        g[rc.source.instance.id].append((rc.target.instance.id, rc.connection.id))
+    routes: dict[str, list[str]] = {}
+    queue = [controller_id]
+    seen = {controller_id}
+    while queue:
+        cur = queue.pop(0)
+        for nxt, conn_id in g.get(cur, []):
+            if nxt in seen:
+                continue
+            seen.add(nxt)
+            routes[nxt] = [*routes.get(cur, []), conn_id]
+            queue.append(nxt)
+    return routes
+
+
 def wiring_diagnostics(rig: Rig, profiles: dict[str, DeviceProfile]) -> tuple[WiringContext, list[Diagnostic]]:
     ctx = build_context(rig, profiles)
     validate_connections(ctx)
     topology_diagnostics(ctx)
     power_diagnostics(ctx)
+    outlet_load_diagnostics(ctx)
     return ctx, ctx.diagnostics

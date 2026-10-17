@@ -35,6 +35,7 @@ from ..models.profile import (
     PowerSpec,
     ProgramChangeSpec,
     Provenance,
+    SupplyOption,
 )
 
 IN_TO_MM = 25.4
@@ -469,12 +470,13 @@ def ml10x() -> DeviceProfile:
         ports=ports,
         power=PowerSpec(
             voltage_v=9,
+            voltage_max_v=18,
             polarity=Polarity.CENTER_NEGATIVE,
             ac_dc="dc",
             current_ma_min=160,
             connector=Connector.DC_BARREL_2_1,
             evidence=Evidence.DOCUMENTED,
-            note="9-18 VDC centre negative, min 160 mA (9 V assumed here; 18 V raises headroom).",
+            note="9-18 VDC centre negative, minimum 160 mA (manual). Any outlet in that range is accepted.",
         ),
         midi=MidiSpec(
             interfaces=["din_in", "din_thru", "usb"],
@@ -958,6 +960,8 @@ def generic_power_supply() -> DeviceProfile:
                 supply_voltage_v=9,
                 supply_polarity=Polarity.CENTER_NEGATIVE,
                 supply_current_ma_max=500,
+                supply_ac_dc="dc",
+                supply_isolated=True,
                 plug_clearance_mm=25.0,
             )
         )
@@ -976,6 +980,8 @@ def generic_power_supply() -> DeviceProfile:
             supply_voltage_v=18,
             supply_polarity=Polarity.CENTER_NEGATIVE,
             supply_current_ma_max=500,
+            supply_ac_dc="dc",
+            supply_isolated=True,
             plug_clearance_mm=25.0,
         )
     )
@@ -1001,6 +1007,144 @@ def generic_power_supply() -> DeviceProfile:
         midi=MidiSpec(interfaces=[]),
         capabilities=Capabilities(),
         tags=["power", "generic"],
+    )
+
+
+_ZUMA_RETRIEVED = (
+    "2026-10-16 (manufacturer copy as reproduced by several retailers; strymon.net unreachable from build sandbox)"
+)
+_ZUMA_OPTIONS = [
+    SupplyOption(voltage_v=9, current_ma_max=500),
+    SupplyOption(voltage_v=12, current_ma_max=375),
+    SupplyOption(voltage_v=18, current_ma_max=250),
+]
+
+
+def _zuma_outlet(i: int, pos: float, *, selectable: bool) -> PortDef:
+    return PortDef(
+        id=f"out{i}",
+        label=f"Out {i}" + (" (9/12/18 V)" if selectable else " (9 V)"),
+        kind=SignalKind.POWER,
+        direction=PortDirection.OUT,
+        connector=Connector.DC_BARREL_2_1,
+        edge=Edge.TOP,
+        position=pos,
+        position_evidence=Evidence.APPROXIMATE,
+        role="supply_out",
+        exclusive=False,
+        supply_voltage_v=9,
+        supply_polarity=Polarity.CENTER_NEGATIVE,
+        supply_current_ma_max=500,
+        supply_ac_dc="dc",
+        supply_options=list(_ZUMA_OPTIONS) if selectable else [],
+        supply_isolated=True,
+        plug_clearance_mm=25.0,
+        notes="Isolated output with its own regulator (manufacturer). Selectable: 9 V/500 mA, 12 V/375 mA or 18 V/250 mA."
+        if selectable
+        else "Isolated output with its own regulator (manufacturer).",
+    )
+
+
+def _ojai_link(pos: float, label: str) -> PortDef:
+    return PortDef(
+        id="link24",
+        label=label,
+        kind=SignalKind.POWER,
+        direction=PortDirection.OUT,
+        connector=Connector.OTHER,
+        edge=Edge.RIGHT,
+        position=pos,
+        position_evidence=Evidence.APPROXIMATE,
+        role="expansion_out",
+        exclusive=True,
+        supply_voltage_v=24,
+        supply_polarity=Polarity.UNKNOWN,
+        supply_ac_dc="dc",
+        supply_isolated=None,
+        plug_clearance_mm=25.0,
+        notes="Feeds a Strymon Ojai / Ojai R30 expansion supply only. Not a pedal outlet; its current rating is not published.",
+    )
+
+
+def strymon_zuma() -> DeviceProfile:
+    ev = Evidence.THIRD_PARTY
+    ports = [_zuma_outlet(i, (i - 0.5) / 9, selectable=i >= 8) for i in range(1, 10)]
+    ports.append(_ojai_link(0.5, "24V out (Ojai link)"))
+    return DeviceProfile(
+        id="strymon-zuma",
+        manufacturer="Strymon",
+        model="Zuma",
+        category=DeviceCategory.POWER_SUPPLY,
+        builtin=True,
+        provenance=Provenance(
+            source="hand_authored",
+            url="https://www.strymon.net/products/zuma/",
+            evidence=ev,
+            retrieved=_ZUMA_RETRIEVED,
+            attribution="Figures as published by Strymon and reproduced by retailers (cross-checked across listings)",
+        ),
+        footprint=Footprint(
+            width=_m(173, ev, "6.8 in; 173 x 84 x 46 mm per manufacturer copy"),
+            depth=_m(84, ev, "3.3 in"),
+            height=_m(46, ev, "1.8 in"),
+            includes_jacks=None,
+        ),
+        ports=ports,
+        power=PowerSpec(
+            ac_dc="ac",
+            evidence=ev,
+            note="Mains input 100-240 VAC (IEC lead); not modelled as a rig connection.",
+        ),
+        midi=MidiSpec(interfaces=[]),
+        capabilities=Capabilities(
+            notes="Nine isolated outputs: seven fixed 9 V/500 mA, two selectable 9 V/500 mA, 12 V/375 mA or 18 V/250 mA. 24 V jack links an Ojai; it is not a pedal outlet."
+        ),
+        declared_unknowns=[
+            "jack positions (estimated)",
+            "24 V link current (not published)",
+            "whether dimensions include jacks",
+        ],
+        tags=["power", "strymon", "isolated"],
+    )
+
+
+def strymon_zuma_r300() -> DeviceProfile:
+    ev = Evidence.THIRD_PARTY
+    ports = [_zuma_outlet(i, (i - 0.5) / 5, selectable=i == 5) for i in range(1, 6)]
+    ports.append(_ojai_link(0.5, "24V thru (Ojai link)"))
+    return DeviceProfile(
+        id="strymon-zuma-r300",
+        manufacturer="Strymon",
+        model="Zuma R300",
+        category=DeviceCategory.POWER_SUPPLY,
+        builtin=True,
+        provenance=Provenance(
+            source="hand_authored",
+            url="https://www.strymon.net/products/zuma-r300/",
+            evidence=ev,
+            retrieved=_ZUMA_RETRIEVED,
+            attribution="Figures as published by Strymon and reproduced by retailers (cross-checked across listings)",
+        ),
+        footprint=Footprint(
+            width=_m(184, ev, "7.25 in; 184 x 88 x 30 mm per manufacturer copy"),
+            depth=_m(88, ev, "3.5 in"),
+            height=_m(30, ev, "1.18 in (low profile)"),
+            includes_jacks=None,
+        ),
+        ports=ports,
+        power=PowerSpec(
+            ac_dc="ac", evidence=ev, note="Mains input 100-240 VAC (IEC lead); not modelled as a rig connection."
+        ),
+        midi=MidiSpec(interfaces=[]),
+        capabilities=Capabilities(
+            notes="Five isolated outputs: four fixed 9 V/500 mA, one selectable 9 V/500 mA, 12 V/375 mA or 18 V/250 mA. 24 V thru links an Ojai; not a pedal outlet. A different device from the Zuma."
+        ),
+        declared_unknowns=[
+            "jack positions (estimated)",
+            "24 V link current (not published)",
+            "whether dimensions include jacks",
+        ],
+        tags=["power", "strymon", "isolated", "low-profile"],
     )
 
 
@@ -1056,6 +1200,8 @@ def builtin_profiles() -> list[DeviceProfile]:
         generic_mono_effect(),
         generic_stereo_effect(),
         generic_power_supply(),
+        strymon_zuma(),
+        strymon_zuma_r300(),
         electric_guitar(),
         generic_amp(),
     ]

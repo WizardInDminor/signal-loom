@@ -8,9 +8,10 @@ wiring (audio / MIDI / expression / power), reusable **scenes** that describe th
 state, and a compiler that turns scenes into an inspectable Morningstar **MC8** switch plan and
 **ML10X** routing plan. Nothing is ever sent to hardware; the app plans, validates and exports.
 
-Session reports: [SESSION-1-RESULTS.md](SESSION-1-RESULTS.md) (foundation) and
+Session reports: [SESSION-1-RESULTS.md](SESSION-1-RESULTS.md) (foundation),
 [SESSION-2-RESULTS.md](SESSION-2-RESULTS.md) (jack-aware wiring, stereo routing, Morningstar
-tools, evidence levels and the hardware verification procedure). The domain model is described in
+tools, evidence levels and the hardware verification procedure) and
+[SESSION-3-RESULTS.md](SESSION-3-RESULTS.md) (the Stage: a scene-first view of the physical rig). The domain model is described in
 [ARCHITECTURE.md](ARCHITECTURE.md); research and licensing findings in
 [docs/research.md](docs/research.md).
 
@@ -46,7 +47,7 @@ Two processes, two terminals (or `scripts/dev.sh` which starts both):
 
 ```bash
 # Terminal 1 — API on http://127.0.0.1:8000 (creates backend/data/signal_loom.sqlite3 on first run)
-cd backend && .venv/bin/uvicorn app.main:app --reload --port 8000
+cd backend && .venv/bin/uvicorn app.main:app --reload --port 8000 --timeout-keep-alive 75
 
 # Terminal 2 — UI on http://localhost:3000 (proxies /api/* to the backend)
 cd frontend && npm run dev
@@ -57,6 +58,11 @@ hand-authored device catalog and creates two example rigs: the **mono demo** (ML
 Plumes + Sunset + BigSky MX, three scenes) and the **stereo demo** (mono drives in ML10X loops
 A/B, the BigSky MX as a stereo pair in loop C, Output Tip/Ring to two amps, Advanced presets). Set `SIGNAL_LOOM_DB=/path/to/file.sqlite3` to use another database
 and `SIGNAL_LOOM_NO_DEMO=1` to skip the demo rig. API docs: <http://127.0.0.1:8000/docs>.
+
+The `--timeout-keep-alive 75` keeps the backend's idle connections open longer than the
+frontend's proxy keeps them (about 4 s), so a reused connection is never closed by the server at
+the moment it is reused; without it the browser occasionally sees a spurious "Internal Server
+Error" from the proxy under load (CI, many tabs).
 
 ## Test, lint, build
 
@@ -90,6 +96,12 @@ GitHub Actions runs the same gates on every push (`.github/workflows/ci.yml`).
   manifest all use the same position.
 - **Undo/redo** (buttons or Ctrl+Z / Ctrl+Shift+Z) covers every edit of the rig document.
   Devices snap to the grid and to the edges of their neighbours while dragging.
+- **Fit and Expand.** The canvas area runs to the bottom of the window, and **Fit** picks the
+  zoom from both its width and height (with a margin) so the whole board, off-board devices
+  included, is on screen without scrolling; it keeps following window resizes until you move the
+  zoom slider yourself, and pressing Fit again hands control back. **Expand** gives the board the
+  whole window: zoom, Fit, undo/redo and the cable switches stay in the toolbar, the Add-device
+  and inspector column can be hidden and shown, and Esc (or Exit) restores the normal layout.
 - **Stereo is traced per conductor.** The Wiring tab lists, for each ML10X preset, the left
   path (Input Tip … Output Tip) and the right path (e.g. the return-only loop that carries a
   stereo pedal's second output to Output Ring), with the physical Send/Return jack of every
@@ -99,6 +111,148 @@ GitHub Actions runs the same gates on every push (`.github/workflows/ci.yml`).
   scene; switches already used by other scenes are disabled.
 - **Morningstar tools** (Exports tab): import an MC8 "Current Bank" backup into the plan, and
   compare any two editor backups (MC8 or ML10X) field by field for controlled experiments.
+
+## The Stage (Session 3)
+
+Open a rig and pick **Stage** (or press ▶ Stage on a rig card; the URL fragment `#stage` deep
+links to it). Pick a scene in the setlist, or step through it with the arrow keys as you would
+on stage, and the board shows what the scene does physically:
+
+- the **left and right conductors** flow along the real cables between the real jacks; routing
+  inside the ML10X (the preset, not a cable) is drawn as dashed arcs inside its enclosure; a
+  bypassed loop is faint, an empty loop is a dashed pass-through, a half-cabled loop ends the
+  flow with “✕ breaks here”;
+- every pedal shows the state the scene wants as an **LED** (lit = engaged, dark = bypassed,
+  dashed = the scene does not say) and a line such as “loop bypassed · prog 1”; pedals the
+  scene's path does not touch fade;
+- the **MC8 face** lights the switch that recalls the scene (press a switch to jump to its
+  scene); the scene's **MIDI messages** travel as pulses along the real MIDI cables, and a
+  device no cable reaches is flagged on the board;
+- “What happens” tells the scene in words, “What changes” lists the differences from the
+  previous scene in the set (preset, paths, pedal states, programs, CCs, manual steps).
+
+The Stage is read-only: it never edits the rig and never sends anything to hardware.
+
+## Pictures of your pedals (Session 3)
+
+Open a profile in the **Device library** (or select a device on the Board and look at the
+inspector) and press **Add picture…**. Upload a top-down JPEG, PNG or WebP photograph, then in
+the crop editor draw a box around the enclosure, move it, resize it with the handles, and lock
+it to the device's recorded width : depth. The preview on the right shows the result fitted
+to the real footprint with the jacks in place; turn the picture in quarter steps if it was shot
+sideways, and choose *fit inside* (margins in the enclosure colour) or *fill & clip* when the
+box's proportions differ from the footprint. Nothing is ever stretched, and the text under the
+preview says exactly how large the margins or the clipped share are. Save, and every board that
+uses the profile shows the pedal at physical scale, on the Board, the Stage and the rig cards.
+Recrop, Replace and Remove are one click; removing restores the plain enclosure drawing.
+
+What stays true: the profile's footprint remains the source of truth for size (with its evidence
+level); jacks, cables, collisions, measurements and plug clearance never depend on the picture;
+rotating a device rotates the picture with it. A device without recorded dimensions can still be
+cropped, but is labelled *not calibrated* until dimensions are entered and the picture recropped.
+A placed unit can carry its own picture (a repainted pedal) that overrides the profile's.
+
+Storage and rights: uploads are decoded defensively (only real JPEG/PNG/WebP; never SVG; 15 MB
+and 40 megapixel limits), EXIF orientation is applied and then all metadata is stripped by
+re-encoding, and the sanitized copy is kept under `backend/data/assets/` (or `$SIGNAL_LOOM_ASSETS`)
+next to the database, named by id. Project files stay format 1 and carry only the crop metadata;
+`GET /api/rigs/{id}/export?include_images=1` is the explicit opt-in that bundles the pictures
+(format 2) for a backup or another computer. You are responsible for having the right to use any
+photograph you upload; Signal Loom never downloads or redistributes product photography.
+
+## Configure jacks by pointing at them (Session 3)
+
+Imported catalogs (Pedal Playground) bring dimensions but no jacks. Once a profile has a
+picture, press **Configure jacks on the photo** (Device library, or the Board inspector). The
+whole photograph is shown, with the enclosure crop and its top edge drawn on it, so plugs that
+stick out of the enclosure are still visible. Pick a starter template (mono, stereo, mono with
+MIDI, or empty) or just click: each click on a connector places a marker and opens a compact
+editor with sensible defaults (audio in, TS, mono). Change the type with one select, the audio
+channel with one tap (mono · L · R · TRS L+R), drag markers to adjust, and save. Every board
+that uses the profile gets the jacks; the per-unit jack editor and the table editor remain for
+fine work.
+
+What a marker is, and is not: it records where the connector *appears* in the photo. The cable
+in the board model starts at the point the thin lead points to: the nearest enclosure edge (or
+the side a plug protrudes from), or a top-face jack when the connector sits deep inside the
+outline. Override the edge with the ▲ ▶ ▼ ◀ ◎ buttons if the guess is wrong. Positions and
+connector facts you enter are stored with *user* evidence, separate from the catalog's
+third-party dimensions. Markers are kept in photo coordinates, so recropping the picture never
+moves a jack; a replaced photograph flags markers that were placed on the previous one.
+
+The photograph sits centred in the mapping area with a margin on every side, so markers and
+labels on a top-mounted row are never pressed against the edge; a small picture is scaled up to
+the area, and zooming scrolls the whole picture including that margin.
+
+Jack ids are stable handles for cables. Removing or renaming a jack that a cable in any of your
+rigs uses, or changing what it is (an audio input becoming a MIDI input, an output becoming an
+input, a different connector or channel), is refused with the list of affected cables until you
+explicitly choose *Remove anyway* / *Change anyway*; the cables are then flagged by the wiring
+check, never deleted silently. Labels, positions and photo markers change freely. Once an
+imported pedal has its jacks mapped, the import's "ports (not in dataset)" note disappears from
+its unknowns; power and MIDI stay marked unknown until you fill them in.
+
+## Under the board, and the power to run it (Session 3)
+
+**Top / Underside.** The Board has two surfaces that share one coordinate system. Switch with the
+*Top* / *Underside* buttons: the underside is drawn seen through the board from above (not
+mirrored), the other surface shows as faint ghosts, and *Add device* places on the surface you are
+looking at. A device's *Mounted on* select (inspector) moves it between top, underside and
+off-board. Pick a manufacturer pedalboard (Pedaltrain Classic 2, Novo 24) to take its dimensions;
+the spec line says what is known (rail count) and what is not (rail spacing, usable clearance).
+A device under the board is called a fit only when its documented height and the board's clearance
+are both known; enter your own measurement in *Clearance under* to get a real answer, otherwise it
+stays *unverified*. Cables that cross between surfaces end in a ↧/↥ stub; where they pass the
+board is not modelled. Mounting changes nothing electrically: an underside Zuma powers pedals on
+top, and an underside ML10X keeps its audio and MIDI in the Wiring and Stage workspaces.
+
+**Power planner** (Wiring tab). Pick a supply (Strymon Zuma, Zuma R300 or the generic isolated
+supply are built in); each outlet shows its voltage and polarity, its rating at the selected
+voltage, the devices on it with their documented minimum requirements, the remaining current and
+a status. Assign a device from the outlet row or from the *Not yet powered* list; move it with the
+row's *move…* select; change a selectable outlet's voltage and watch its rating follow (Zuma out
+8/9: 9 V/500 mA, 12 V/375 mA, 18 V/250 mA). Assignments are ordinary power cables, so the Wiring
+diagnostics, cable kit and manifest agree with the planner. Errors: wrong voltage, wrong polarity,
+AC/DC mismatch, an outlet rated below a device's documented minimum, a shared outlet whose
+documented minimums add up past its rating, a pedal on the 24 V expansion link. Warnings: anything
+not documented, which is never an approval. All currents are ratings and documented minimums, not
+measured draw, and passing every check does not make an installation safe.
+
+## Manuals and MIDI commands by name (Session 3)
+
+**Documents.** On a device profile (Device library), *Upload PDF* attaches your own manual,
+quick-start sheet or MIDI implementation chart. The file is checked by content (PDF header and
+trailer, and PDFium must open it; a photograph renamed `.pdf` is refused), stored under an opaque
+id in `backend/data/documents/` (or `$SIGNAL_LOOM_DOCS`), and the profile keeps only a title and a
+reference. *View* opens the document at `/documents/<id>?page=N`: every page is a picture rendered
+on your computer, so nothing inside the PDF can run in the app; *Find in document* searches the
+PDF's own text layer (scanned manuals have none and say so). The original is only ever a download.
+Rename and reclassify freely; *Replace* keeps the id so page citations stay valid (refused while
+another profile shares the file, unless you confirm); detaching never deletes the file unless you
+say so and nothing else uses it; *Documents on this computer* lists what is left. Signal Loom never
+downloads a manual for you, and never bundles one in a project unless you choose *Export with
+manuals*.
+
+**MIDI commands.** Below the documented MIDI map, *MIDI commands* is your own library for the
+profile: a name, a category, one CC (fixed value, documented value→meaning choices, or "any value
+0–127") or one PC (wire number and optional bank; the device's displayed number follows the
+profile's numbering), the intent (engage/bypass/set/toggle/recall), whether the result is
+deterministic, where the numbers come from, an optional manual citation with page, and a separate
+"I tried this on the device" claim. ★ marks favorites. *From documented map* turns the profile's
+bypass CC, CC map and program-change support into starter commands with the map's own evidence.
+A profile imported without MIDI data can hold commands, but scenes compile them only after you
+*Declare MIDI input* (recorded as your statement, never as documented).
+
+**In a scene.** Each MIDI pedal's row has *+ Command*: favorites first, search, the exact bytes
+with the placed unit's channel ("CC 10 = 127 on channel 3 → Sunset"), the evidence, a link to the
+cited manual page, a value choice where documented and a precise number for everything else, and
+warnings for toggles, unknown sources, undocumented CCs and contradictions with what the scene
+already says. *Add to scene* writes an ordinary CC value or program selection, compiled by the same
+compiler and MC8 plan as before; typing numbers by hand still works. Under the value the row
+remembers which command it came from. **Editing or deleting a command later never changes a saved
+scene's bytes**: the row shows *definition changed — review* (or *command removed*), the compiled
+plan carries a warning, and *reapply* is the deliberate act that updates it. Two different values
+for one CC on one pedal in one scene are an error, never a silent choice.
 
 ## A short tour: the three-scene demo
 
@@ -131,6 +285,9 @@ backend/   FastAPI app: models, SQLite repo + migrations, domain rules, compiler
 frontend/  Next.js app: rig library, board, wiring, scenes, controllers, exports, device library
 docs/      research notes (raw agent reports + consolidated research.md)
 ```
+
+Local data that is never committed: `backend/data/` holds the SQLite database, the managed
+picture directory (`assets/`) and the managed document directory (`documents/`).
 
 ## Licensing of data
 

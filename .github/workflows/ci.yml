@@ -56,7 +56,7 @@ jobs:
       - name: Start backend
         run: |
           cd backend
-          SIGNAL_LOOM_DB=/tmp/e2e.sqlite3 nohup python -m uvicorn app.main:app --port 8000 > /tmp/backend.log 2>&1 &
+          SIGNAL_LOOM_DB=/tmp/e2e.sqlite3 nohup python -m uvicorn app.main:app --port 8000 --timeout-keep-alive 75 > /tmp/backend.log 2>&1 &
           for i in $(seq 1 30); do curl -sf localhost:8000/api/health && break; sleep 1; done
       - name: Start frontend
         run: |

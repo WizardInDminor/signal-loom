@@ -2,10 +2,15 @@
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import type { DeviceProfile } from "@/lib/types";
+import type { AssetRecord, DeviceProfile } from "@/lib/types";
 import { CATEGORIES } from "@/lib/types";
 import { Badge, Button, ErrorBanner, EvidenceBadge, Field, Panel } from "@/components/ui/basics";
 import { JackEditor } from "@/components/board/JackEditor";
+import { DeviceImageSection } from "@/components/images/DeviceImageSection";
+import { ConfigureJacksButton, JackMapper } from "@/components/images/JackMapper";
+import { DocumentsSection } from "@/components/library/DocumentsSection";
+import { MidiCommandsSection } from "@/components/library/MidiCommandsSection";
+import { enclosureFill } from "@/lib/boardLayout";
 import type { PortDef, SignalKind, PortDirection, Edge } from "@/lib/types";
 import { CONNECTORS } from "@/lib/types";
 
@@ -14,9 +19,35 @@ function blankProfile(): DeviceProfile {
     id: "", manufacturer: "", model: "", category: "effect", provenance: { source: "user", evidence: "user" },
     footprint: { width: { value_mm: null, evidence: "user" }, depth: { value_mm: null, evidence: "user" }, height: { value_mm: null, evidence: "user" }, includes_jacks: null, display_unit: "mm" },
     ports: [], power: { voltage_v: null, polarity: "unknown", current_ma_min: null, connector: "unknown", evidence: "unknown" },
-    midi: { interfaces: [], default_channel: null, program_change: { supported: null, min: null, max: null, evidence: "unknown" }, cc_map: [], bypass: { evidence: "unknown" }, evidence: "unknown" },
+    midi: { interfaces: [], default_channel: null, program_change: { supported: null, min: null, max: null, evidence: "unknown" }, cc_map: [], bypass: { evidence: "unknown" }, commands: [], evidence: "unknown" },
+    documents: [],
     capabilities: {}, declared_unknowns: [], tags: [], builtin: false,
   };
+}
+
+function DocumentsOnThisComputer() {
+  const [docs, setDocs] = useState<Awaited<ReturnType<typeof api.documents.list>> | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const refresh = () => api.documents.list().then(setDocs).catch(() => setDocs(null));
+  useEffect(() => { void refresh(); }, []);
+  const unused = docs?.filter((d) => !d.referenced_by.length) ?? [];
+  return (
+    <Panel title="Documents on this computer">
+      <div className="text-xs flex flex-col gap-1" data-testid="document-cleanup">
+        {docs === null ? <span className="text-neutral-500">…</span> : (
+          <>
+            <span>{docs.length} PDF{docs.length === 1 ? "" : "s"} stored · <b data-testid="document-unused-count">{unused.length}</b> attached to nothing ({Math.round(unused.reduce((n, d) => n + d.byte_size, 0) / 1024)} KB)</span>
+            <span className="text-neutral-500">Detached manuals stay here until you remove them. A document a profile attaches or cites is never removed here.</span>
+            <div className="flex gap-2 items-center">
+              <Button disabled={!unused.length} onClick={async () => { if (!window.confirm(`Remove ${unused.length} unattached document(s) from this computer?`)) return; try { await api.documents.removeUnreferenced(); await refresh(); } catch (e) { setError((e as Error).message); } }}>Remove unattached documents</Button>
+              <Button variant="ghost" onClick={() => void refresh()}>Refresh</Button>
+            </div>
+            {error && <span className="text-red-700">{error}</span>}
+          </>
+        )}
+      </div>
+    </Panel>
+  );
 }
 
 export default function CatalogPage() {
@@ -28,8 +59,13 @@ export default function CatalogPage() {
   const [draft, setDraft] = useState<DeviceProfile | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<string | null>(null);
+  const [assets, setAssets] = useState<(AssetRecord & { referenced: boolean })[] | null>(null);
+  const [mapping, setMapping] = useState(false);
   const refresh = () => api.catalog.list(q, category || undefined).then(setItems).catch((e) => setError(e.message));
+  const refreshAssets = () => api.assets.list().then(setAssets).catch(() => setAssets(null));
   useEffect(() => { void refresh(); }, [q, category]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { void refreshAssets(); }, [sel?.image?.asset_id]);
+  const unused = assets?.filter((a) => !a.referenced) ?? [];
   const duplicate = (p: DeviceProfile) => {
     const copy = structuredClone(p);
     copy.id = `${p.id}-copy`;
@@ -60,8 +96,8 @@ export default function CatalogPage() {
   const jsonEdit = (text: string) => { try { setDraft(JSON.parse(text)); setError(null); } catch { setError("Profile JSON is not valid yet."); } };
 
   return (
-    <div className="p-4 grid lg:grid-cols-[320px_1fr] gap-3 items-start">
-      <div className="flex flex-col gap-3">
+    <div className="p-4 grid lg:grid-cols-[320px_minmax(0,1fr)] gap-3 items-start">
+      <div className="flex flex-col gap-3 min-w-0">
         <ErrorBanner message={error} onClose={() => setError(null)} />
         <Panel title="Device library" actions={<Button variant="primary" onClick={() => { setDraft(blankProfile()); setSel(null); }}>+ Custom device</Button>}>
           <div className="flex gap-1 mb-2">
@@ -78,6 +114,18 @@ export default function CatalogPage() {
             ))}
           </ul>
         </Panel>
+        <Panel title="Pictures on this computer">
+          <div className="text-xs flex flex-col gap-1" data-testid="asset-cleanup">
+            {assets === null ? <span className="text-neutral-500">…</span> : (
+              <>
+                <span>{assets.length} picture{assets.length === 1 ? "" : "s"} stored · <b data-testid="asset-unused-count">{unused.length}</b> unused ({Math.round(unused.reduce((n, a) => n + a.byte_size, 0) / 1024)} KB)</span>
+                <span className="text-neutral-500">Unused pictures come from cancelled crops or replaced photographs. Pictures a device still uses are never removed here.</span>
+                <div><Button disabled={!unused.length} data-testid="asset-cleanup-remove" onClick={async () => { if (!window.confirm(`Remove ${unused.length} unused picture(s) from this computer?`)) return; try { await api.assets.removeUnreferenced(); await refreshAssets(); } catch (e) { setError((e as Error).message); } }}>Remove unused pictures</Button></div>
+              </>
+            )}
+          </div>
+        </Panel>
+        <DocumentsOnThisComputer />
         <Panel title="Import Pedal Playground catalog">
           <p className="text-xs text-neutral-600 mb-1">Upload your own copy of <code>pedals.json</code> (Brand/Name/Width/Height in inches). The dataset has no published license, so Signal Loom never bundles it; images are not imported. Records become third-party-evidence profiles without ports or power data.</p>
           <input type="file" accept=".json,application/json" aria-label="Pedal Playground file" onChange={async (e) => { const f = e.target.files?.[0]; if (!f) return; try { const r = await api.catalog.importPedalPlayground(await f.text()); setReport(`Imported ${r.imported}, skipped ${r.skipped_existing} existing, ${r.problems.length} problems${r.problems.length ? ": " + r.problems.slice(0, 3).join("; ") : ""}`); void refresh(); } catch (err) { setError((err as Error).message); } }} />
@@ -85,7 +133,7 @@ export default function CatalogPage() {
         </Panel>
       </div>
       {draft ? (
-        <Panel title={draft.id ? `Edit ${draft.id}` : "New custom device"} actions={<div className="flex gap-2"><Button onClick={() => setDraft(null)}>Cancel</Button><Button variant="primary" onClick={save}>Save</Button></div>}>
+        <Panel className="min-w-0" title={draft.id ? `Edit ${draft.id}` : "New custom device"} actions={<div className="flex gap-2"><Button onClick={() => setDraft(null)}>Cancel</Button><Button variant="primary" onClick={save}>Save</Button></div>}>
           <div className="grid grid-cols-4 gap-2 text-xs mb-2">
             <Field label="Manufacturer"><input value={draft.manufacturer} onChange={(e) => setDraft({ ...draft, manufacturer: e.target.value })} /></Field>
             <Field label="Model"><input value={draft.model} onChange={(e) => setDraft({ ...draft, model: e.target.value })} /></Field>
@@ -103,7 +151,7 @@ export default function CatalogPage() {
             </div>
             <div className="text-xs">
               <div className="flex items-center justify-between mb-1"><h3 className="font-semibold">Jacks ({draft.ports.length})</h3><Button onClick={addDraftPort}>+ Add jack</Button></div>
-              <table className="w-full">
+              <div className="overflow-x-auto"><table className="w-full">
                 <thead><tr className="text-left text-neutral-500"><th>Id</th><th>Label</th><th>Kind</th><th>Dir</th><th>Connector</th><th>Edge</th><th>Pos</th><th></th></tr></thead>
                 <tbody>
                   {draft.ports.map((p) => (
@@ -119,7 +167,7 @@ export default function CatalogPage() {
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </table></div>
               <p className="text-[11px] text-neutral-500 mt-1">MIDI map, power details and provenance live in the JSON below; the evidence level of every value you type is recorded as “user”.</p>
             </div>
           </div>
@@ -128,7 +176,7 @@ export default function CatalogPage() {
           </Field>
         </Panel>
       ) : sel ? (
-        <Panel title={`${sel.manufacturer} ${sel.model}`} actions={<div className="flex gap-2"><Button onClick={() => duplicate(sel)}>Duplicate</Button><Button onClick={() => setDraft(structuredClone(sel))}>Edit{sel.builtin ? " (creates your own copy)" : ""}</Button><Button variant="danger" onClick={async () => { if (!window.confirm(`Delete profile ${sel.id}?`)) return; try { await api.catalog.remove(sel.id); setSel(null); void refresh(); } catch (e) { setError((e as Error).message); } }}>Delete</Button></div>}>
+        <Panel className="min-w-0" title={`${sel.manufacturer} ${sel.model}`} actions={<div className="flex gap-2"><Button onClick={() => duplicate(sel)}>Duplicate</Button><Button onClick={() => setDraft(structuredClone(sel))}>Edit{sel.builtin ? " (creates your own copy)" : ""}</Button><Button variant="danger" onClick={async () => { if (!window.confirm(`Delete profile ${sel.id}?`)) return; try { await api.catalog.remove(sel.id); setSel(null); void refresh(); } catch (e) { setError((e as Error).message); } }}>Delete</Button></div>}>
           <div className="text-xs flex flex-col gap-2">
             <div className="flex flex-wrap gap-1 items-center">
               <Badge>{sel.category}</Badge><Badge>{sel.source}</Badge>
@@ -142,14 +190,50 @@ export default function CatalogPage() {
             {sel.midi.bypass.cc != null && <div>Bypass: CC {sel.midi.bypass.cc} on={sel.midi.bypass.on_value} off={sel.midi.bypass.off_value} <EvidenceBadge evidence={sel.midi.bypass.evidence} /> {sel.midi.bypass.note}</div>}
             {sel.midi.cc_map.length > 0 && <div>CC map: <ul className="list-disc pl-4">{sel.midi.cc_map.map((c) => <li key={c.cc}>CC {c.cc} {c.name} {c.value_semantics && <span className="text-neutral-500">({c.value_semantics})</span>} <EvidenceBadge evidence={c.evidence} /></li>)}</ul></div>}
             <div>Unknown / unverified: {(sel.unknown_attributes ?? []).length ? sel.unknown_attributes!.map((u) => <Badge key={u} tone="warn">{u}</Badge>) : "nothing declared"}</div>
-            <table className="w-full"><thead><tr className="text-left text-neutral-500"><th>Jack</th><th>Kind</th><th>Dir</th><th>Connector</th><th>Edge</th><th>Position</th><th>Notes</th></tr></thead>
-              <tbody>{sel.ports.map((p) => <tr key={p.id} className="border-t border-line"><td>{p.label}</td><td>{p.kind}</td><td>{p.direction}</td><td>{p.connector}{p.midi_trs_type ? ` (${p.midi_trs_type})` : ""}{p.audio_channel ? ` ${p.audio_channel}` : ""}</td><td>{p.edge}</td><td>{p.position == null ? <Badge tone="bad">unknown</Badge> : <>{p.position} <EvidenceBadge evidence={p.position_evidence} /></>}</td><td className="text-neutral-500">{p.notes}</td></tr>)}</tbody>
-            </table>
+            <div className="overflow-x-auto"><table className="w-full"><thead><tr className="text-left text-neutral-500"><th>Jack</th><th>Kind</th><th>Dir</th><th>Connector</th><th>Edge</th><th>Position</th><th>Notes</th></tr></thead>
+              <tbody>{sel.ports.map((p) => <tr key={p.id} className="border-t border-line"><td>{p.label}</td><td>{p.kind}</td><td>{p.direction}</td><td>{p.connector}{p.midi_trs_type ? ` (${p.midi_trs_type})` : ""}{p.audio_channel ? ` ${p.audio_channel}` : ""}{p.kind === "power" && p.direction === "out" && (p.role === "expansion_out" ? <> · <Badge tone="warn">{p.supply_voltage_v ?? "?"} V expansion link, not a pedal outlet</Badge></> : <> · supplies {p.supply_voltage_v ?? "?"} V {p.supply_current_ma_max ?? "?"} mA{p.supply_options?.length ? ` (selectable: ${p.supply_options.map((o) => `${o.voltage_v} V/${o.current_ma_max ?? "?"} mA`).join(", ")})` : ""}{p.supply_isolated === true ? ", isolated" : p.supply_isolated === false ? ", shared" : ""}</>)}</td><td>{p.edge}</td><td>{p.position == null ? <Badge tone="bad">unknown</Badge> : <>{p.position} <EvidenceBadge evidence={p.position_evidence} /></>}</td><td className="text-neutral-500">{p.notes}</td></tr>)}</tbody>
+            </table></div>
             {sel.capabilities.notes && <div className="text-neutral-600">{sel.capabilities.notes}</div>}
+            <MidiCommandsSection profile={sel} onSaved={(saved) => { setSel(saved); void refresh(); }} />
+            <DocumentsSection profile={sel} onSaved={(saved) => { setSel(saved); void refresh(); }} />
+            <DeviceImageSection
+              heading="Picture"
+              value={sel.image ?? null}
+              widthMm={sel.footprint.width.value_mm}
+              depthMm={sel.footprint.depth.value_mm}
+              evidence={sel.footprint.width.evidence}
+              ports={sel.ports}
+              fill={enclosureFill(sel.category)}
+              hint={`Add a top-down photograph of the ${sel.model}; every board that uses this profile shows it.${sel.builtin ? " Saving a picture on a built-in profile makes it your own copy (same id, never overwritten by updates)." : ""}`}
+              onSave={async (img) => {
+                const saved = await api.catalog.update({ ...sel, image: img });
+                setSel(saved);
+                void refresh();
+                setTimeout(() => void refreshAssets(), 300); // after the section reclaims replaced/cancelled uploads
+              }}
+            />
             <div>
-              <h3 className="font-semibold mb-1">Jack layout (read-only; Edit or Duplicate to change)</h3>
+              <div className="flex flex-wrap items-center gap-2 mb-1">
+                <h3 className="font-semibold">Jacks ({sel.ports.length})</h3>
+                <ConfigureJacksButton image={sel.image} count={sel.ports.length} onOpen={() => setMapping(true)} />
+                {sel.ports.length === 0 && sel.image && <span className="text-[11px] text-neutral-500">This profile has no jacks yet (imported catalogs carry dimensions only).</span>}
+              </div>
+              <h4 className="text-[11px] text-neutral-500 mb-1">Outline view (read-only; Edit or Duplicate for the table editor)</h4>
               <JackEditor widthMm={sel.footprint.width.value_mm ?? 70} depthMm={sel.footprint.depth.value_mm ?? 120} ports={sel.ports} onChange={() => undefined} />
             </div>
+            {mapping && sel.image && (
+              <JackMapper
+                profileId={sel.id}
+                title={`${sel.manufacturer} ${sel.model}`}
+                ports={sel.ports}
+                image={sel.image}
+                widthMm={sel.footprint.width.value_mm}
+                depthMm={sel.footprint.depth.value_mm}
+                footprintEvidence={sel.footprint.width.evidence}
+                onSaved={(saved) => { setSel(saved); void refresh(); }}
+                onClose={() => setMapping(false)}
+              />
+            )}
           </div>
         </Panel>
       ) : <Panel title="Device"><p className="text-xs text-neutral-500">Pick a device to see its specification and evidence levels, or create a custom one.</p></Panel>}

@@ -1,15 +1,27 @@
 from __future__ import annotations
 
+import base64
 import copy
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from ..assets import ImageAssetError
 from ..catalog.demo import demo_rig
-from ..exports.project import ProjectImportError, export_project, parse_project
+from ..documents import DocumentError
+from ..domain.geometry import rotated_size
+from ..exports.project import (
+    ProjectImportError,
+    bundle_assets,
+    bundle_documents,
+    export_project,
+    parse_project,
+    project_dict,
+)
+from ..images import image_asset_ids, resolve_image
 from ..models.common import new_id
-from ..models.rig import ProjectFile, Rig, RigSummary, utcnow_iso
-from .deps import load_rig, profile_repo, profiles_for, rig_repo
+from ..models.rig import PreviewDevice, Rig, RigPreview, RigSummary, utcnow_iso
+from .deps import asset_store, assets_for, load_rig, profile_repo, profiles_for, rig_repo
 
 router = APIRouter(prefix="/api/rigs", tags=["rigs"])
 
@@ -27,9 +39,43 @@ class RenameBody(BaseModel):
     description: str | None = None
 
 
+def rig_preview(rig: Rig, profiles, assets=None) -> RigPreview:
+    """A true-scale miniature of the board for the rig library: enclosures at their real size,
+    with the device picture when one is on this computer."""
+    devices = []
+    for inst in rig.instances:
+        prof = profiles.get(inst.profile_id)
+        w, h, placeholder = rotated_size(prof, inst.rotation)
+        img = resolve_image(inst, prof, assets or {})
+        devices.append(
+            PreviewDevice(
+                x_mm=inst.x_mm,
+                y_mm=inst.y_mm,
+                width_mm=w,
+                height_mm=h,
+                category=prof.category.value if prof else "other",
+                off_board=inst.off_board,
+                surface=inst.mount,
+                placeholder=placeholder,
+                rotation=inst.rotation,
+                image=img if img and not img.get("missing") else None,
+            )
+        )
+    return RigPreview(
+        width_mm=rig.board.width_mm, depth_mm=rig.board.depth_mm, devices=devices, cable_count=len(rig.connections)
+    )
+
+
 @router.get("", response_model=list[RigSummary])
 def list_rigs(request: Request):
-    return rig_repo(request).list()
+    repo = rig_repo(request)
+    summaries = repo.list()
+    for s in summaries:
+        rig = repo.get(s.id)
+        if rig is not None:
+            profiles = profiles_for(request, rig)
+            s.preview = rig_preview(rig, profiles, assets_for(request, rig, profiles))
+    return summaries
 
 
 @router.post("", response_model=Rig, status_code=201)
@@ -117,10 +163,23 @@ def duplicate_rig(rig_id: str, request: Request):
     return rig_repo(request).save(copy_rig)
 
 
-@router.get("/{rig_id}/export", response_model=ProjectFile)
-def export_rig(rig_id: str, request: Request):
+@router.get("/{rig_id}/export")
+def export_rig(rig_id: str, request: Request, include_images: bool = False, include_documents: bool = False):
+    """Project file. Plain by default (format_version 1, no binary data). With ``include_images=1``
+    the user explicitly opts into bundling their device photographs (format_version 2); with
+    ``include_documents=1`` into bundling the PDF manuals their profiles attach or cite
+    (format_version 3). Manuals are the user's own files: they are never included implicitly."""
     rig = load_rig(request, rig_id)
-    return export_project(rig, profiles_for(request, rig))
+    profiles = profiles_for(request, rig)
+    project = export_project(rig, profiles)
+    if include_images:
+        store = asset_store(request)
+        bundle_assets(project, store.get_many(image_asset_ids(rig, profiles)), store.read_bytes)
+    if include_documents:
+        docs = request.app.state.documents
+        ids = [d for p in profiles.values() for d in p.document_ids()]
+        bundle_documents(project, docs.get_many(ids), docs.read_bytes)
+    return project_dict(project)
 
 
 class ImportResult(BaseModel):
@@ -140,6 +199,53 @@ async def import_rig(request: Request, keep_id: bool = False, name: str | None =
     prof_repo = profile_repo(request)
     imported: list[str] = []
     from ..models.profile import DeviceProfile
+
+    # Bundled images (opt-in exports) are restored through the same validation as an upload.
+    store = asset_store(request)
+    for a in project.assets:
+        aid = a.get("id")
+        if not isinstance(aid, str) or store.get(aid) is not None:
+            continue
+        try:
+            store.ingest_image(
+                base64.b64decode(a.get("data_base64", ""), validate=True), a.get("original_name"), asset_id=aid
+            )
+        except (ImageAssetError, ValueError) as e:
+            warnings.append(f"bundled image {aid} was not restored: {e}")
+    # Images referenced but not on this computer: keep the metadata, draw the enclosure meanwhile.
+    for p in project.profiles:
+        img = p.get("image") if isinstance(p, dict) else None
+        if isinstance(img, dict) and isinstance(img.get("asset_id"), str) and store.get(img["asset_id"]) is None:
+            warnings.append(
+                f"profile {p.get('id')} refers to image {img['asset_id']}, which is not on this computer; the enclosure drawing is used until you add a picture"
+            )
+    for inst in project.rig.instances:
+        if inst.image and store.get(inst.image.asset_id) is None:
+            warnings.append(f"device {inst.label} refers to image {inst.image.asset_id}, which is not on this computer")
+    # Bundled manuals (opt-in exports) go through the same PDF validation as an upload. Missing
+    # ones are reported, never invented: the profile keeps its reference and the UI says "not here".
+    docs = request.app.state.documents
+    for dd in project.documents:
+        did = dd.get("id")
+        if not isinstance(did, str) or docs.get(did) is not None:
+            continue
+        try:
+            docs.ingest_pdf(
+                base64.b64decode(dd.get("data_base64", ""), validate=True), dd.get("original_name"), document_id=did
+            )
+        except (DocumentError, ValueError) as e:
+            warnings.append(f"bundled document {did} was not restored: {e}")
+    for p in project.profiles:
+        try:
+            prof_doc_ids = DeviceProfile.model_validate(p).document_ids()
+        except Exception:  # validated again below; a bad profile fails there with a clear message
+            prof_doc_ids = []
+        for did in prof_doc_ids:
+            if docs.get(did) is None:
+                title = next((d.get("title") for d in p.get("documents", []) if d.get("document_id") == did), None)
+                warnings.append(
+                    f"profile {p.get('id')} refers to document {did}{f' ({title})' if title else ''}, which is not on this computer; upload it again to view it"
+                )
 
     for p in project.profiles:
         prof = DeviceProfile.model_validate(p)

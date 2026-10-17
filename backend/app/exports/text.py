@@ -15,6 +15,9 @@ from ..models.profile import DeviceProfile
 from ..models.rig import Rig
 from ..morningstar import specs
 
+SURFACE_WORD = {"top": "the top of the board", "underside": "under the board", "off_board": "off the board"}
+SURFACE_SHORT = {"top": "top", "underside": "underside", "off_board": "off-board"}
+
 
 def _port_label(rig: Rig, profiles: dict[str, DeviceProfile], ref) -> tuple[str, str]:
     inst = rig.instance(ref.instance_id)
@@ -30,6 +33,14 @@ def wiring_manifest_rows(rig: Rig, profiles: dict[str, DeviceProfile]) -> list[d
     for i, c in enumerate(rig.connections, start=1):
         si, sp = _port_label(rig, profiles, c.source)
         ti, tp = _port_label(rig, profiles, c.target)
+        a, b = rig.instance(c.source.instance_id), rig.instance(c.target.instance_id)
+        sa, sb = (a.mount if a else "top"), (b.mount if b else "top")
+        notes = c.notes or ""
+        if sa != sb and "off_board" not in (sa, sb):
+            # Where the cable passes through or around the board is not known; say that it must.
+            notes = (
+                notes + " " if notes else ""
+            ) + f"Crosses from {SURFACE_WORD[sa]} to {SURFACE_WORD[sb]} (route not modelled)."
         rows.append(
             {
                 "n": i,
@@ -42,7 +53,9 @@ def wiring_manifest_rows(rig: Rig, profiles: dict[str, DeviceProfile]) -> list[d
                 "cable_length_cm": c.cable_length_cm if c.cable_length_cm is not None else "",
                 "connector_style": c.connector_style or "",
                 "intentional": "yes" if c.intentional else "",
-                "notes": c.notes or "",
+                "notes": notes,
+                "from_surface": sa,
+                "to_surface": sb,
                 "connection_id": c.id,
             }
         )
@@ -69,17 +82,17 @@ def wiring_manifest_markdown(
     ]
     out.append("## Devices")
     out.append("")
-    out.append("| Label | Profile | Position (mm) | Rotation | MIDI ch | Footprint (mm) | Unknowns |")
-    out.append("|---|---|---|---|---|---|---|")
+    out.append("| Label | Profile | Mounted | Position (mm) | Rotation | MIDI ch | Footprint (mm) | Unknowns |")
+    out.append("|---|---|---|---|---|---|---|---|")
     for inst in rig.instances:
         prof = profiles.get(inst.profile_id)
         fp = "?"
         if prof and prof.footprint.width.value_mm and prof.footprint.depth.value_mm:
             fp = f"{prof.footprint.width.value_mm:g} x {prof.footprint.depth.value_mm:g} ({prof.footprint.width.evidence.value})"
         unknowns = ", ".join(prof.unknowns()) if prof else "profile missing"
-        pos = "off-board" if inst.off_board else f"{inst.x_mm:g}, {inst.y_mm:g}"
+        pos = "-" if inst.mount == "off_board" else f"{inst.x_mm:g}, {inst.y_mm:g}"
         out.append(
-            f"| {inst.label} | {prof.display_name if prof else inst.profile_id} | {pos} | {inst.rotation}° | {inst.midi_channel or '-'} | {fp} | {unknowns or '-'} |"
+            f"| {inst.label} | {prof.display_name if prof else inst.profile_id} | {SURFACE_SHORT[inst.mount]} | {pos} | {inst.rotation}° | {inst.midi_channel or '-'} | {fp} | {unknowns or '-'} |"
         )
     out.append("")
     for kind in (SignalKind.AUDIO, SignalKind.MIDI, SignalKind.EXPRESSION, SignalKind.POWER, SignalKind.USB):
@@ -153,6 +166,10 @@ def scene_report_markdown(rig: Rig, compiled: dict) -> str:
     out.append(
         f"MC8 firmware assumed: {compiled['mc8']['firmware_assumed']}. ML10X firmware assumed: {rig.controllers.ml10x.firmware_version or 'not set'}."
     )
+    out.append(
+        "The MIDI below is what the original MC8 is intended to send, compiled from the saved scene values; "
+        "it is not a record of what any device has been observed to do."
+    )
     out.append("")
     for sp in compiled["scenes"]:
         scene = rig.scene(sp["scene_id"])
@@ -173,17 +190,22 @@ def scene_report_markdown(rig: Rig, compiled: dict) -> str:
                 inst = rig.instance(st.instance_id)
                 bits = []
                 if st.program is not None:
-                    bits.append(
-                        f"PC {st.program.pc}"
-                        + (
-                            f" bank {st.program.bank_msb}/{st.program.bank_lsb}"
-                            if st.program.bank_msb is not None or st.program.bank_lsb is not None
-                            else ""
-                        )
+                    pc_text = f"PC {st.program.pc}" + (
+                        f" bank {st.program.bank_msb}/{st.program.bank_lsb}"
+                        if st.program.bank_msb is not None or st.program.bank_lsb is not None
+                        else ""
                     )
+                    if st.program.command is not None:
+                        pc_text = f"'{st.program.command.name}' ({pc_text})"
+                    bits.append(pc_text)
                 if st.enabled is not None:
                     bits.append("engaged" if st.enabled else "bypassed")
-                bits += [f"CC{c.cc}={c.value}" for c in st.cc_values]
+                for c in st.cc_values:
+                    cc_text = f"CC{c.cc}={c.value}"
+                    if c.command is not None:
+                        meaning = f" {c.command.value_label}" if c.command.value_label else ""
+                        cc_text = f"'{c.command.name}'{meaning} ({cc_text})"
+                    bits.append(cc_text)
                 if st.manual_note:
                     bits.append(f"note: {st.manual_note}")
                 out.append(f"- {inst.label if inst else st.instance_id}: {', '.join(bits) or 'no change'}")

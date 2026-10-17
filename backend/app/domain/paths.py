@@ -56,9 +56,17 @@ class PathStep:
     send_jack: str | None = None
     return_jack: str | None = None
     note: str | None = None
+    # Physical facts behind the step: the switcher jack the conductor leaves through (a Send or
+    # the main Output), the jack it comes back in through (a Return or the main Input), and the
+    # cables plugged into them, in signal order. Empty when nothing is cabled.
+    out_port_id: str | None = None
+    in_port_id: str | None = None
+    cables: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict:
-        return self.__dict__.copy()
+        d = self.__dict__.copy()
+        d["cables"] = list(self.cables)
+        return d
 
 
 @dataclass
@@ -107,6 +115,10 @@ def _loop_step(lp: LoopOccupancy | None, n: int, bypassed: bool) -> PathStep:
     step = PathStep(
         node=f"L{n}", label=_loop_label(n), send_jack=f"Send {pair} ({cond})", return_jack=f"Return {pair} ({cond})"
     )
+    if lp is not None:
+        step.out_port_id = lp.send_port_id
+        step.in_port_id = lp.return_port_id
+        step.cables = [c for c in (lp.send_connection_id, lp.return_connection_id) if c]
     if lp is None or not lp.occupied:
         step.state = "missing"
         step.note = "no device cabled into this loop; the signal still passes through the buffered loop"
@@ -164,6 +176,8 @@ def trace_preset(topo: Ml10xTopology | None, preset: Ml10xPreset) -> dict:
                         state="through",
                         device=fed_by,
                         note=f"fed by {fed_by}" if fed_by else "nothing is cabled into this input",
+                        in_port_id=topo.input_port_id.get(node) if topo else None,
+                        cables=[topo.input_connection_id[node]] if topo and node in topo.input_connection_id else [],
                     )
                 )
             elif node in OUTPUT_NODES:
@@ -175,6 +189,8 @@ def trace_preset(topo: Ml10xTopology | None, preset: Ml10xPreset) -> dict:
                         state="through",
                         device=drives,
                         note=f"feeds {drives}" if drives else "this output is not cabled anywhere",
+                        out_port_id=topo.output_port_id.get(node) if topo else None,
+                        cables=[topo.output_connection_id[node]] if topo and node in topo.output_connection_id else [],
                     )
                 )
                 path.ends_at.append(node)
@@ -211,6 +227,8 @@ def trace_preset(topo: Ml10xTopology | None, preset: Ml10xPreset) -> dict:
                 first.device = lp.return_from_label
                 first.device_instance_id = lp.return_from_instance_id
                 first.note = f"return-only: nothing feeds this loop's Send; its Return carries the second output of {lp.return_from_label}"
+                first.out_port_id = None
+                first.cables = [c for c in (lp.return_connection_id,) if c]
                 p.complete = bool(p.ends_at)
             else:
                 first.state = "missing"

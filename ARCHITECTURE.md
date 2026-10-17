@@ -106,6 +106,219 @@ saved, the switch is refused and the current document stays in memory with a blo
 decided from the same `effective_ports` the backend uses, and the resulting connection is an
 ordinary document edit.
 
+## The Stage: a scene told on the physical board (Session 3)
+
+The Stage is a pure projection of facts the rig already stores; it owns no state of its own
+and never writes. Two backend additions make it possible without guessing in the browser:
+
+- every traced `PathStep` names the switcher jack the conductor leaves through (`out_port_id`:
+  a Send or the main Output), the jack it comes back in through (`in_port_id`: a Return or the
+  main Input) and the physical cables plugged into them, in signal order (`cables`);
+- `analysis.midi.routes` lists, for every device the MC8 reaches, the ordered MIDI cables
+  (breadth-first, so the shortest physical route; MIDI Thru hops included).
+
+`frontend/src/lib/stage.ts` turns a scene into a *story*: per conductor a list of segments
+(`cable` = a connection id, `virtual` = the preset's hop inside the switcher, `device` = through
+a pedal, each with a state: engaged / bypassed / empty / broken / return-only), per device the
+state the scene wants (kept separate from the loop state, because an analog pedal's bypass is
+its own footswitch), MIDI targets with their routes, the MC8 assignment, and a diff against the
+previous scene in the set. `frontend/src/lib/boardLayout.ts` is the one place that turns rig
+geometry into drawing coordinates and cable curves, shared by the Board and the Stage, so a
+flow is drawn exactly on the cable the Board draws. Cables leave a jack perpendicular to the
+edge the jack sits on (as a plug does); top-face jacks fall back to a bend towards the centre.
+
+## Device pictures: assets, calibration and rendering (Session 3)
+
+A photograph is a *visual layer* on a device whose geometry is already known; it never becomes
+geometry. Three pieces keep that true:
+
+- **Assets** (`app/assets.py`, table `assets`, migration 0003, files in the managed asset
+  directory next to the database). An upload is sniffed by Pillow (JPEG/PNG/WebP only), checked
+  against byte and pixel ceilings before decoding, EXIF-transposed, downscaled to 2048 px and
+  re-encoded, so no original bytes or metadata are stored or served. Files are named by a
+  server-generated `img_…` id; the API validates ids against a strict pattern before any lookup.
+  Deleting an asset that a profile or rig still references is refused (409).
+- **`DeviceImage`** (`models/profile.py`), on a profile or as an instance override: `asset_id`,
+  a normalized `crop` in the stored image, `rotation_quarter` (quarter turns so the picture's top
+  matches the device's top edge), `fit` (`contain` letterboxes, `cover` clips) and `calibrated`
+  (true only when the selection was made against a known width and depth; a statement about the
+  workflow, not about the measurements' evidence). `app/images.py::resolve_image` picks the
+  effective picture (instance override wins) and joins it with the asset's pixel size; a missing
+  asset resolves to `{missing: true}` and renderers fall back to the enclosure. The analysis
+  exposes it per instance, the rig library preview per device.
+- **Rendering** (`frontend/src/components/images/DeviceImageGlyph.tsx`): the picture is placed in
+  the *unrotated* enclosure frame and rotated with the device about the same centre the jacks
+  rotate about, so a 90° device shows a 90° picture with its jacks on the new edge. The crop is a
+  nested SVG viewport (`viewBox` = crop in pixels) with `preserveAspectRatio` meet/slice, so
+  nothing is ever stretched. Board, Stage and previews all use this one glyph under their own
+  overlays (labels on a translucent chip, LEDs, paths, jacks).
+
+Project files: format 1 is unchanged and carries only `DeviceImage` metadata; importing one on a
+computer without the asset keeps the metadata and warns. `?include_images=1` produces a format 2
+file with the assets base64-bundled; import restores them through the same sanitizer under the
+same ids (local library still wins for existing profiles).
+
+## Image-assisted jack mapping (Session 3)
+
+Two coordinate systems, kept apart on purpose (`frontend/src/lib/jackMapping.ts`):
+
+- **Image space**: `PortDef.image_anchor = {x, y, asset_id}`, a normalized point in the stored,
+  orientation-corrected photograph. It records where the connector *appears* and may lie outside
+  the enclosure crop. It is a visual annotation only: `placed_ports` never reads it. `asset_id`
+  says which picture it was placed on, so a replaced photograph is flagged for reconciliation.
+- **Enclosure space**: `PortDef.edge` + `position`, the wiring fact the board, the cable kit and
+  the exports already use. The bridge from image to enclosure space is exactly the crop, the
+  quarter turn and the fit mode the board uses to draw the picture (`imageToEnclosure` /
+  `enclosureToImage`), so a marker and its lead agree with what the Board shows.
+
+`suggestPlacement` proposes the edge (nearest edge within about 12 mm on a calibrated device,
+the protruding side for a point outside the crop, `top_face` deep inside) and the normalized
+position; the user can pin a different edge, and the position is then the projection of the
+anchor on that edge. Nothing is invented beyond the click itself; positions set this way carry
+`position_evidence = user`, connector facts `evidence = user` (hand-authored builtins keep
+`evidence = None`, meaning "shares the profile's provenance").
+
+Persistence goes through `PUT /api/catalog/devices/{id}/ports`, which replaces only the jack
+list (dimensions, provenance, picture, MIDI and power data are untouched). Jack ids are stable
+handles for cables: `ProfileRepository.port_usage` lists every cable, in every rig, plugged into
+each jack, and the endpoint refuses (409 `ports_in_use`, affected cables listed, each with a
+`change` of `"removed"` or the semantic diff) to drop an id a cable uses, or to change what a
+used jack *is* (`kind`, `direction`, `connector`, `audio_channel`, `trs_role`, `midi_trs_type`,
+`pair_group`, `role`; see `PORT_SEMANTIC_FIELDS`), unless `force` is set. Labels, positions,
+anchors and clearance change freely, and filling in or un-stating a value is not a change. A
+forced removal is then flagged by the existing `connection.port_missing` diagnostic and a forced
+retype by `connection.kind_mismatch`/`connection.direction`, rather than any cable being deleted.
+Saving jacks also calls `DeviceProfile.reconcile_declared_unknowns()`, which drops an importer's
+"ports (not in dataset)" marker once the profile has jacks while leaving the power/MIDI unknowns
+alone. TRS semantics are untouched: a stereo
+TRS jack is one port with `audio_channel = stereo_trs`; an L/R pair is two ports sharing a
+`pair_group`; per-conductor ML10X ports keep their `pair_group`/`loop` facts.
+
+## Device manuals and the MIDI command library (Session 3f)
+
+**Documents** (`app/documents.py`, table `documents`, migration 0004, files in the managed
+document directory next to the database; `SIGNAL_LOOM_DOCS` overrides it). A PDF is a different
+kind of thing from a photograph, so it does not share the image pipeline: the bytes are kept
+byte-for-byte (a manual must stay citable by page) and only *validated* and *rendered*. Validation
+is the `%PDF-` header, a `%%EOF` trailer in the last 8 KB, a 40 MB bound, and PDFium
+(`pypdfium2`, a bundled local binary) opening the file and counting at most 2000 pages; the
+client's content type is ignored. Ids are server-generated `doc_<12 hex>` and matched against a
+strict pattern before any lookup, so no caller can name a path. Serving is passive by design:
+`GET /api/documents/{id}/pages/{n}` rasterizes one page to PNG (cached under
+`documents/cache/<id>/`), which is what the in-app viewer shows, so a PDF's scripts, links and
+forms never execute in the browser; the original is only offered as `Content-Disposition:
+attachment` with `nosniff`, a `default-src 'none'; sandbox` CSP and `no-store`. Text search is
+local PDFium text extraction, cached per document; scanned PDFs report "no text layer". A profile
+carries `documents: [DocumentRef{document_id, title, kind, note}]` and a command may cite
+`{document_id, page}`; both are found by a JSON `instr` search, so `referenced_by` sees attachments
+and citations alike. Replace keeps the id (citations survive) and is refused while another profile
+shares the file; detach never deletes bytes unless asked and unreferenced; `DELETE
+/api/documents/{id}` is refused while referenced. The API's `document_files` echo tells the UI
+whether each referenced file is present on this computer, so an imported profile degrades to
+"not on this computer" instead of a broken link.
+
+**Commands** (`MidiCommand` in `models/profile.py`, `app/domain/commands.py`). A command is one CC
+(`value_mode` fixed / choice / any) or one PC (wire number, optional bank MSB/LSB), with intent,
+a tri-state `deterministic`, an evidence level, an optional citation and a separate
+`verified_on_hardware` claim. It lives in `MidiSpec.commands` beside the documented
+`cc_map`/`program_change`/`bypass`, which remain the *reference* the compiler checks numbers
+against (`midi.cc_undocumented`, `midi.pc_out_of_range`, bank support) exactly as for hand-typed
+values; `commands_from_midi_spec` derives starter commands from those facts copying their
+evidence, so the two never contradict by construction and nothing is invented for a profile that
+documents nothing. The MIDI channel is deliberately absent from a command: it is resolved from the
+placed instance (override, else profile default) at compile time.
+
+**Applied to scenes.** No new state shape: `CcValue` and `ProgramSelection` gained an optional
+`AppliedCommand{command_id, name, definition, value_label, deterministic, applied_at}`. The numeric
+fields beside it are still the compiler's only input; `definition` is `MidiCommand.fingerprint()`
+(the wire-relevant fields as a canonical string, identical in `frontend/src/lib/commands.ts`) taken
+at apply time. On every compile `_check_applied_command` compares it with the live command: equal →
+nothing; different → `midi.command_changed` (warning, names old and new); gone →
+`midi.command_removed`; toggle → `midi.command_toggle`; evidence unknown → `midi.command_unverified`.
+Bytes change only when the user reapplies. `_check_cc_conflicts` collects every instruction for
+one CC on one device in one scene (bypass-by-CC, Bank Select CCs, explicit values) and reports
+different values as `scene.cc_conflict` (error) and repeats as `scene.cc_repeated` (info); nothing
+is dropped or "corrected". The scene report names the command and the exact bytes and states that
+it is not a record of device behaviour.
+
+Project files: format 1 and 2 are unchanged and now carry `midi.commands`, `documents` references
+and applied snapshots as ordinary profile/rig JSON; `?include_documents=1` produces a format 3 file
+with the PDFs base64-bundled, restored on import through the same validation under the same ids.
+Format 1 and 2 files cannot carry `documents`. The plain export still writes `assets: []` as it
+always has, and omits the `documents` section entirely when empty, so older app versions keep
+reading plain files.
+
+## Mounting surfaces and the underside (Session 3e, phase A)
+
+A placed device has a **mounting surface**: `top`, `underside` or `off_board`
+(`DeviceInstance.surface`). Rigs saved before this existed carry only `off_board`; they load with
+`surface = None` and are read through `DeviceInstance.mount` (`off_board → off_board`, else
+`top`). Loading never rewrites the flag; an explicit `surface` keeps the flag in agreement so
+older readers see the same fact. The frontend mirrors this in `lib/mounting.ts` (`surfaceOf`).
+
+Top and underside share one coordinate system and one perimeter. The underside view is the board
+**seen through from above, not mirrored**: what is under your left foot is drawn on the left.
+`geometry.board_diagnostics` bounds-checks both surfaces and reports collisions only between
+devices on the same surface. Whether something fits *under* the board is a separate question
+answered only from two documented figures: the device's `footprint.height` and the board's usable
+clearance (`geometry.underside_clearance`: the user's `Board.underside_clearance_mm` wins, then
+the catalog spec's figure, else unknown). Both known → `instance.underside_fits` (INFO) or
+`instance.underside_too_tall` (ERROR); either missing → `instance.underside_height_unknown` /
+`instance.underside_clearance_unverified` (WARNING). A footprint inside the perimeter is never
+taken as proof. A board whose spec says `underside_mountable = False` refuses underside devices
+(`instance.underside_unavailable`).
+
+`models/board.py` / `catalog/boards.py` hold **pedalboard specs** (`GET /api/catalog/boards`):
+overall size, height, rail count, rail pitch, underside mountability and clearance, open front,
+bracket compatibility as text, each with evidence. Rails are drawn only when their pitch is known
+(it never is, for the shipped Pedaltrain boards), so the underside view shows the frame outline,
+the open front and the clearance status, and `board.underside_mounting_unverified` says bracket
+fit is not checked. `Rig.board.model_id` points at a spec; the board's width/depth are copied in
+when the user picks one and remain editable.
+
+Mounting changes nothing electrically: wiring, MIDI, scenes and the Stage read the same
+connections. On the Board a cable whose other end is on the other surface ends in a short stub
+with ↧/↥; where it passes the board is not modelled and no length is invented. The wiring
+manifest gains a *Mounted* column and notes cables that cross surfaces. Rig cards draw the top
+surface only; the Stage dims underside devices.
+
+## Power supplies and the power plan (Session 3e, phase B)
+
+Outlet facts stay on the outlet's `PortDef`: `supply_voltage_v`, `supply_current_ma_max`,
+`supply_polarity`, `supply_ac_dc`, `supply_isolated`, `supply_shared_group`, and for selectable
+outlets `supply_options` (voltage → rating at that voltage). A jack that feeds another supply
+(Strymon's 24 V Ojai link) is `role = "expansion_out"`. A device's need stays on its profile's
+`PowerSpec`, now with `voltage_max_v` for a documented range (ML10X 9–18 V); `current_ma_min` is
+the manufacturer's documented minimum requirement, not a measurement.
+
+An **assignment is the typed power `Connection`** from outlet to inlet; there is no second
+allocation model. The rig adds only `DeviceInstance.supply_settings` (outlet port id → chosen
+voltage). `domain/power.py` derives everything else: `effective_outlet` applies the setting (an
+option replaces voltage *and* rating; a value that is no option is reported invalid and the default
+is used, never an invented capacity), `outlet_loads` sums the documented minimums per outlet, and
+`power_plan` builds the planner view (`analysis.power`: supplies → outputs with assigned devices,
+known requirement total, remaining, status derived from the wiring diagnostics; consumers;
+`unpowered`; `unknown_requirements`). Capacities of separate outlets are never pooled.
+
+`wiring._validate_power` extends the existing checks rather than replacing them: expansion link
+used as an outlet (ERROR), invalid setting (ERROR), voltage outside the documented point or range
+(ERROR), AC/DC mismatch (ERROR) or unknown (WARNING), polarity mismatch (ERROR, DC only) or unknown
+(WARNING), rating below the documented minimum at the selected voltage (ERROR), and the unknowns
+(`requirement_unknown`, `current_unknown`, `outlet_current_unknown`, `supply_unknown`) as
+WARNINGs that never approve. `outlet_load_diagnostics` handles shared outlets: documented minimums
+adding up beyond the rating (`power.outlet_overloaded`, ERROR), a total that cannot be known
+(`power.outlet_load_unknown`), the lost isolation between devices on one outlet
+(`power.outlet_shared_assumption`, INFO) and outlets documented as sharing a regulator
+(`power.outlets_share_regulator`, INFO). `power.unpowered` is unchanged.
+
+The **Power planner** (Wiring tab, `components/wiring/PowerPlanner.tsx`) shows one supply at a
+time: each outlet's voltage (a select for selectable outlets, bound to `supply_settings`),
+polarity, rating, the devices on it with their documented needs, the remaining current and a
+status with the diagnostic codes in words. Assigning, moving and unplugging write power cables
+through the store (`assignPower`, `unassignPower`, `setOutletVoltage`). Unpowered devices and
+devices with no documented requirement are listed explicitly, and the footer repeats that the
+figures are ratings and documented minimums, not measured draw.
+
 ## Scenes and the compiler
 
 A scene is intent, not bytes. The compiler is deterministic for equal inputs (ordering is
@@ -127,7 +340,7 @@ device/cable/switch.
 
 SQLite with explicit SQL migrations (`backend/migrations/NNNN_name.sql`, applied once,
 tracked in `schema_migrations`). Tables: `device_profiles`, `rigs`, `device_instances`,
-`connections`, `scenes`. Core columns are relational; nested detail is the validated JSON of
+`connections`, `scenes`, `assets` (pictures) and `documents` (PDF manuals). Core columns are relational; nested detail is the validated JSON of
 the Pydantic model. Builtin profiles are re-seeded on start only if still marked `builtin`;
 editing one in the UI turns it into a user-owned copy.
 

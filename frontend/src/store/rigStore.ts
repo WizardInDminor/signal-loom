@@ -2,7 +2,8 @@
 
 import { create } from "zustand";
 import { api, ApiError, newId } from "@/lib/api";
-import type { Analysis, Connection, DeviceInstance, DeviceProfile, PortDirection, Rig, Scene, SignalKind } from "@/lib/types";
+import type { Analysis, Connection, DeviceInstance, DeviceProfile, PortDirection, Rig, Scene, SignalKind, Surface } from "@/lib/types";
+import { surfaceOf } from "@/lib/mounting";
 
 interface RigState {
   rig: Rig | null;
@@ -35,15 +36,24 @@ interface RigState {
   /** Adopt a rig document the server already stored (e.g. after a server-side import) without a loading cycle. */
   replaceRig: (rig: Rig) => void;
   refreshCatalog: () => Promise<void>;
+  /** Re-run the analysis of the current document (e.g. after a profile changed) without editing it. */
+  reanalyze: () => Promise<void>;
   update: (fn: (rig: Rig) => void) => void;
   /** Persist every pending edit, in order. Resolves true once the latest revision is saved. */
   ensureSaved: () => Promise<boolean>;
   flush: () => void;
   select: (id: string | null) => void;
   selectScene: (id: string | null) => void;
-  addInstance: (profile: DeviceProfile) => string;
+  /** Place a device; `surface` defaults by category (instrument/amp off-board, otherwise top). */
+  addInstance: (profile: DeviceProfile, surface?: Surface) => string;
   removeInstance: (id: string) => void;
   addConnection: (c: Omit<Connection, "id" | "intentional"> & { intentional?: boolean }) => string;
+  /** Plug a device's power inlet into a supply outlet (moving it off any outlet it is on). Returns the cable id. */
+  assignPower: (supplyId: string, outletPortId: string, deviceId: string, inletPortId: string) => string;
+  /** Unplug a device's power inlet. */
+  unassignPower: (deviceId: string) => void;
+  /** Pick the voltage of a selectable outlet (null = back to the outlet's default). */
+  setOutletVoltage: (supplyId: string, outletPortId: string, voltage: number | null) => void;
   removeConnection: (id: string) => void;
   addScene: (name: string) => string;
   duplicateScene: (id: string) => string | null;
@@ -183,6 +193,18 @@ export const useRigStore = create<RigState>((set, get) => ({
     set({ catalog, profiles });
   },
 
+  async reanalyze() {
+    const rig = get().rig;
+    if (!rig) return;
+    const seq = ++analyzeSeq;
+    try {
+      const analysis = await api.rigs.analyzeDocument(rig);
+      if (seq === analyzeSeq) set({ analysis });
+    } catch (e) {
+      set({ error: errorText(e) });
+    }
+  },
+
   update(fn) {
     const current = get().rig;
     if (!current || get().conflict) return;
@@ -263,10 +285,12 @@ export const useRigStore = create<RigState>((set, get) => ({
   select: (id) => set({ selectedInstanceId: id }),
   selectScene: (id) => set({ selectedSceneId: id }),
 
-  addInstance(profile) {
+  addInstance(profile, surface) {
     const id = newId("inst");
     const rig = get().rig;
-    const n = rig?.instances.length ?? 0;
+    const external = ["instrument", "amp"].includes(profile.category);
+    const where: Surface = external ? "off_board" : (surface ?? "top");
+    const n = rig?.instances.filter((i) => surfaceOf(i) === where).length ?? 0;
     get().update((r) => {
       r.instances.push({
         id,
@@ -276,7 +300,8 @@ export const useRigStore = create<RigState>((set, get) => ({
         y_mm: 20 + Math.floor(n / 4) * 130,
         rotation: 0,
         intentional_overlap: false,
-        off_board: ["instrument", "amp"].includes(profile.category),
+        off_board: where === "off_board",
+        surface: where,
         midi_channel: profile.midi.default_channel ?? null,
         port_overrides: [],
         removed_port_ids: [],
@@ -308,6 +333,34 @@ export const useRigStore = create<RigState>((set, get) => ({
   removeConnection(id) {
     get().update((r) => {
       r.connections = r.connections.filter((c) => c.id !== id);
+    });
+  },
+
+  assignPower(supplyId, outletPortId, deviceId, inletPortId) {
+    const id = newId("conn");
+    get().update((r) => {
+      // One plug per inlet: the assignment *is* the typed power cable, so moving a device means
+      // replacing its power cable, never keeping a second record of where it is plugged in.
+      r.connections = r.connections.filter((c) => !(c.kind === "power" && c.target.instance_id === deviceId && c.target.port_id === inletPortId));
+      r.connections.push({ id, kind: "power", source: { instance_id: supplyId, port_id: outletPortId }, target: { instance_id: deviceId, port_id: inletPortId }, label: null, intentional: false });
+    });
+    return id;
+  },
+
+  unassignPower(deviceId) {
+    get().update((r) => {
+      r.connections = r.connections.filter((c) => !(c.kind === "power" && c.target.instance_id === deviceId));
+    });
+  },
+
+  setOutletVoltage(supplyId, outletPortId, voltage) {
+    get().update((r) => {
+      const i = r.instances.find((k) => k.id === supplyId);
+      if (!i) return;
+      const settings = { ...(i.supply_settings ?? {}) };
+      if (voltage == null) delete settings[outletPortId];
+      else settings[outletPortId] = voltage;
+      i.supply_settings = settings;
     });
   },
 

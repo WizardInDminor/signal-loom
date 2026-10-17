@@ -5,6 +5,8 @@ import { useRigStore } from "@/store/rigStore";
 import type { Connection, PortDef, SignalKind } from "@/lib/types";
 import { Badge, Button, DiagnosticList, Field, KIND_COLOR, Panel } from "@/components/ui/basics";
 import { WiringDiagram } from "./WiringDiagram";
+import { PowerPlanner } from "./PowerPlanner";
+import { SURFACE_SHORT, surfaceOf } from "@/lib/mounting";
 
 const KINDS: SignalKind[] = ["audio", "midi", "expression", "power", "usb"];
 
@@ -40,7 +42,8 @@ export function WiringTab() {
   const name = (ref: { instance_id: string; port_id: string }) => {
     const inst = rig.instances.find((i) => i.id === ref.instance_id);
     const port = portsOf(ref.instance_id).find((p) => p.id === ref.port_id);
-    return `${inst?.label ?? ref.instance_id}: ${port?.label ?? ref.port_id}`;
+    const where = inst && surfaceOf(inst) !== "top" ? ` [${SURFACE_SHORT[surfaceOf(inst)]}]` : "";
+    return `${inst?.label ?? ref.instance_id}${where}: ${port?.label ?? ref.port_id}`;
   };
   const topo = analysis?.ml10x.topology;
   const presetPaths = analysis?.ml10x.preset_paths ?? [];
@@ -52,6 +55,7 @@ export function WiringTab() {
         <Panel title="Signal diagram (physical cables only)">
           <WiringDiagram selectedId={selected} onSelect={setSelected} />
         </Panel>
+        <PowerPlanner />
         <Panel title={`Cables (${conns.length})`} actions={
           <select aria-label="Filter by signal" value={filter} onChange={(e) => setFilter(e.target.value as SignalKind | "all")}>
             <option value="all">all kinds</option>

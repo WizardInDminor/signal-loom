@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { api, ApiError } from "@/lib/api";
 import type { RigSummary } from "@/lib/types";
 import { Button, ErrorBanner, Field, Panel, confirmDialog } from "@/components/ui/basics";
+import { RigPreview } from "@/components/ui/RigPreview";
 
 export default function RigLibraryPage() {
   const router = useRouter();
@@ -79,22 +80,28 @@ export default function RigLibraryPage() {
               No rigs yet. Create one on the right, or tick <em>Start from the demo rig</em> to explore a complete three-scene example.
             </p>
           )}
-          <ul className="divide-y divide-line">
+          <ul className="flex flex-col gap-3">
             {rigs?.map((r) => (
-              <li key={r.id} className="py-2 flex items-center gap-3">
-                <div className="flex-1 min-w-0">
-                  <Link href={`/rigs/${r.id}`} className="font-medium hover:underline">
+              <li key={r.id} className="rounded-lg border border-line overflow-hidden flex flex-col sm:flex-row bg-panel hover:shadow-md transition-shadow">
+                <Link href={`/rigs/${r.id}`} className="block sm:w-56 shrink-0 bg-neutral-900 p-2" aria-hidden="true" tabIndex={-1}>
+                  <RigPreview preview={r.preview} className="w-full h-28" />
+                </Link>
+                <div className="flex-1 min-w-0 p-3 flex flex-col gap-1">
+                  <Link href={`/rigs/${r.id}`} className="font-semibold text-base hover:underline truncate">
                     {r.name}
                   </Link>
                   <div className="text-xs text-neutral-500">
-                    {r.instance_count} devices · {r.scene_count} scenes · updated {new Date(r.updated_at).toLocaleString()}
+                    {r.preview ? `${r.preview.width_mm} × ${r.preview.depth_mm} mm · ` : ""}{r.instance_count} devices · {r.preview?.cable_count ?? 0} cables · {r.scene_count} scenes · updated {new Date(r.updated_at).toLocaleString()}
                   </div>
-                  {r.description && <div className="text-xs text-neutral-600 truncate">{r.description}</div>}
+                  {r.description && <div className="text-xs text-neutral-600 line-clamp-2">{r.description}</div>}
+                  <div className="flex flex-wrap gap-2 mt-auto pt-1">
+                    <Button onClick={() => router.push(`/rigs/${r.id}`)} variant="primary">Open</Button>
+                    <Button onClick={() => router.push(`/rigs/${r.id}#stage`)}>▶ Stage</Button>
+                    <Button onClick={() => rename(r)}>Rename</Button>
+                    <Button onClick={() => duplicate(r)}>Duplicate</Button>
+                    <Button onClick={() => remove(r)} variant="danger">Delete</Button>
+                  </div>
                 </div>
-                <Button onClick={() => router.push(`/rigs/${r.id}`)} variant="primary">Open</Button>
-                <Button onClick={() => rename(r)}>Rename</Button>
-                <Button onClick={() => duplicate(r)}>Duplicate</Button>
-                <Button onClick={() => remove(r)} variant="danger">Delete</Button>
               </li>
             ))}
           </ul>
@@ -129,6 +136,7 @@ export default function RigLibraryPage() {
           <Panel title="Tour: the three-scene demo">
             <ol className="text-xs text-neutral-700 list-decimal pl-4 flex flex-col gap-1">
               <li>Open the demo rig. The <b>Board</b> tab shows the ML10X, pedals and MC8 at true scale; drag or rotate them.</li>
+              <li><b>Stage</b> plays the setlist: step through scenes with the arrow keys and watch the real signal path, pedal states, the MC8 switch and the MIDI cables light up.</li>
               <li>The <b>Wiring</b> tab lists every cable by signal type and flags problems; try deleting “Plumes → Return A”.</li>
               <li><b>Scenes</b> holds Clean intro / Heavy verse / Solo with the compiled MIDI plan beside each.</li>
               <li><b>Controllers</b> maps scenes to MC8 bank 1 switches A/B/C and defines ML10X presets.</li>

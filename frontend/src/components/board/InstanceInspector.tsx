@@ -5,11 +5,18 @@ import type { DeviceInstance, Rotation } from "@/lib/types";
 import { Badge, Button, DiagnosticList, EvidenceBadge, Field, Panel } from "@/components/ui/basics";
 import { PortEditor } from "./PortEditor";
 import { JackEditor } from "./JackEditor";
+import { DeviceImageSection } from "@/components/images/DeviceImageSection";
+import { ConfigureJacksButton, JackMapper } from "@/components/images/JackMapper";
+import { api } from "@/lib/api";
+import { enclosureFill } from "@/lib/boardLayout";
+import { SURFACES, SURFACE_LABEL, setSurface, surfaceOf } from "@/lib/mounting";
+import type { Surface } from "@/lib/types";
 import { useState } from "react";
 import type { PortDef } from "@/lib/types";
 
 export function InstanceInspector() {
-  const { rig, analysis, profiles, selectedInstanceId, update, removeInstance } = useRigStore();
+  const { rig, analysis, profiles, selectedInstanceId, update, removeInstance, refreshCatalog, reanalyze } = useRigStore();
+  const [mapping, setMapping] = useState(false);
   const inst = rig?.instances.find((i) => i.id === selectedInstanceId);
   if (!rig || !inst) return <Panel title="Device inspector"><p className="text-xs text-neutral-500">Select a device on the board.</p></Panel>;
   const profile = profiles[inst.profile_id];
@@ -31,18 +38,24 @@ export function InstanceInspector() {
         </div>
         <Field label="Label"><input value={inst.label} onChange={(e) => edit((i) => { i.label = e.target.value; })} /></Field>
         <div className="grid grid-cols-3 gap-2">
-          <Field label="X (mm)"><input type="number" value={inst.x_mm} onChange={(e) => edit((i) => { i.x_mm = Number(e.target.value); })} disabled={inst.off_board} /></Field>
-          <Field label="Y (mm)"><input type="number" value={inst.y_mm} onChange={(e) => edit((i) => { i.y_mm = Number(e.target.value); })} disabled={inst.off_board} /></Field>
+          <Field label="X (mm)"><input type="number" value={inst.x_mm} onChange={(e) => edit((i) => { i.x_mm = Number(e.target.value); })} disabled={surfaceOf(inst) === "off_board"} /></Field>
+          <Field label="Y (mm)"><input type="number" value={inst.y_mm} onChange={(e) => edit((i) => { i.y_mm = Number(e.target.value); })} disabled={surfaceOf(inst) === "off_board"} /></Field>
           <Field label="Rotation">
             <select value={inst.rotation} onChange={(e) => edit((i) => { i.rotation = Number(e.target.value) as Rotation; })}>
               {[0, 90, 180, 270].map((r) => <option key={r} value={r}>{r}°</option>)}
             </select>
           </Field>
         </div>
+        <Field label="Mounted on" hint={surfaceOf(inst) === "underside" ? "Same x/y as the top view, seen through the board from above (not mirrored). Fit under the board is checked against the device's height and the board's clearance." : undefined}>
+          <select value={surfaceOf(inst)} onChange={(e) => edit((i) => setSurface(i, e.target.value as Surface))} data-testid="inst-surface" aria-label="Mounted on">
+            {SURFACES.map((sf) => <option key={sf} value={sf}>{SURFACE_LABEL[sf]}</option>)}
+          </select>
+        </Field>
         <div className="text-neutral-600">
           Footprint: {geo ? `${Math.round(geo.width_mm * 10) / 10} × ${Math.round(geo.height_mm * 10) / 10} mm (rotated)` : "?"}{" "}
           {profile && <EvidenceBadge evidence={profile.footprint.width.evidence} />}{" "}
           {profile?.footprint.includes_jacks === null && <Badge tone="warn">jack inclusion unknown</Badge>}
+          {" · "}height {geo?.tall_mm != null ? `${geo.tall_mm} mm` : <Badge tone="warn">unknown</Badge>}{profile?.footprint.height.value_mm != null && <> <EvidenceBadge evidence={profile.footprint.height.evidence} /></>}
         </div>
         <div className="grid grid-cols-2 gap-2">
           <Field label="MIDI channel" hint={profile?.midi.interfaces.length ? `profile default: ${profile.midi.default_channel ?? "unknown"}` : "no MIDI interface"}>
@@ -50,7 +63,6 @@ export function InstanceInspector() {
           </Field>
           <div className="flex flex-col gap-1 pt-4">
             <label className="flex items-center gap-1"><input type="checkbox" checked={inst.intentional_overlap} onChange={(e) => edit((i) => { i.intentional_overlap = e.target.checked; })} /> Overlap is intentional</label>
-            <label className="flex items-center gap-1"><input type="checkbox" checked={inst.off_board} onChange={(e) => edit((i) => { i.off_board = e.target.checked; })} /> Off-board (guitar, amp, under-board)</label>
           </div>
         </div>
         <Field label="Notes"><textarea rows={2} value={inst.notes ?? ""} onChange={(e) => edit((i) => { i.notes = e.target.value || null; })} /></Field>
@@ -65,8 +77,60 @@ export function InstanceInspector() {
         ) : (
           <div className="text-neutral-600">Power requirement: <Badge tone="bad">unknown</Badge></div>
         )}
+        <div className="flex flex-col gap-2 border border-line rounded p-2">
+          <DeviceImageSection
+            heading={`Picture for every ${profile?.model ?? "device of this profile"}`}
+            value={profile?.image ?? null}
+            widthMm={profile?.footprint.width.value_mm ?? null}
+            depthMm={profile?.footprint.depth.value_mm ?? null}
+            evidence={profile?.footprint.width.evidence}
+            ports={geo?.effective_ports ?? profile?.ports ?? []}
+            fill={enclosureFill(profile?.category)}
+            testId="profile-image"
+            hint="A top-down photograph shown on every board that uses this profile."
+            onSave={async (img) => {
+              if (!profile) return;
+              await api.catalog.update({ ...profile, image: img });
+              await refreshCatalog();
+              await reanalyze();
+            }}
+          />
+          <details data-testid="instance-image-details">
+            <summary className="cursor-pointer text-neutral-600">This unit only (repainted or customised pedal){inst.image ? " · override active" : ""}</summary>
+            <div className="mt-2">
+              <DeviceImageSection
+                value={inst.image ?? null}
+                widthMm={profile?.footprint.width.value_mm ?? null}
+                depthMm={profile?.footprint.depth.value_mm ?? null}
+                evidence={profile?.footprint.width.evidence}
+                ports={geo?.effective_ports ?? []}
+                fill={enclosureFill(profile?.category)}
+                testId="instance-image"
+                hint="Overrides the profile's picture for this one placed unit; the profile's dimensions and jacks still apply."
+                onSave={(img) => edit((i) => { i.image = img; })}
+              />
+            </div>
+          </details>
+        </div>
+        <div className="flex flex-col gap-1">
+          <ConfigureJacksButton image={profile?.image} count={profile?.ports.length ?? 0} onOpen={() => setMapping(true)} />
+          {profile?.image && <p className="text-[11px] text-neutral-500">Edits the profile, so every {profile.model} gets the jacks. Per-unit tweaks stay below.</p>}
+        </div>
+        {mapping && profile?.image && (
+          <JackMapper
+            profileId={profile.id}
+            title={`${profile.manufacturer} ${profile.model}`}
+            ports={profile.ports}
+            image={profile.image}
+            widthMm={profile.footprint.width.value_mm}
+            depthMm={profile.footprint.depth.value_mm}
+            footprintEvidence={profile.footprint.width.evidence}
+            onSaved={async () => { await refreshCatalog(); await reanalyze(); }}
+            onClose={() => setMapping(false)}
+          />
+        )}
         <div>
-          <h3 className="font-semibold mb-1">Jack positions (drag on the outline)</h3>
+          <h3 className="font-semibold mb-1">Jack positions on this unit (drag on the outline)</h3>
           <JackEditorForInstance inst={inst} onChange={savePort} />
         </div>
         <PortEditor inst={inst} />

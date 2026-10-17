@@ -3,19 +3,24 @@ placed ports, ML10X topology and the compiled plan."""
 
 from __future__ import annotations
 
+from .catalog.boards import board_spec
 from .domain.cables import cable_kit
 from .domain.compiler import compile_rig
-from .domain.geometry import board_diagnostics, effective_ports, placed_ports, rotated_size
+from .domain.geometry import board_diagnostics, effective_ports, placed_ports, rotated_size, underside_clearance
 from .domain.ml10x import loop_occupancy, preset_diagnostics
 from .domain.paths import trace_preset
-from .domain.wiring import wiring_diagnostics
+from .domain.power import power_plan
+from .domain.wiring import midi_routes, wiring_diagnostics
+from .images import resolve_image
 from .models.common import DeviceCategory, Diagnostic, Severity
 from .models.profile import DeviceProfile
 from .models.rig import Rig
 
 
-def analyze(rig: Rig, profiles: dict[str, DeviceProfile]) -> dict:
-    board = board_diagnostics(rig, profiles)
+def analyze(rig: Rig, profiles: dict[str, DeviceProfile], assets: dict | None = None) -> dict:
+    spec = board_spec(rig.board.model_id)
+    board = board_diagnostics(rig, profiles, spec)
+    clearance, clearance_src = underside_clearance(rig.board, spec)
     ctx, wiring = wiring_diagnostics(rig, profiles)
     ml10x_topo = None
     ml10x_diags: list[Diagnostic] = []
@@ -81,6 +86,8 @@ def analyze(rig: Rig, profiles: dict[str, DeviceProfile]) -> dict:
     ]
     kit, kit_diags = cable_kit(ctx)
     compiled = compile_rig(rig, profiles, ctx)
+    mc8_id = rig.controllers.mc8.instance_id
+    midi = {"controller_id": mc8_id, "routes": midi_routes(ctx, mc8_id) if mc8_id else {}}
     placed = {}
     for inst in rig.instances:
         prof = profiles.get(inst.profile_id)
@@ -89,6 +96,9 @@ def analyze(rig: Rig, profiles: dict[str, DeviceProfile]) -> dict:
             "width_mm": w,
             "height_mm": h,
             "placeholder": placeholder,
+            "surface": inst.mount,
+            # Physical height (not the rotated depth above), for underside clearance.
+            "tall_mm": prof.footprint.height.value_mm if prof else None,
             "ports": [
                 {
                     "port_id": pp.port.id,
@@ -107,6 +117,8 @@ def analyze(rig: Rig, profiles: dict[str, DeviceProfile]) -> dict:
             ],
             "effective_ports": [p.model_dump(mode="json") for p in effective_ports(inst, prof)],
             "unknowns": prof.unknowns() if prof else ["profile missing"],
+            # Picture (if any) fitted to this footprint; geometry above never depends on it.
+            "image": resolve_image(inst, prof, assets or {}),
         }
     all_diags = board + wiring + ml10x_diags + midi_diags + kit_diags
     return {
@@ -118,6 +130,12 @@ def analyze(rig: Rig, profiles: dict[str, DeviceProfile]) -> dict:
             "infos": sum(1 for d in all_diags if d.severity == Severity.INFO),
         },
         "board": [d.model_dump(mode="json") for d in board],
+        "mounting": {
+            "spec": spec.model_dump(mode="json") if spec else None,
+            "clearance_mm": clearance,
+            "clearance_source": clearance_src,
+            "counts": {k: sum(1 for i in rig.instances if i.mount == k) for k in ("top", "underside", "off_board")},
+        },
         "wiring": [d.model_dump(mode="json") for d in wiring],
         "ml10x": {
             "topology": ml10x_topo,
@@ -125,6 +143,8 @@ def analyze(rig: Rig, profiles: dict[str, DeviceProfile]) -> dict:
             "preset_paths": preset_paths,
         },
         "cable_kit": [i.as_dict() for i in kit],
+        "midi": midi,
+        "power": power_plan(ctx, wiring),
         "instances": placed,
         "compiled": compiled,
     }
