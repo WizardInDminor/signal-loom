@@ -1,8 +1,8 @@
 # Signal Loom — Device Manuals & MIDI Command Library
 
-> Focused follow-up charter for \`experiment/session-3-freestyle\` / draft PR #3.
+> Focused follow-up charter for `experiment/session-3-freestyle` / draft PR #3.
 > This is a user-requested next implementation, not a speculative redesign.
-> Do not merge or modify \`main\`.
+> Do not merge or modify `main`.
 
 ## Why this matters
 
@@ -11,10 +11,10 @@ The owner has completed substantial hands-on testing of the physical board, phot
 The next pain point is **reconstructing sounds and MIDI control behavior reliably**. A guitarist can spend hours programming a pedal, ML10X routing preset, and Morningstar MC8 switch, only to struggle to remember how the configuration works later. Signal Loom should make device commands easy to look up and apply, and keep an honest, durable record of *which actual MIDI values a scene will send*.
 
 There is already a good foundation:
-- \`DeviceProfile.midi\` includes interfaces, program-change support/numbering, CC maps, and bypass semantics.
-- \`DeviceInstance.midi_channel\` represents the channel for a placed unit.
-- \`Scene.device_states\` carries PC/bank, CC values, bypass intent, and notes.
-- \`domain/compiler.py\`, the Stage, the MC8 plan, and existing validation use those states.
+- `DeviceProfile.midi` includes interfaces, program-change support/numbering, CC maps, and bypass semantics.
+- `DeviceInstance.midi_channel` represents the channel for a placed unit.
+- `Scene.device_states` carries PC/bank, CC values, bypass intent, and notes.
+- `domain/compiler.py`, the Stage, the MC8 plan, and existing validation use those states.
 - Local managed image assets and opt-in image-inclusive project exports are established patterns.
 
 Build on these concepts. Do not replace the compiler, create an unrelated MIDI planner, or imply hardware has been programmed by the application.
@@ -58,7 +58,7 @@ Support a focused first set of commands:
 - Intent semantics such as engage/bypass/absolute set/toggle when established, with visibility into whether the resulting state is deterministic.
 - A source/evidence reference such as "user entered", "documented in uploaded manual, page N", or "verified on hardware"; attaching a manual does **not** independently verify a command. Hardware validation must be an explicit user claim.
 
-Do not invent CC numbers, bypass values, PC ranges, MIDI channels, or manufacturer command semantics. Allow partial/unknown information and clear labels. Support an imported device that lacks a published MIDI implementation chart. Keep this compatible with the existing \`MidiSpec.cc_map\`, program-change and bypass definitions; avoid two contradictory sources of truth. If new reusable command objects are introduced, make their relationship to the existing map explicit and tested.
+Do not invent CC numbers, bypass values, PC ranges, MIDI channels, or manufacturer command semantics. Allow partial/unknown information and clear labels. Support an imported device that lacks a published MIDI implementation chart. Keep this compatible with the existing `MidiSpec.cc_map`, program-change and bypass definitions; avoid two contradictory sources of truth. If new reusable command objects are introduced, make their relationship to the existing map explicit and tested.
 
 Favorite commands should be prominently visible, searchable, and easy to reuse. They are not necessarily a complete catalog of the device's MIDI messages.
 
@@ -110,7 +110,7 @@ Run backend tests, ruff, frontend lint/typecheck/build, and Playwright. Inspect 
 1. Reconnoiter the current implementation and write a brief execution plan before major edits. Choose the smallest compatible schema and UI changes.
 2. Implement in tested, reviewable increments (manual storage, command definitions, scene picker/integration).
 3. Record decisions, test evidence, limitations, and any deferred follow-ups in the Session 3 results (or a clearly linked short report).
-4. Commit on \`experiment/session-3-freestyle\` and update draft PR #3; **do not merge**.
+4. Commit on `experiment/session-3-freestyle` and update draft PR #3; **do not merge**.
 5. Make no claims of device/editor validation beyond actual evidence.
 
 ## Definition of done
