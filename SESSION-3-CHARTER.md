@@ -99,6 +99,23 @@ Validate routes with the existing `midi_reachability` graph and cable model, ext
 
 Show for each device: bound / unbound, port present / missing, route, and last message sent/received.
 
+### Design principle: wire once, reach everything
+
+**The user must never re-plug a USB cable to change which pedal they are controlling.** The board is cabled once; from then on every reachable device is addressable at the same time from the one screen. This is a first-class requirement, not a convenience, and it shapes the binding model:
+
+- **Many devices per port.** A binding is `(port, channel)`, not one port per device. Several instances may share one route (e.g. everything behind the MC8's single USB connection) and are told apart by MIDI channel. Validate that every device sharing a route has a **unique channel**; a collision is an error with the exact devices named.
+- **All routes open at once.** The backend keeps every bound port open simultaneously, including several USB ports when a hub is used. Selecting a pedal in the UI never opens, closes or rebinds anything.
+- **Route capabilities per hop.** Each hop declares which message types it passes (PC, CC, clock, SysEx), with evidence. Known constraints already in the catalog: MC8 Omniports cannot send SysEx; the ML10X DIN Thru is a hard-wired copy. Unknown (verify): whether MC8 Cross MIDI Thru forwards USB → Omniports and whether it forwards SysEx; what the Meris MIDI I/O passes. A device's controls are enabled only for message types its route can deliver; anything else is shown as "needs a different route", not silently dropped.
+- **Coverage view.** A single table: every MIDI-capable device × (PC, CC, clock, SysEx) → reachable via which route, or why not. When something is unreachable, suggest the **smallest cabling change** (e.g. "move Volante to Omniport 3 and set it to MIDI out") rather than a USB swap.
+- **Model the extra hardware.** Add profiles for the Meris MIDI I/O (the user owns one), a generic powered USB hub and a generic USB isolator, plus a `computer` device as the root of every route, so these topologies can be drawn and validated like any other cabling.
+
+Two reference topologies to model in the demo data and evaluate in the results report:
+
+1. **Single link via MC8 (default).** One USB cable: computer → MC8. MC8 DIN Out → ML10X In → ML10X Thru → Collider In → Collider Thru → Meris MIDI I/O → Hedra, Enzo. Strymon pedals on MC8 Omniports configured as TRS MIDI out. This reuses the cabling the board already needs for performance and covers PC/CC for every owned device, provided Cross MIDI Thru reaches the Omniports. Its limits (no SysEx on Omniports, Omniports shared with expression inputs, MC8 needed in the path) must be reported honestly.
+2. **Single link via powered USB hub.** One USB cable: computer → (isolator) → hub on the board, with MC8, ML10X, Volante, Zelzah, Sunset and Collider permanently connected; Meris still via MC8 DIN → MIDI I/O. Every USB device gets its own port, so SysEx and vendor editors also work without re-plugging. Report the trade-offs: extra board cabling, hub power, and USB ground-loop noise (recommend an isolator on the uplink, and say this is a recommendation, not a verified finding).
+
+The app should support both and mixtures of them (some devices direct on the hub, others behind the MC8), and pick, per device and message type, the bound route that can deliver it.
+
 ## 5. P0 — Discovery, monitor and scene audition
 
 1. **Discovery:** list ports, suggest bindings by matching port names to profiles (e.g. a port containing "Zelzah"), let the user confirm or change them.
@@ -153,7 +170,7 @@ Write `docs/live-hardware-validation.md`: short, ordered, reversible steps the u
 2. One PC to one USB pedal (Zelzah, Volante, Sunset, Collider) and confirm the preset changes.
 3. One CC per pedal against the documented map.
 4. ML10X preset recall over USB (9 V powered).
-5. MC8 Cross MIDI Thru: computer → MC8 → DIN → ML10X, then → Meris path.
+5. MC8 Cross MIDI Thru: computer → MC8 → DIN → ML10X, then → Collider → Meris MIDI I/O → Hedra and Enzo. Then computer → MC8 → each Omniport (Strymon pedals). Record whether SysEx passes each hop.
 6. Scene audition of the demo-style scene on the real board.
 7. MC8 stomp → scene follower.
 
@@ -185,6 +202,7 @@ The backend binds to localhost only, as today. Do not expose MIDI control to the
 6. A user can dial in a pedal from its panel and capture the result into a scene, which compiles and exports like any other scene.
 7. Incoming MIDI is visible and decoded; an MC8 switch press (simulated in tests) shows the active scene, or an honest "unrecognised" result.
 8. Project files remain portable: live bindings are never part of them.
+11. Every owned device can be controlled through one fixed set of connections: the coverage view shows each device reachable for PC/CC with no USB re-plugging, channel collisions on shared routes are reported, and message types a route cannot carry are disabled with the reason.
 9. Core live behaviours have automated coverage with the virtual transport.
 10. `docs/live-hardware-validation.md` exists and every hardware claim carries an evidence level.
 
@@ -201,10 +219,11 @@ Use a dedicated branch, open a pull request against the appropriate base, and do
 
 The agent should proceed on the stated defaults and record these for the user:
 
-- **Meris MIDI path:** does the board have a Meris MIDI I/O (or another Meris-compatible TRS MIDI interface)? *Default:* model Hedra and Enzo as reachable via MC8 DIN out → Meris MIDI I/O, marked unverified.
+- **Meris MIDI path:** *Answered:* the user owns a Meris MIDI I/O. Model Hedra and Enzo as reachable via MC8 DIN (or the DIN Thru chain) → Meris MIDI I/O; the route itself stays unverified until the validation package confirms it.
+- **USB hub:** does the user want a powered hub (topology 2) on the board, or only the single MC8 link (topology 1)? *Default:* implement and test both; recommend topology 1 for PC/CC control and topology 2 only when SysEx or vendor editors are needed.
 - **Operating system** of the machine that will run the backend (affects port naming and ML10X multi-device behaviour). *Default:* support macOS, Windows and Linux; test on Linux with the virtual transport.
 - **Sunset USB MIDI:** confirm on hardware. *Default:* profile lists USB MIDI as reported, unverified.
-- **Which pedals sit on DIN/TRS chains vs direct USB** on the real board. *Default:* Strymon, Collider and ML10X direct USB; Meris via MC8.
+- **Which pedals sit on DIN/TRS chains vs direct USB** on the real board, and which Omniports are free for MIDI. *Default:* topology 1 (everything behind the MC8), with topology 2 modelled as the alternative.
 
 ## Autonomy and execution
 
