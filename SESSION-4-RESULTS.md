@@ -38,3 +38,146 @@ asks for: everything below runs on the virtual transport.
 7. **Docs**: `docs/live-hardware-validation.md`, research evidence, ARCHITECTURE, README, this file.
 
 P0a lands as one tested milestone before P1/P2 refinements.
+
+## What was built
+
+P0a — the virtual end-to-end PC/CC milestone — is complete and tested; P1 (panels and capture)
+and P2 (MC8 observation and follower) are implemented in their first useful form on the same
+foundation. P0b (real hardware) is prepared as a user-run checklist and **not** claimed.
+
+### Backend (`backend/app/live`, `backend/app/vendors`, `backend/app/api/live.py`)
+
+- **Transport protocol and the byte choke point.** `transport.encode` builds PC and CC bytes and
+  refuses every other type (`ForbiddenMessageError`); `decode` only interprets PC/CC for display.
+- **Virtual transport.** Per-rig simulated endpoints (one USB out per device whose profile lists
+  USB MIDI, an input for controllers, a generic interface), a receiver network per endpoint,
+  channel-filtered simulated pedals with program/bank/bypass/CC state, `inject` for simulated
+  controller traffic, `set_busy`/`unplug` fault injection, and a record of every byte string sent.
+- **rtmidi transport.** Import-guarded `python-rtmidi` implementation (optional extra
+  `pip install -e ".[live]"`), busy-port detection with an explanation; reports itself unavailable
+  with the reason. *Written against the API, not run here.*
+- **Workstation-local bindings.** `LiveBindings` per rig (endpoint ↔ device jack, deliberate
+  channel groups, send delay, user-recorded verified hops) in table `live_bindings` (migration
+  0005), deleted with the rig, never in a project file. Changing bindings disarms.
+- **Route graph and coverage.** Computer → bound endpoint → device jack → vendor forwarding →
+  the rig's MIDI cables → …, with a `Capability` (status, evidence, prerequisites) per hop and
+  message kind. Coverage per device × kind = weakest hop of the best route: supported /
+  unverified / unsupported / unreachable (with the smallest plausible change). Receiver-network
+  collisions (`live.channel_collision`) and declared sharing (`live.channel_group`).
+- **Vendor tables** (isolated from the compiler): MC8 Cross MIDI Thru USB → DIN (PC/CC/clock
+  published, SysEx unknown) and → Omniports (SysEx unsupported, output-only); ML10X In → Thru
+  (hardware copy, published), USB → Thru (unknown, never inferred); Sunset EXP-only MIDI with its
+  prerequisites, USB unsupported; BigSky MX THRU setting; generic rules (a `thru` port is unknown
+  until documented; a USB jack not listed under `midi.interfaces` is not a MIDI endpoint).
+- **Armed sender.** Disarmed at construction and on every transport change, bindings change, lost
+  endpoint, transport error and shutdown; arm phrase `send MIDI to my rig`; dry run is pure;
+  audition queues ordered messages with the configured delay (default 20 ms) on one worker thread;
+  `stop` cancels queued messages and logs that transmitted ones are not undone; slider CCs
+  coalesce per device/controller; toggles need explicit confirmation; unsupported/unreachable
+  routes are refused, unverified ones warned; a per-rig send log and "last sent" per device.
+- **Monitor and follower.** Thread-safe inbox (callbacks never block the event loop), last PC/CC
+  per channel as *observation*, and a follower that says at most "possible active scene".
+- **Service and API.** One `LiveService` on `app.state.live`; `/api/live/*` is loopback-only
+  (peer and `x-forwarded-for` both checked, so a remote browser behind the Next.js proxy is refused).
+  Endpoints: status, endpoints, mode, refresh (detect-and-rebind, never re-arm), release/reacquire
+  (hand a port to an external editor on purpose), bindings (get/put/suggest), coverage,
+  connect/disconnect, arm/disarm/stop, dry-run, audition, send, panels, follower, events,
+  virtual inject.
+
+### Frontend (`frontend/src/components/live`, `frontend/src/store/liveStore.ts`)
+
+A **Live** workspace (`#live`) with: transport choice and the honest reason when real ports are
+unavailable; endpoint list with busy/missing/released state and release/reacquire; bindings editor
+and virtual suggestion; receiver networks with collisions and a one-click "declare shared on
+purpose"; the coverage table with per-row "why" (hops, prerequisites, suggestions); scene dry run
+(bytes, endpoint, route status) vs audition (disabled until armed), delay, Stop, send log; generated
+pedal panels (PC, bypass, documented CCs rendered from their value semantics — engage/bypass pairs,
+confirmed toggles, bank ranges, sliders — and named commands), the three state columns, and
+"Capture to scene…" with a preview that writes through the ordinary store (undo, revision, PUT);
+controller observation with the follower and, in virtual mode, simulated stomps. The rig header
+shows a red **ARMED** badge on every tab while the backend is armed for that rig.
+
+### Documentation
+
+`docs/live-hardware-validation.md` (eight reversible steps with a record template),
+`docs/research.md` §8 (route evidence table and the known unknowns), ARCHITECTURE.md (live
+section), README (Live tour, optional extra), screenshots in `docs/screenshots/session-4/`.
+
+## Verification (performed, with the numbers)
+
+| Check | Result |
+|---|---|
+| `backend: python -m pytest -q` | **130 passed, 4 skipped** (24 new: `test_live_sender.py` 10, `test_live_routes.py` 6, `test_live_api.py` 8; the skips are the external MC8/ML10X fixtures) |
+| `ruff check` / `ruff format --check` | clean |
+| `npm run lint` / `npm run typecheck` / `npm run build` | clean |
+| Playwright (production build, Chromium 1194, fresh scratch DB) | **43 passed** (40 previous + `e2e/live.spec.ts` 3) |
+| Screenshots | `docs/screenshots/session-4/live-1…5.png`, inspected |
+
+Charter §6 backend requirements, each with its test: arm/disarm (`test_arm_requires_the_phrase…`,
+`test_attaching_a_transport_again_disarms_never_rearms`), zero output while disarmed
+(`test_disarmed_by_default_and_nothing_sends_while_disarmed`, with a transport whose `send`
+raises), binding and route changes (`test_toggle_needs_confirmation_and_unsupported_routes…`,
+`test_best_route_per_kind…`), per-bus channel clashes (`test_collisions_are_scoped_to_a_receiver_
+network…`), capability filtering (`test_usb_jack_without_documented_usb_midi…`,
+`test_forwarding_is_never_inferred…`), dispatch order and delay (`test_audition_sends_in_order…`),
+cancellation (`test_stop_cancels_queued…`), disconnect/reconnect and hot-unplug
+(`test_disarm_and_disconnect_drop_the_queue`, `test_hot_unplug_disarms_and_reconnect_rebinds…`,
+`test_restart_starts_disarmed…`), rejection of unauthorized message types
+(`test_encode_only_pc_and_cc…`, `test_rejects_forbidden_types…`), coalescing
+(`test_coalescing_keeps_only_the_newest_value…`), capture-to-scene and snapshot preservation
+(`test_virtual_round_trip…` through the ordinary rig PUT; the browser scenario covers the
+command-snapshot path), ambiguous follower (`test_follower_reports_possible_ambiguous…`),
+virtual-mode fallback refused (`test_cold_start_is_disarmed…`), remote clients
+(`test_remote_clients_are_refused`).
+
+Charter §6 Playwright: live/disarmed visibility, dry run, simulated arm/audition, signal received
+by a simulated pedal, capture, reload and compile, simulated MC8 stomp with honest scene match,
+offline Board/Stage untouched — all in `e2e/live.spec.ts`; manuals and the other 40 scenarios run
+unchanged against the same build.
+
+## Decisions worth knowing
+
+- **Collision scope** is the receiver network behind one bound endpoint, and the entry device
+  (MC8) is a member on its own channel: a PC on channel 16 into the MC8's USB jumps its bank.
+- **Best route per kind** prefers status, then evidence, then fewer hops. With both the MC8 uplink
+  and a pedal's own USB bound, the direct USB wins for that pedal; the virtual suggestion binds only
+  the controller so the demo exercises the one-cable chain.
+- **Virtual delivery** follows the modelled routes: a message is delivered to a simulated pedal
+  when the route is supported or unverified (not when unsupported) and the pedal is on the
+  channel. It is a simulation of the evidence table, never evidence itself; the UI labels it.
+- **Capture reads "last sent" only.** Simulated and observed state are shown beside it but never
+  written into a scene. Bank CCs travel with the program; the bypass CC becomes `enabled`.
+- **Per-rig log and per-session observations.** The send log is stamped with the connected rig;
+  observations are cleared on connect (found by the browser suite when two scenarios shared the
+  process).
+- **Planner warning kept.** `midi.channel_shared` still describes the MC8's own output; the new
+  per-network diagnostics are the live layer's.
+
+## Limitations and honest unknowns
+
+- **No hardware was touched.** `python-rtmidi` does not build in the sandbox; `rtmidi.py` is
+  unexercised. Everything "supported" in the coverage table means *documented by the
+  manufacturer*, never measured on the owner's board.
+- The demo rig models ML10X → BigSky MX over the ML10X Thru; the owner's Collider, Meris MIDI I/O,
+  Hedra, Enzo, Volante and Zelzah are **not shipped profiles** (deliberately: no invented CC maps).
+  Added by the user in the Device library, they fall under the generic rules (unknown until tested).
+- Whether the real MC8 echoes footswitch traffic for DIN/Omniport messages to USB is unknown; the
+  follower is only as good as that and says so.
+- The follower matches a five-second window of exact PC/CC tuples; a scene whose messages are a
+  subset of another's will read as ambiguous, which is the intended behaviour.
+- CC controls are 0–127 sliders unless the documented semantics match one of a few exact phrasings
+  (engage/bypass ranges, "any value toggles", "0-n = Banks"); no other ranges are inferred.
+- MIDI Clock and read-only SysEx appear in the coverage table but are never sent (P3 not started).
+- The API polls (700 ms) rather than streaming over WebSocket; adequate for a send log, not for
+  high-rate monitoring. The sender is one worker thread per process.
+- Port names on Windows are whatever the OS reports; duplicates ("… 2") are bound by exact name.
+
+## Remaining work
+
+1. P0b with the owner on Windows: run `docs/live-hardware-validation.md`, send the record back;
+   update vendor tables and profiles from it (evidence `user`, hops `hardware_verified`).
+2. Profiles for the actual board (Volante, Zelzah, Collider, Meris MIDI I/O, Hedra, Enzo): jacks
+   and channels first, CCs only as documented or tested.
+3. P2 refinements once step 7 of the checklist answers whether the MC8 echoes to USB.
+4. P3 (optional): MIDI Clock with jitter measurement, per-device opt-in read-only identity
+   request over a verified route.

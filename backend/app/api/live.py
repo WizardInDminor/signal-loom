@@ -254,8 +254,8 @@ def follower(rig_id: str, svc: Live):
 
 
 @router.get("/events", dependencies=deps)
-def events(svc: Live, since_log: int = 0, since_observed: int = 0):
-    return svc.events(since_log, since_observed)
+def events(svc: Live, since_log: int = 0, since_observed: int = 0, rig_id: str | None = None):
+    return svc.events(since_log, since_observed, rig_id)
 
 
 @router.post("/virtual/inject", dependencies=deps)

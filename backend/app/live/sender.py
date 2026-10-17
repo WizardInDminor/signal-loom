@@ -89,6 +89,7 @@ class LogEntry:
     message: str
     job_id: str | None = None
     resolved: Resolved | None = None
+    rig_id: str | None = None
 
     def as_dict(self) -> dict:
         return {
@@ -98,6 +99,7 @@ class LogEntry:
             "message": self.message,
             "job_id": self.job_id,
             "resolved": self.resolved.as_dict() if self.resolved else None,
+            "rig_id": self.rig_id,
         }
 
 
@@ -155,6 +157,9 @@ class LiveSender:
         self._closing = False
         # last message Signal Loom attempted to send, per device: "last sent", never "device state"
         self.last_sent: dict[str, dict] = {}
+        # The rig the sender currently works for; stamped on every log entry so a rig page shows
+        # its own history only. Set by the service on connect, cleared on disconnect.
+        self.rig_id: str | None = None
 
     # -- state ------------------------------------------------------------------------
     @property
@@ -174,13 +179,13 @@ class LiveSender:
     ) -> LogEntry:
         with self._lock:
             self._seq += 1
-            e = LogEntry(self._seq, utcnow_iso(), kind, message, job_id, resolved)
+            e = LogEntry(self._seq, utcnow_iso(), kind, message, job_id, resolved, self.rig_id)
             self._log.append(e)
             return e
 
-    def log(self, since: int = 0, limit: int = 200) -> list[LogEntry]:
+    def log(self, since: int = 0, limit: int = 200, rig_id: str | None = None) -> list[LogEntry]:
         with self._lock:
-            out = [e for e in self._log if e.seq > since]
+            out = [e for e in self._log if e.seq > since and (rig_id is None or e.rig_id == rig_id)]
             return out[-limit:]
 
     @property

@@ -266,6 +266,11 @@ def test_follower_reports_possible_ambiguous_or_no_evidence_never_certainty(clie
     )  # observation ≠ simulated pedal state
     # SysEx cannot be injected either: the encoder refuses it.
     assert inj("sysex", 1, 0).status_code == 422
+    # A new connection session starts with an empty observation window.
+    client.post("/api/live/disconnect")
+    client.post(f"/api/live/rigs/{RIG}/connect")
+    assert client.get("/api/live/events").json()["observed"] == []
+    assert client.get(f"/api/live/rigs/{RIG}/follower").json()["status"] == "no_evidence"
 
 
 def test_remote_clients_are_refused(client):

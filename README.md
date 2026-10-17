@@ -6,12 +6,16 @@ Signal Loom is a local-first workspace for designing, configuring and maintainin
 effects rig as **one coherent system**: a dimensionally accurate pedalboard, typed physical
 wiring (audio / MIDI / expression / power), reusable **scenes** that describe the desired rig
 state, and a compiler that turns scenes into an inspectable Morningstar **MC8** switch plan and
-**ML10X** routing plan. Nothing is ever sent to hardware; the app plans, validates and exports.
+**ML10X** routing plan. The planner never sends anything to hardware. Since Session 4 there is an
+optional, explicitly armed **Live** layer: the backend owns the MIDI ports, you bind them once, see
+which pedals each message kind really reaches, dry-run a scene, audition it while armed, dial in a
+control and capture it back into the scene on purpose.
 
 Session reports: [SESSION-1-RESULTS.md](SESSION-1-RESULTS.md) (foundation),
 [SESSION-2-RESULTS.md](SESSION-2-RESULTS.md) (jack-aware wiring, stereo routing, Morningstar
 tools, evidence levels and the hardware verification procedure) and
-[SESSION-3-RESULTS.md](SESSION-3-RESULTS.md) (the Stage: a scene-first view of the physical rig). The domain model is described in
+[SESSION-3-RESULTS.md](SESSION-3-RESULTS.md) (the Stage: a scene-first view of the physical rig) and
+[SESSION-4-RESULTS.md](SESSION-4-RESULTS.md) (live rig control). The domain model is described in
 [ARCHITECTURE.md](ARCHITECTURE.md); research and licensing findings in
 [docs/research.md](docs/research.md).
 
@@ -67,7 +71,7 @@ Error" from the proxy under load (CI, many tabs).
 ## Test, lint, build
 
 ```bash
-# Backend: 64 unit/integration tests + lint
+# Backend: unit/integration tests + lint (the live layer runs on the virtual transport, no hardware)
 cd backend && .venv/bin/pytest -q && .venv/bin/ruff check app tests && .venv/bin/ruff format --check app tests
 
 # Optional: fixture validation against real MC8 editor exports (downloads two public files,
@@ -254,6 +258,41 @@ scene's bytes**: the row shows *definition changed — review* (or *command remo
 plan carries a warning, and *reapply* is the deliberate act that updates it. Two different values
 for one CC on one pedal in one scene are an error, never a silent choice.
 
+## Live: audition a scene on the rig, safely (Session 4)
+
+The **Live** tab is off until you make it do something. Five rules hold everywhere: the backend is
+the only MIDI port owner (the browser never touches MIDI); it starts **disarmed** and disarms again on
+disconnect, rebind, a lost port or a restart; a **dry run** never sends; only **PC and CC** can ever
+be transmitted (no SysEx, no memory writes, no firmware); and the MC8 keeps working on its own —
+nothing performance-critical runs through the computer.
+
+1. **Transport.** *Virtual* is a simulation with stateful simulated pedals (what CI runs). *Real
+   MIDI ports* needs `pip install -e ".[live]"` (python-rtmidi) on the computer cabled to the board;
+   if it is missing the option says why, and the simulation is never substituted for it.
+2. **Bindings.** Say which enumerated endpoint is plugged into which device jack (one USB cable to
+   the MC8 is the reference setup; a powered hub with several pedals is the other). Bindings are
+   saved for this computer only, never in a project file. *Suggest virtual bindings* does this for
+   the simulation.
+3. **Coverage.** One row per pedal × message kind: endpoint, hops, channel, status (route documented
+   / unverified / unsupported / unreachable) with the evidence level, the prerequisites to check on
+   the hardware (Cross MIDI Thru, Omniport mode, Strymon MIDI EXP cable…) and, for unreachable
+   pedals, the smallest plausible change. Channel collisions are flagged per receiver network, and a
+   deliberately shared channel can be declared.
+4. **Audition.** Pick a scene, *Dry run* shows the exact bytes, order, endpoint and route status —
+   the same compiled plan the Scenes tab shows. *Connect*, then *Arm…* (type `send MIDI to my rig`),
+   then *Audition* transmits them in order with a conservative delay; *Stop* cancels what is queued
+   (and says that transmitted messages are not undone). Toggle-type messages ask for confirmation.
+5. **Pedal panels.** Generated from each profile's documented PC range, bypass CC, CC map and named
+   commands. Three columns stay apart: *last sent by Signal Loom*, *observed reply* (most pedals
+   send none) and *simulated pedal* (virtual only). *Capture to scene…* shows what would change and
+   then writes ordinary scene data through the normal save/undo pipeline.
+6. **Controller observation.** What the MC8 sends to the computer, and at most a "possible active
+   scene" when every compiled message of one scene was seen — never "which switch was pressed".
+
+Before touching real pedals, read [docs/live-hardware-validation.md](docs/live-hardware-validation.md):
+a reversible, step-by-step checklist that records what is documented, simulation-tested and
+hardware-verified (by you). Nothing in this repository claims a hardware test that was not run.
+
 ## A short tour: the three-scene demo
 
 1. **Rigs** — open *Demo rig: three-scene song* (or create a new rig, optionally "from the demo").
@@ -281,9 +320,10 @@ for one CC on one pedal in one scene are an error, never a silent choice.
 ## Repository layout
 
 ```
-backend/   FastAPI app: models, SQLite repo + migrations, domain rules, compiler, exports, tests
-frontend/  Next.js app: rig library, board, wiring, scenes, controllers, exports, device library
-docs/      research notes (raw agent reports + consolidated research.md)
+backend/   FastAPI app: models, SQLite repo + migrations, domain rules, compiler, exports, tests;
+           app/live (transports, bindings, routes, armed sender, monitor) and app/vendors (route evidence)
+frontend/  Next.js app: rig library, board, stage, wiring, scenes, controllers, live, exports, device library
+docs/      research notes (raw agent reports + consolidated research.md) and the hardware validation checklist
 ```
 
 Local data that is never committed: `backend/data/` holds the SQLite database, the managed

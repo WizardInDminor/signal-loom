@@ -298,6 +298,10 @@ class LiveService:
             self.sender.attach_transport(None)  # disarms + drops queue, always
             self._load(rig_id)
             self.transport().close_all()
+            if self.sender.rig_id != rig_id:
+                self.sender.last_sent = {}  # another rig's "last sent" says nothing about this one
+            self.monitor.clear()  # observations belong to one connection session
+            self.sender.rig_id = rig_id
             self._apply_world(rig_id)
             self.connected_rig_id = rig_id
             self.sender.attach_transport(self.transport())
@@ -314,6 +318,7 @@ class LiveService:
                 pass
             self._endpoint_states = {}
             self.connected_rig_id = None
+            self.sender.rig_id = None
             return self.status()
 
     def refresh(self) -> dict:
@@ -548,14 +553,14 @@ class LiveService:
             )
         return result
 
-    def events(self, since_log: int = 0, since_observed: int = 0) -> dict:
+    def events(self, since_log: int = 0, since_observed: int = 0, rig_id: str | None = None) -> dict:
         return {
             "status": self.status(),
-            "log": [e.as_dict() for e in self.sender.log(since_log)],
+            "log": [e.as_dict() for e in self.sender.log(since_log, rig_id=rig_id)],
             "observed": [o.as_dict() for o in self.monitor.observed(since_observed)],
             "log_seq": self.sender.seq,
             "observed_seq": self.monitor.seq,
-            "last_sent": self.sender.last_sent,
+            "last_sent": self.sender.last_sent if rig_id in (None, self.sender.rig_id) else {},
             "simulated": {k: v.as_dict() for k, v in self.virtual.pedals().items()} if self.mode == "virtual" else {},
         }
 
