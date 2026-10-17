@@ -251,3 +251,68 @@ export interface Analysis {
   compiled: { scenes: ScenePlan[]; mc8: { instance_id: string | null; firmware_assumed: string; limits: { banks: number; presets_per_bank: number; messages_per_preset: number; footswitch_positions: string[] }; banks: { number: number; name: string; diagnostics: Diagnostic[]; switches: SwitchPlan[] }[] }; diagnostics: Diagnostic[] };
 }
 export interface ExportStatus { [key: string]: { level: string; available: boolean; note: string } }
+
+// ---------------------------------------------------------------------------- Live control (Session 4)
+// Mirror of backend/app/models/live.py and the shapes produced by app/live/*. Workstation-local.
+
+export type TransportMode = "virtual" | "rtmidi";
+export type MessageKind = "pc" | "cc" | "clock" | "sysex_read";
+export type RouteEvidence = "published" | "unknown" | "simulation_tested" | "hardware_verified";
+export type CoverageStatus = "supported" | "unverified" | "unsupported" | "unreachable";
+
+export interface LiveEndpoint { id: string; name: string; direction: "in" | "out"; transport: string; available: boolean; busy: boolean; note: string | null; peer_count: number }
+export interface EndpointBinding { endpoint_id: string; instance_id: string; port_id: string; direction: "out" | "in" | "both"; note?: string | null; peer_count?: number | null }
+export interface ChannelGroup { channel: number; instance_ids: string[]; note?: string | null }
+export interface LiveBindings { rig_id: string; transport_mode: TransportMode; bindings: EndpointBinding[]; channel_groups: ChannelGroup[]; send_delay_ms: number; verified_hops: Record<string, string>; updated_at?: string | null }
+
+export interface LiveJob { id: string; label: string; total: number; sent: number; failed: number; cancelled: number; pending: number; started_at: string; finished_at: string | null; done: boolean }
+export interface LiveEndpointState { endpoint_id: string; name: string; direction: string; open: boolean; busy: boolean; missing: boolean; released: boolean; ambiguous: boolean; peer_count: number | null; error: string | null; bound_to: string[] }
+export interface LiveStatus {
+  mode: TransportMode;
+  transports: Record<TransportMode, { available: boolean; reason: string | null; label: string }>;
+  connected_rig_id: string | null;
+  endpoints: LiveEndpointState[];
+  released: string[];
+  notes: string[];
+  watching: boolean;
+  watch_interval_s: number;
+  last_check_at: string | null;
+  armed: boolean;
+  armed_at: string | null;
+  queue_length: number;
+  /** Summary of the one message currently being handed to the driver, if any. */
+  in_flight: string | null;
+  seq: number;
+  arm_phrase: string;
+  /** Route prerequisites / unverified hops acknowledged in this connection session. */
+  acknowledged: string[];
+  jobs: LiveJob[];
+}
+
+export interface HopCapability { status: "supported" | "unsupported" | "unknown"; evidence: RouteEvidence; reason: string; prerequisites: string[] }
+export interface RouteHop { key: string; from: { node: string; label: string; port_id: string | null }; to: { node: string; label: string; port_id: string | null }; medium: string; connection_id: string | null; capabilities: Record<MessageKind, HopCapability>; note: string | null }
+export interface KindCoverage { status: CoverageStatus; evidence: RouteEvidence | null; reason: string; prerequisites: string[]; blocking_hop: string | null }
+export interface LiveRoute { endpoint_id: string; hops: RouteHop[]; coverage: Record<MessageKind, KindCoverage> }
+export interface LiveTarget { instance_id: string; label: string; profile_id: string; category: string; channel: number | null; has_midi: boolean; routes: LiveRoute[]; best: Record<MessageKind, number | null>; coverage: Record<MessageKind, KindCoverage>; suggestions: string[] }
+export interface CoverageRow { instance_id: string; label: string; kind: MessageKind; channel: number | null; endpoint_id: string | null; endpoint_name: string | null; hops: string[]; hop_keys: string[]; status: CoverageStatus; evidence: RouteEvidence | null; reason: string; prerequisites: string[]; suggestions: string[] }
+export interface ReceiverNetwork { endpoint_id: string; endpoint_name: string; members: { instance_id: string; label: string; channel: number | null; kinds: MessageKind[] }[]; collisions: Diagnostic[] }
+export interface LiveCoverage { targets: Record<string, LiveTarget>; networks: ReceiverNetwork[]; rows: CoverageRow[]; diagnostics: Diagnostic[] }
+
+export interface ResolvedMessage { type: "pc" | "cc"; channel: number; number: number; value: number | null; target_instance_id: string; target_label: string; endpoint_id: string | null; endpoint_name: string | null; hex: string; route_status: CoverageStatus; route_evidence: RouteEvidence | null; route_reason: string; deterministic: boolean; explanation: string; source_kind: string; needs_ack: string[]; summary: string }
+export interface DryRun { scene_id: string; scene_name: string; messages: ResolvedMessage[]; confirmations_required: string[]; manual_steps: string[]; diagnostics: Diagnostic[]; sent: false; note: string }
+export interface LiveLogEntry { seq: number; at: string; kind: "armed" | "disarmed" | "queued" | "sent" | "failed" | "cancelled" | "stopped" | "refused" | "note"; message: string; job_id: string | null; resolved: ResolvedMessage | null; rig_id: string | null }
+export interface ObservedMessage { seq: number; at: string; endpoint_id: string; endpoint_name: string; type: string; channel: number | null; number: number | null; value: number | null; hex: string; summary: string }
+export interface LastSent { program: number | null; bank_msb: number | null; bank_lsb: number | null; cc: Record<string, { value: number; source_kind: string; at: string }>; at: string | null; last?: string }
+export interface SimulatedPedal { instance_id: string; label: string; channel: number; program: number | null; bank_msb: number | null; bank_lsb: number | null; bypassed: boolean | null; cc: Record<string, number>; received_count: number; last_received: string | null; routes: Record<string, string>; simulated: true }
+export interface ObservedChannel { program: number | null; cc: Record<string, number>; at: string | null; endpoint_name: string }
+export interface LiveEvents { status: LiveStatus; log: LiveLogEntry[]; observed: ObservedMessage[]; log_seq: number; observed_seq: number; last_sent: Record<string, LastSent>; simulated: Record<string, SimulatedPedal> }
+
+export interface PanelControls {
+  program: { min: number; max: number; display_numbering: string | null; bank_select_supported: boolean | null; supported: boolean | null; evidence: string; note: string | null } | null;
+  bypass: { cc: number; on_value: number; off_value: number; deterministic: boolean | null; evidence: string; note: string | null } | null;
+  cc: { cc: number; name: string; value_semantics: string | null; evidence: string }[];
+  commands: MidiCommand[];
+}
+export interface LivePanel { instance_id: string; label: string; profile: string; category: string; channel: number | null; coverage: Record<"pc" | "cc", KindCoverage>; controls: PanelControls; last_sent: LastSent | null; observed: ObservedChannel | null; simulated: SimulatedPedal | null }
+export interface LivePanels { rig_id: string; mode: TransportMode; connected: boolean; panels: LivePanel[] }
+export interface Follower { status: "no_evidence" | "possible" | "ambiguous"; text: string; candidates: { scene_id: string; scene_name: string; matched: number; total: number; complete: boolean }[]; observed_count: number; window_s: number; inputs: LiveEndpointState[]; listening: boolean }

@@ -204,7 +204,7 @@ def test_catalog_custom_device_crud_and_pedalplayground_import(client):
 
 def test_migrations_are_idempotent(tmp_path):
     db = Database(tmp_path / "m.sqlite3")
-    assert db.migrate() == ["0001_initial", "0002_rig_revision", "0003_assets", "0004_documents"]
+    assert db.migrate() == ["0001_initial", "0002_rig_revision", "0003_assets", "0004_documents", "0005_live_bindings"]
     assert db.migrate() == []
     seed(db)
     seed(db)

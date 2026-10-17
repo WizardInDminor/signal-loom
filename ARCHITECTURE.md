@@ -365,3 +365,117 @@ validation, no overwrite of existing library profiles, fresh rig id unless reque
 
 The core model never depends on these; a future adapter (another controller or switcher) adds
 a module here and a compile target, not a change to scenes or wiring.
+
+## Live rig control: backend-owned MIDI, explicitly armed (Session 4)
+
+The planner stays what it was: a scene is intent, the compiler turns it into bytes, nothing is
+sent on load, on scene selection or on an edit. Session 4 adds an *optional* layer beside it:
+
+```
+backend/app/live/
+  transport.py   Transport protocol; encode() is the one place bytes are built — PC and CC only,
+                 every other status byte raises before any transport sees it; decode() for display
+  virtual.py     simulation: endpoints, one receiver network per endpoint, stateful simulated pedals,
+                 an injectable input, busy/unplug fault injection; records every byte string sent
+  rtmidi.py      python-rtmidi implementation (optional extra ".[live]"; import-guarded; the sandbox
+                 could not install it, so it is written against the API, not exercised)
+  bindings.py    LiveBindings per rig in table live_bindings (migration 0005) — workstation-local,
+                 never exported: OS endpoint names mean nothing on another computer
+  routes.py      route graph: computer → bound endpoint → device jack → vendor forwarding → MIDI
+                 cables → …; per hop, per kind (pc/cc/clock/sysex_read) a Capability with status,
+                 evidence (published/unknown/simulation_tested/hardware_verified) and prerequisites
+  sender.py      the only caller of transport.send: arm phrase, disarm on every change, ordered queue
+                 with delay, Stop, coalescing, toggle confirmation, per-rig send log, "last sent"
+  monitor.py     thread-safe inbox for incoming bytes; last-per-channel; the modest scene follower
+  service.py     one per process on app.state.live: transports, world, endpoint states, resolution
+                 of compiled messages to endpoints, panels, events
+backend/app/vendors/   evidence-tagged route facts per family (Morningstar, Strymon, generic rules)
+backend/app/api/live.py  loopback-only API (peer address and x-forwarded-for are both checked)
+frontend/src/store/liveStore.ts, components/live/*   the Live tab; the browser never touches MIDI
+```
+
+**Ownership and locality.** FastAPI owns every port Signal Loom opens; the UI asks over HTTP and
+polls `/api/live/events` for the send log, observations and simulated state. The API refuses any
+client that is not loopback, including through the Next.js proxy (the forwarded address is checked),
+so a browser on another machine can plan but cannot send.
+
+**In-flight semantics and control priority (review follow-up).** The worker dequeues a message,
+re-checks `armed` and hands the bytes to the transport inside one critical section. `disarm`,
+`stop`, `attach_transport` (connect/disconnect/mode switch) and `close` announce themselves first
+(`hold_worker`), so the worker yields to them between messages whatever the lock's fairness, then
+take the same lock: none of them can return while a send is in flight, and no send can begin after
+any of them has returned. The one message already handed to the driver completes and is logged as
+sent; everything behind it is cancelled; the log says that transmitted messages are not undone.
+`tests/test_live_race.py` forces this interleaving with a transport that blocks inside `send`, for
+disarm, stop, disconnect, close, and through the service for disconnect, endpoint release and a
+mode switch. `status()` exposes `in_flight`.
+
+**Hot-plug detection is automatic.** While a rig is connected the service runs a watcher thread
+(`check_endpoints`, every `SIGNAL_LOOM_LIVE_WATCH_S` seconds, default 1.0) that re-enumerates the
+transport, closes and marks endpoints that vanished (disarming if armed), holds a binding whose
+same-named port count changed, and re-opens endpoints that returned — without re-arming and
+without resetting the simulated world (unlike the manual Rescan, which rebuilds it). It does not
+depend on the Live tab, or any browser, being open. A check that cannot enumerate at all (a driver
+error) **fails closed**: while armed, or with anything queued, the service disarms and drops the
+queue, naming the cause in the log and in `status.last_check_error`; a later successful probe
+rebinds what it finds but never re-arms.
+
+**Acknowledged routes.** Each resolved message carries `needs_ack`: the route's hardware
+prerequisites (Cross MIDI Thru, Omniport mode, a special cable, DC power) and, for an unverified
+route, the undocumented hop by name. The sender refuses an audition or a panel send — before
+anything is queued — until every item has been acknowledged in this connection session
+(`409 live.confirm_route` lists them; the request's `acknowledge` echoes them back). A dry run
+lists them as `confirmations_required`. Acknowledgements are forgotten on disconnect/reconnect.
+
+**Endpoint identity on the real transport.** `rtmidi` ids are `rtmidi:<dir>:<name>#<k>`, `k` the
+ordinal among same-named ports (Windows lists two identical devices under one name). A binding
+records `peer_count` when saved; when the enumerated count differs, the port is held closed as
+*ambiguous* (the position may be another device) and the session is disarmed until the user
+re-saves the binding. `tests/test_live_rtmidi.py` exercises the adapter against a fake of the
+python-rtmidi API (duplicates, busy, disappearance, input callbacks, the service on top of it).
+
+**Disarmed by construction.** `LiveSender` starts disarmed and disarms itself on `attach_transport`
+(connect, disconnect, mode switch), on a bindings change, when a bound endpoint disappears, on a
+transport error mid-audition, and on shutdown. Arming requires the exact phrase and is never
+restored: a backend restart, a reconnect or a rebind leaves the sender disarmed (tested). Dry run
+is a pure function of resolved messages and cannot reach a transport (a test uses a transport whose
+`send` raises). `stop()` cancels what is queued and says, in the log, that transmitted messages are
+not undone. Toggle-type or otherwise state-dependent messages are refused until the caller confirms
+them explicitly; the UI shows the list and asks.
+
+**Routes and coverage.** A *binding* is "this enumerated endpoint is plugged into this device's
+jack" (USB, or a MIDI input fed by a computer interface). From there the graph follows what the
+vendor tables say the device repeats on which output (MC8 Cross MIDI Thru to DIN and Omniports;
+ML10X hardware Thru of its 5-pin In; BigSky MX MIDI OUT when set to THRU) and the rig's ordinary
+MIDI cables. A device's coverage for a kind is the weakest hop of its best route: **supported** only
+when every hop is published; **unverified** when any hop is undocumented (ML10X USB → Thru, a
+generic port marked `thru`, an unknown TRS wiring); **unsupported** when a hop rules it out (SysEx
+over an Omniport, Sunset's firmware-only USB); **unreachable** with the smallest plausible change
+when no bound endpoint arrives. The user can raise a hop to *hardware_verified* in the bindings
+(their claim, recorded per workstation); the app never does.
+
+**Collision scope** is one bound endpoint's receiver network — every device its messages can reach,
+the entry device included (the MC8 listens on its own channel). Two pedals on channel 1 behind one
+MC8 uplink are a `live.channel_collision` (warning); the same two pedals behind two separate USB
+endpoints are not flagged; a declared `ChannelGroup` turns the warning into `live.channel_group`
+(info) because broadcast is sometimes the point. The planner's older `midi.channel_shared` warning
+is unchanged and still describes the MC8's own chain.
+
+**The three state categories** are kept apart end to end: *last sent by Signal Loom* comes from the
+sender's log; *observed reply* from the monitor (what arrived on an input on that channel; most
+pedals send nothing); *simulated pedal* exists only in virtual mode and is labelled as such.
+"Capture to scene" reads *last sent* only, shows the diff, and then performs an ordinary store
+`update()` — same revision bump, same undo stack, same debounced PUT and stale-revision rule as any
+edit. A panel change never rewrites a scene by itself, and selecting a scene never sends.
+
+**Follower.** `LiveMonitor.follow` compares the last few seconds of observed messages with every
+compiled scene: "possible" only when every message of exactly one scene was seen, "ambiguous" for
+partial or multiple matches, otherwise "no evidence" — and the text says it does not prove which
+footswitch was pressed or that any pedal changed. Whether the real MC8 echoes DIN/Omniport traffic
+to USB at all is unknown and is step 7 of the hardware checklist.
+
+**Virtual mode** is a first-class, user-selected simulation: endpoints are generated per rig (one
+simulated USB per device whose profile lists USB MIDI, plus an input for controllers and a generic
+interface), simulated pedals are attached to the receiver networks the route graph derives from the
+bindings, channel-filtered, and keep program/bank/bypass/CC state. Selecting the real transport when
+`python-rtmidi` is missing is refused with the reason; the simulation is never substituted silently.

@@ -14,12 +14,14 @@ from .api import assets as assets_api
 from .api import catalog as catalog_api
 from .api import documents as documents_api
 from .api import exports as exports_api
+from .api import live as live_api
 from .api import rigs as rigs_api
 from .assets import AssetStore, default_assets_dir
 from .catalog.builtin import builtin_profiles
 from .catalog.demo import DEMO_RIG_ID, STEREO_DEMO_RIG_ID, demo_rig, stereo_demo_rig
 from .db import Database, default_db_path
 from .documents import DocumentStore, default_documents_dir
+from .live.service import LiveService
 from .repo import ProfileRepository, RigRepository
 
 APP_VERSION = "0.1.0"
@@ -56,7 +58,10 @@ def create_app(db_path: Path | str | None = None) -> FastAPI:
         app.state.db = db
         app.state.assets = AssetStore(db, default_assets_dir(path))
         app.state.documents = DocumentStore(db, default_documents_dir(path))
+        # Live MIDI: constructed disarmed on every start; owns every MIDI port Signal Loom opens.
+        app.state.live = LiveService(db)
         yield
+        app.state.live.close()
         db.close()
 
     app = FastAPI(title="Signal Loom", version=APP_VERSION, lifespan=lifespan)
@@ -72,6 +77,7 @@ def create_app(db_path: Path | str | None = None) -> FastAPI:
     app.include_router(exports_api.router)
     app.include_router(assets_api.router)
     app.include_router(documents_api.router)
+    app.include_router(live_api.router)
 
     @app.get("/api/health")
     def health() -> dict:

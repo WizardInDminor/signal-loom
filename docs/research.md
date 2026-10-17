@@ -220,3 +220,44 @@ Next.js 16 / React 19 / TypeScript with zustand; plain SVG for the board and the
 diagram (predictable geometry, no heavy canvas dependency; React Flow/Konva were evaluated
 and rejected for Session 1 as unnecessary). FastAPI + Pydantic v2 + SQLite with file-based
 migrations. Pytest (64 tests) and Playwright (20 scenarios) cover the rules and the demo path.
+
+## 8. Live MIDI routes and evidence (Session 4)
+
+The route graph in `backend/app/vendors/` carries one capability per hop and message kind with
+the evidence vocabulary of the Session 4 charter: **published** (manufacturer material),
+**unknown**, **simulation_tested** (the virtual transport in CI), **hardware_verified** (the user's
+own test, recorded by the user). The vendor hosts were again not reachable from the build
+sandbox, so "published" below means the charter's cited pages and the Session 1–3 excerpts; each
+row is a one-click confirmation away and the hardware checklist records what is actually observed.
+
+| Hop | PC / CC | Clock | SysEx (read-only) | Prerequisites | Source |
+|---|---|---|---|---|---|
+| Computer USB → MC8 (own reception) | published | published | unknown (editor protocol not modelled) | — | MC8 manual: https://help.morningstar.io/en/article/mc8-user-manual-1fzlzjx/ |
+| MC8 USB → MC8 **MIDI Out (DIN)** | published (Cross MIDI Thru: PC, CC, Note, Clock) | published | unknown (not in the published list; never assumed) | Cross MIDI Thru enabled | https://helpdesk.morningstar.io/support/solutions/articles/43000681102-does-the-mcx-pass-midi-messages-through-from-midi-in-to-usb-midi- |
+| MC8 USB → MC8 **Omniport** (MIDI-out mode) | published | published | **unsupported** (Omniports cannot send SysEx; output-only, no return path) | Cross MIDI Thru; Omniport set to MIDI Out Standard/Type B matching the cable | same, plus Omniport notes in `raw-mc8.md` |
+| ML10X 5-pin **In** (own reception) | published | unknown | unknown | — | ML10X manual: https://help.morningstar.io/en/article/ml10x-user-manual-262ann/ |
+| ML10X **In → Thru** | published (hardware copy of In) | published | published | — | ML10X manual (MIDI In + Thru only) |
+| ML10X **USB** (own reception) | published (product page lists USB MIDI) | unknown | unknown | external DC power for the relays | morningstar.io/ml10x |
+| ML10X **USB → Thru** | **unknown** — a physical Thru is a DIN-input copy; USB forwarding is not documented | unknown | unknown | — | charter §2 |
+| Strymon Sunset **EXP jack** | published (PC/CC) | unknown | unknown | firmware 1.20+, EXP set to MIDI, Strymon MIDI EXP cable / Conduit | https://www.strymon.net/faq/control-sunset-with-midi/ |
+| Strymon Sunset **USB** | **unsupported** (firmware updates only; Nixie 2 does not list Sunset) | — | — | — | https://www.strymon.net/support/nixie-2/ |
+| Strymon BigSky MX **USB-C** / **MIDI IN** | published | unknown | unknown (Nixie's protocol not assumed) | — | BigSky MX manual (third-party excerpts, see §2) |
+| BigSky MX **IN → OUT** | published with setting | published | unknown | MIDI OUT set to THRU (or MERGE) | BigSky MX manual |
+| BigSky MX **USB → OUT** | unknown | unknown | unknown | — | not documented |
+| Any other device, port marked `thru` | unknown (never inferred) | unknown | unknown | — | generic rule in `vendors/__init__.py` |
+| Any device, USB jack **not** listed under `midi.interfaces` | unsupported (firmware/editor use assumed until documented) | — | — | — | profile fact |
+
+Devices the charter names that are **not shipped profiles** (Volante, Zelzah, Collider, Hedra,
+Enzo, Meris MIDI I/O): the generic rules apply to user-made profiles, which means "unknown" until
+the user records a test. Nixie 2's support list (Volante yes, Zelzah and Sunset no) is a statement
+about Strymon's editor, not about class-compliant USB MIDI; Signal Loom does not claim either way.
+
+Facts about the computer side that remain **unknown** on purpose: whether the MC8 echoes
+footswitch traffic for DIN/Omniport messages to USB (the follower can only be as good as that);
+whether Nixie/Neuro can share a port with another program on Windows (not promised; software
+release/reacquire exists); hub enumeration order and isolator compatibility.
+
+The virtual transport (`backend/app/live/virtual.py`) is a simulation of *this table*: it delivers
+a message to every simulated pedal on the bound endpoint's receiver network whose route is not
+"unsupported", channel-filtered, and labels the result **simulated**. It is never evidence about
+hardware.

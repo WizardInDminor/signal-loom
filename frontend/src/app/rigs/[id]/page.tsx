@@ -11,8 +11,10 @@ import { ScenesTab } from "@/components/scenes/ScenesTab";
 import { ControllersTab } from "@/components/controllers/ControllersTab";
 import { ExportsTab } from "@/components/exports/ExportsTab";
 import { StageTab } from "@/components/stage/StageTab";
+import { LiveTab } from "@/components/live/LiveTab";
+import { useLiveStore } from "@/store/liveStore";
 
-const TABS = ["board", "stage", "wiring", "scenes", "controllers", "exports"] as const;
+const TABS = ["board", "stage", "wiring", "scenes", "controllers", "live", "exports"] as const;
 type Tab = (typeof TABS)[number];
 const isTab = (v: string): v is Tab => (TABS as readonly string[]).includes(v);
 
@@ -20,6 +22,9 @@ export default function RigPage() {
   const { id } = useParams<{ id: string }>();
   const { rig, analysis, loading, error, saving, dirty, conflict, load, clearError, update, flush, undo, redo, blockedSwitch, retrySwitch, discardAndSwitch } = useRigStore();
   const [tab, setTabState] = useState<Tab>("board");
+  const liveStatus = useLiveStore((s) => s.status);
+  const attachLive = useLiveStore((s) => s.attach);
+  const detachLive = useLiveStore((s) => s.detach);
   // Workspaces are addressable (`#stage`), so a setlist view can be bookmarked or shared.
   const setTab = (t: Tab) => {
     setTabState(t);
@@ -29,6 +34,11 @@ export default function RigPage() {
   useEffect(() => {
     if (id) void load(id);
   }, [id, load]);
+  useEffect(() => {
+    // The live service's state (armed, queue) is polled while a rig is open so the header badge is live.
+    if (id) void attachLive(id);
+    return () => detachLive();
+  }, [id, attachLive, detachLive]);
   useEffect(() => {
     const fromHash = () => {
       const h = window.location.hash.replace(/^#/, "");
@@ -88,6 +98,9 @@ export default function RigPage() {
         </span>
         {conflict && <Button onClick={() => window.location.reload()}>Reload</Button>}
         <div className="ml-auto flex gap-2 text-xs">
+          {liveStatus?.armed && liveStatus.connected_rig_id === rig.id && (
+            <span className="rounded px-2 py-0.5 bg-red-600 text-white font-semibold" data-testid="rig-armed-badge" title="Live MIDI is armed: auditions and panel controls transmit. Open the Live tab to disarm.">ARMED</span>
+          )}
           {s && (
             <>
               <Badge tone={s.errors ? "bad" : "ok"}>{s.errors} errors</Badge>
@@ -110,6 +123,7 @@ export default function RigPage() {
         {tab === "wiring" && <WiringTab />}
         {tab === "scenes" && <ScenesTab />}
         {tab === "controllers" && <ControllersTab />}
+        {tab === "live" && <LiveTab />}
         {tab === "exports" && <ExportsTab />}
       </div>
     </div>
