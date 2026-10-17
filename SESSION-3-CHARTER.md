@@ -1,5 +1,7 @@
 # Signal Loom — Session 3: From Planner to Live Rig Control
 
+> **SUPERSEDED (2026-10-17):** The maintained live-control specification is [SESSION-4-CHARTER.md](https://github.com/WizardInDminor/signal-loom/blob/session-4-live-control/SESSION-4-CHARTER.md) on `session-4-live-control`, based on the latest Session 3 features. This historical branch is based on Session 2 and must **not** be used as the implementation base. Its contents are retained for reference. Do not merge this old branch as a competing feature PR.
+
 **Repository:** https://github.com/WizardInDminor/signal-loom  
 **Status:** Autonomous Session 3 build charter  
 **Prerequisite:** Session 2 (including the PR #2 review follow-up) merged into the base branch.
