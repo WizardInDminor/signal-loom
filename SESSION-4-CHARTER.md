@@ -51,7 +51,7 @@ A guitarist should cable the computer to the board **once**, then be able to cho
 | Strymon **Sunset** | MIDI over EXP/TRS jack with compatible firmware/interface | Do **not** model Sunset as a confirmed direct USB MIDI endpoint; USB firmware updating is different from general MIDI control. Nixie 2 does not list Sunset. |
 | Source Audio **Collider** | Confirmed USB MIDI / DIN MIDI as actually documented for the exact unit | A USB connection does not automatically make the proprietary Neuro editor protocol available to Signal Loom. |
 | Meris **Hedra**, **Enzo** (original) | MIDI via Meris-compatible TRS wiring and the user's **Meris MIDI I/O** | No direct USB MIDI assumed. Verify MIDI I/O physical routing, TRS standards, channels and any Thru chain hop by hop. |
-| Strymon **TimeLine MX**, **BigSky MX** | Planned/other reference profiles | Do not require either for Session 4's real hardware validation. |
+| Strymon **TimeLine MX**, **BigSky MX** | Existing/reference profiles; current ownership and exact connections to be confirmed by the user | Do not make either model a prerequisite for the first real-hardware validation. Avoid inferring ownership from the demo catalog. |
 
 Document manufacturer links and evidence levels in docs/research.md, keeping facts separated from observations on the actual board. Fill in missing MIDI/CC profile details progressively, starting with the pedal used in the first test; do **not** invent an exhaustive CC map to satisfy a checklist.
 
@@ -176,7 +176,7 @@ Produce `docs/live-hardware-validation.md` with reversible steps, each recording
 - **Sunset:** Use documented EXP/TRS MIDI, not a presumed direct USB MIDI endpoint.
 - **USB isolator:** Optional compatibility/noise experiment, not an assumed requirement.
 - **Control source of truth:** A scene is planned intent, a send log is the last attempted/sent message, and an actual hardware response is separate observational evidence.
-- **Future BigSky MX and TimeLine MX:** No dependency on unowned hardware.
+- **BigSky MX and TimeLine MX:** Confirm whether and how each is currently connected before adding them to the real-hardware coverage list; neither is a dependency for P0b.
 
 ## Delivery protocol
 
