@@ -414,3 +414,47 @@ def test_idle_armed_session_is_disarmed_automatically_when_an_endpoint_vanishes(
         )
         # Disconnect stops watching that rig; the thread stays idle.
         assert client.post("/api/live/disconnect").json()["watching"] is False
+
+
+def test_a_failed_port_enumeration_fails_closed_while_armed_and_never_rearms(client):
+    """The watcher (or a manual check) cannot establish whether the bound ports are still there:
+    disarm, drop the queue, record the cause; a later good probe rebinds but leaves it disarmed."""
+    svc = client.app.state.live
+    client.post(f"/api/live/rigs/{RIG}/bindings/suggest")
+    client.post(f"/api/live/rigs/{RIG}/connect")
+    client.post("/api/live/arm", json={"confirm": ARM_PHRASE})
+    ack = client.post(f"/api/live/rigs/{RIG}/scenes/scene_solo/dry-run").json()["confirmations_required"]
+    # Queue a slow audition so there is something pending when enumeration breaks.
+    r = client.post(f"/api/live/rigs/{RIG}/scenes/scene_solo/audition", json={"delay_ms": 300, "acknowledge": ack})
+    assert r.status_code == 200
+    good_enumerate = svc.virtual.enumerate
+
+    def broken():
+        raise RuntimeError("MMSYSERR_NODRIVER: midiOutGetDevCaps failed")
+
+    svc.virtual.enumerate = broken
+    result = svc.check_endpoints()  # exactly what the watcher thread calls
+    assert "MMSYSERR_NODRIVER" in result["error"]
+    st = client.get("/api/live/status").json()
+    assert st["armed"] is False and st["queue_length"] == 0
+    assert "MMSYSERR_NODRIVER" in st["last_check_error"]
+    assert all("last port check failed" in (e["error"] or "") for e in st["endpoints"])
+    log = client.get("/api/live/events").json()["log"]
+    dis = next(e for e in log if e["kind"] == "disarmed")
+    assert "port enumeration failed" in dis["message"] and "MMSYSERR_NODRIVER" in dis["message"]
+    assert any(e["kind"] == "cancelled" for e in log)
+    # Enumeration recovers: endpoints are still open/rebound, the error clears, still disarmed.
+    svc.virtual.enumerate = good_enumerate
+    svc.check_endpoints()
+    st = client.get("/api/live/status").json()
+    assert st["armed"] is False and st["last_check_error"] is None
+    assert next(e for e in st["endpoints"] if e["endpoint_id"] == "virt:inst_mc8:out")["open"] is True
+    assert (
+        client.post(f"/api/live/rigs/{RIG}/scenes/scene_solo/audition", json={}).json()["detail"]["code"]
+        == "live.disarmed"
+    )
+    # Disarmed and idle: a failure is recorded but there is nothing to drop.
+    svc.virtual.enumerate = broken
+    svc.check_endpoints()
+    assert client.get("/api/live/status").json()["last_check_error"] is not None
+    svc.virtual.enumerate = good_enumerate

@@ -239,3 +239,16 @@ Open questions for the owner: (a) the watcher's default interval of 1 s costs on
 raise `SIGNAL_LOOM_LIVE_WATCH_S`; (b) ordinals are the best identity WinMM offers — if two
 identical devices are both on the board, plugging order decides which is `#0`, so the first real
 test should use distinct devices or a single MC8 uplink.
+
+### Second follow-up: enumeration failures fail closed
+
+The reviewer's last note: a port check that could not enumerate only logged the error and left an
+armed session armed. Now `check_endpoints` (and the watcher's catch-all) treat any enumeration
+exception as "cannot verify the bound ports": while armed, or with messages queued, the sender is
+disarmed and the queue dropped, with the driver's message in the disarm log entry and in
+`status.last_check_error`; every endpoint state carries the failure; a later successful probe clears
+the error and rebinds, and the session stays disarmed until the user re-arms. Tests:
+`test_a_failed_port_enumeration_fails_closed_while_armed_and_never_rearms` (API, virtual transport,
+with a pending audition) and `test_watcher_fails_closed_when_the_native_enumerator_raises_while_armed`
+(rtmidi fake, the watcher thread acting on its own). Backend 146 passed, 4 skipped; Playwright
+unchanged at 43.

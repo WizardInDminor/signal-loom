@@ -72,6 +72,7 @@ class LiveService:
         self._watch_stop = threading.Event()
         self._watcher: threading.Thread | None = None
         self.last_check_at: str | None = None
+        self.last_check_error: str | None = None
         self.check_count = 0
 
     # -- helpers ----------------------------------------------------------------------
@@ -152,6 +153,7 @@ class LiveService:
                 and self.connected_rig_id is not None,
                 "watch_interval_s": self.watch_interval_s,
                 "last_check_at": self.last_check_at,
+                "last_check_error": self.last_check_error,
                 **self.sender.status(),
             }
 
@@ -354,9 +356,9 @@ class LiveService:
             transport = self.transport()
             try:
                 present = {e.id: e for e in transport.enumerate()}
-            except TransportError as e:
-                self._last_change.append(f"enumeration failed: {e}")
-                return {"lost": [], "returned": [], "ambiguous": [], "error": str(e)}
+            except Exception as e:  # TransportError or anything a driver throws: fail closed
+                return self._enumeration_failed(e)
+            self.last_check_error = None
             bindings = getattr(self, "_bindings_cache", None) or self.bindings_repo.get(self.connected_rig_id)
             by_id: dict[str, EndpointBinding] = {}
             for b in bindings.bindings:
@@ -406,6 +408,21 @@ class LiveService:
                 self._last_change.append(f"rebound {', '.join(returned)} (still disarmed)")
             return {"lost": lost, "returned": returned, "ambiguous": ambiguous}
 
+    def _enumeration_failed(self, e: BaseException) -> dict:
+        """The watch could not establish whether the bound ports are still there (or still the same
+        devices). While armed that is not a state to keep sending in: disarm, drop the queue and
+        record the cause. A later successful probe rebinds what it finds but never re-arms."""
+        cause = f"{type(e).__name__}: {e}"
+        self.last_check_error = cause
+        if self.sender.armed or self.sender.queue_length():
+            self.sender.disarm(f"port enumeration failed, cannot verify bound endpoints ({cause})")
+            self._last_change.append(f"enumeration failed while armed: {cause} (disarmed)")
+        else:
+            self._last_change.append(f"enumeration failed: {cause}")
+        for st in self._endpoint_states.values():
+            st.error = f"last port check failed: {cause}"
+        return {"lost": [], "returned": [], "ambiguous": [], "error": cause}
+
     def _ensure_watcher(self) -> None:
         if self._watcher is not None and self._watcher.is_alive():
             return
@@ -416,8 +433,12 @@ class LiveService:
                 try:
                     if self.connected_rig_id:
                         self.check_endpoints()
-                except Exception as e:  # the watcher must survive anything a driver throws
-                    self._last_change.append(f"watcher: {e}")
+                except Exception as e:  # the watcher must survive anything, and a failed check fails closed
+                    try:
+                        with self._lock:
+                            self._enumeration_failed(e)
+                    except Exception as e2:  # pragma: no cover - last resort, never kill the thread
+                        self._last_change.append(f"watcher: {e2}")
 
         self._watcher = threading.Thread(target=run, name="signal-loom-midi-watch", daemon=True)
         self._watcher.start()

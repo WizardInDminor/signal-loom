@@ -286,3 +286,59 @@ def test_service_on_the_rtmidi_fake_binds_by_ordinal_and_holds_a_binding_whose_p
     assert s5["armed"] is False
     svc.close()
     db.close()
+
+
+def test_watcher_fails_closed_when_the_native_enumerator_raises_while_armed(fake, tmp_path):
+    """The real adapter's enumeration raises (a driver hiccup on Windows): the watcher thread,
+    with no manual action, disarms and records the cause; the next good probe does not re-arm."""
+    from app.db import Database
+    from app.live.service import LiveService
+    from app.main import seed
+    from app.models.live import EndpointBinding, LiveBindings
+
+    db = Database(tmp_path / "rt2.sqlite3")
+    db.migrate()
+    seed(db)
+    svc = LiveService(db)
+    svc.watch_interval_s = 0.05
+    rig = "rig_demo_signal_loom"
+    svc.set_mode("rtmidi")
+    svc.save_bindings(
+        rig,
+        LiveBindings(
+            rig_id=rig,
+            transport_mode="rtmidi",
+            bindings=[EndpointBinding(endpoint_id="rtmidi:out:Volante#0", instance_id="inst_bigsky", port_id="usb")],
+        ),
+    )
+    svc.connect(rig)
+    svc.sender.arm(ARM_PHRASE)
+    assert svc.status()["armed"] is True
+    original = fake.module().MidiOut.get_ports
+
+    def exploding(self):
+        raise RuntimeError("MidiOutWinMM::getPortCount: midiOutGetNumDevs failed")
+
+    # Break enumeration on the live module class the transport uses.
+    rt._rtmidi.MidiOut.get_ports = exploding
+    rt._rtmidi.MidiIn.get_ports = exploding
+    end = threading.Event()
+    for _ in range(100):
+        if not svc.status()["armed"]:
+            break
+        end.wait(0.02)
+    st = svc.status()
+    assert st["armed"] is False
+    assert "midiOutGetNumDevs" in (st["last_check_error"] or "")
+    assert any("port enumeration failed" in e.message for e in svc.sender.log() if e.kind == "disarmed")
+    # Recovery: a good probe clears the error and leaves the session disarmed.
+    rt._rtmidi.MidiOut.get_ports = original
+    rt._rtmidi.MidiIn.get_ports = original
+    for _ in range(100):
+        if svc.status()["last_check_error"] is None:
+            break
+        end.wait(0.02)
+    st = svc.status()
+    assert st["last_check_error"] is None and st["armed"] is False
+    svc.close()
+    db.close()

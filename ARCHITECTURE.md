@@ -415,7 +415,10 @@ mode switch. `status()` exposes `in_flight`.
 transport, closes and marks endpoints that vanished (disarming if armed), holds a binding whose
 same-named port count changed, and re-opens endpoints that returned — without re-arming and
 without resetting the simulated world (unlike the manual Rescan, which rebuilds it). It does not
-depend on the Live tab, or any browser, being open.
+depend on the Live tab, or any browser, being open. A check that cannot enumerate at all (a driver
+error) **fails closed**: while armed, or with anything queued, the service disarms and drops the
+queue, naming the cause in the log and in `status.last_check_error`; a later successful probe
+rebinds what it finds but never re-arms.
 
 **Acknowledged routes.** Each resolved message carries `needs_ack`: the route's hardware
 prerequisites (Cross MIDI Thru, Omniport mode, a special cable, DC power) and, for an unverified
