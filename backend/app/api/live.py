@@ -77,6 +77,9 @@ class ArmBody(BaseModel):
 class AuditionBody(BaseModel):
     delay_ms: int | None = Field(default=None, ge=0, le=2000)
     confirm_nondeterministic: bool = False
+    # Route prerequisites / unverified hops the user acknowledges for this connection session
+    # (the exact strings a 409 ``live.confirm_route`` listed). Nothing is queued before they match.
+    acknowledge: list[str] = Field(default_factory=list)
 
 
 class SendBody(BaseModel):
@@ -88,6 +91,7 @@ class SendBody(BaseModel):
     coalesce: bool = False
     label: str | None = None
     deterministic: bool | None = None
+    acknowledge: list[str] = Field(default_factory=list)
 
 
 class InjectBody(BaseModel):
@@ -214,7 +218,7 @@ def dry_run(rig_id: str, scene_id: str, svc: Live):
 @router.post("/rigs/{rig_id}/scenes/{scene_id}/audition", dependencies=deps)
 def audition(rig_id: str, scene_id: str, body: AuditionBody, svc: Live):
     try:
-        return svc.audition(rig_id, scene_id, body.delay_ms, body.confirm_nondeterministic)
+        return svc.audition(rig_id, scene_id, body.delay_ms, body.confirm_nondeterministic, body.acknowledge)
     except LiveRefused as e:
         raise _refused(e) from e
 
@@ -232,6 +236,7 @@ def send(rig_id: str, body: SendBody, svc: Live):
             body.coalesce,
             body.label,
             body.deterministic,
+            body.acknowledge,
         )
     except LiveRefused as e:
         raise _refused(e) from e

@@ -40,6 +40,8 @@ export function LiveTab() {
         <Badge>{status.mode === "virtual" ? "virtual simulation" : "real MIDI ports"}</Badge>
         {connected ? <Badge tone="ok">connected</Badge> : <Badge>not connected</Badge>}
         {status.queue_length > 0 && <Badge tone="warn">{status.queue_length} queued</Badge>}
+        {status.in_flight && <span data-testid="live-in-flight"><Badge tone="warn">sending {status.in_flight}</Badge></span>}
+        {connected && <span data-testid="live-watching"><Badge tone={status.watching ? "ok" : "bad"}>{status.watching ? `ports watched every ${status.watch_interval_s}s` : "ports not watched"}</Badge></span>}
         <div className="ml-auto flex flex-wrap gap-1 items-center">
           {!connected && <Button variant="primary" onClick={() => void onConnect()} disabled={busy} data-testid="live-connect">Connect this rig ({status.mode})</Button>}
           {connected && !armed && !arming && <Button variant="danger" onClick={() => setArming(true)} data-testid="live-arm">Arm…</Button>}
@@ -55,16 +57,26 @@ export function LiveTab() {
           {connected && <Button onClick={() => void disconnect()} disabled={busy} data-testid="live-disconnect" title="Disarms, drops the queue and closes every port">Disconnect</Button>}
         </div>
         <p className="w-full text-[11px] text-neutral-600">
-          Wire the computer to the board once; bind the endpoint(s) below; the coverage table says which pedals each message kind really reaches and with what evidence. Arming is a deliberate gesture and is undone by disconnecting, rebinding, a lost port or a backend restart. The MC8 keeps working on its own without the computer; nothing here replaces it.
+          Wire the computer to the board once; bind the endpoint(s) below; the coverage table says which pedals each message kind really reaches and with what evidence. Arming is a deliberate gesture and is undone by disconnecting, rebinding, a lost port (the backend watches the ports while connected, whether or not this tab is open) or a backend restart. Stop and Disarm wait for the one message already handed to the driver and cancel everything behind it. The MC8 keeps working on its own without the computer; nothing here replaces it.
         </p>
       </div>
 
       {pendingConfirm && (
-        <div role="alertdialog" aria-label="Confirm state-dependent messages" className="border border-amber-400 bg-amber-50 rounded-md p-3 text-xs" data-testid="live-confirm">
-          <div className="font-semibold mb-1">Some messages are toggles or depend on the pedal&apos;s current state</div>
-          <ul className="list-disc pl-4 mb-2">{pendingConfirm.messages.map((m, i) => <li key={i}>{m.summary} — {m.explanation}</li>)}</ul>
+        <div role="alertdialog" aria-label={pendingConfirm.reason === "route" ? "Confirm route prerequisites" : "Confirm state-dependent messages"} className="border border-amber-400 bg-amber-50 rounded-md p-3 text-xs" data-testid="live-confirm" data-reason={pendingConfirm.reason}>
+          {pendingConfirm.reason === "route" ? (
+            <>
+              <div className="font-semibold mb-1">Before the first send over these routes: nothing has been queued</div>
+              <p className="mb-1">Confirm that each hardware setting below is in place and that you accept the unverified hops. This is remembered until you disconnect.</p>
+              <ul className="list-disc pl-4 mb-2" data-testid="live-confirm-items">{pendingConfirm.items.map((it) => <li key={it}>{it}</li>)}</ul>
+            </>
+          ) : (
+            <>
+              <div className="font-semibold mb-1">Some messages are toggles or depend on the pedal&apos;s current state</div>
+              <ul className="list-disc pl-4 mb-2">{pendingConfirm.messages.map((m, i) => <li key={i}>{m.summary} — {m.explanation}</li>)}</ul>
+            </>
+          )}
           <div className="flex gap-1">
-            <Button variant="danger" onClick={() => void pendingConfirm.retry()} data-testid="live-confirm-send">Send anyway</Button>
+            <Button variant="danger" onClick={() => void pendingConfirm.retry()} data-testid="live-confirm-send">{pendingConfirm.reason === "route" ? "I have checked these — send" : "Send anyway"}</Button>
             <Button onClick={dismissConfirm}>Don&apos;t send</Button>
           </div>
         </div>

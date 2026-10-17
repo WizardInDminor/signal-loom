@@ -1,19 +1,28 @@
 """Real MIDI backend on top of ``python-rtmidi`` (optional dependency, ``pip install -e ".[live]"``).
 
-Status: **written against the python-rtmidi API, not exercised on hardware in this repository.**
-The build sandbox has no MIDI devices and cannot compile the library, so this module is guarded:
-when the import fails the transport reports itself unavailable with the reason, and nothing in
-Signal Loom substitutes the virtual transport for it silently. Port names are whatever the OS
-reports (``Morningstar MC8 1`` on Windows); they are workstation-local by nature.
+Status: **written against the python-rtmidi API and tested against a fake of that API**
+(``tests/test_live_rtmidi.py``: enumerate, duplicate names, open/close, send, input callback,
+busy ports, disappearance). It has not been run on hardware in this repository: the build sandbox
+has no MIDI devices and cannot compile the library. When the import fails the transport reports
+itself unavailable with the reason, and nothing in Signal Loom substitutes the virtual transport
+for it silently.
 
-What the user should expect on Windows: the class-compliant USB MIDI driver lets one process own a
-port at a time. If the Morningstar editor, Nixie or Neuro has the port, ``open_output`` raises
-``PortBusyError`` with that explanation; closing it there (or releasing it here) is the remedy.
+Endpoint identity. The OS reports only names, and Windows lists two identical devices under one
+name. An endpoint id is therefore ``rtmidi:<dir>:<name>#<k>`` where ``k`` is the ordinal among the
+same-named ports of that direction in enumeration order (``#0`` for a unique name). The ordinal is
+stable while the set of same-named ports does not change; when it changes, the service compares the
+``peer_count`` recorded on the binding with the one enumerated now and refuses to open the port
+until the user re-saves the binding (see ``LiveService._open_binding``).
+
+Port contention on Windows: the class-compliant USB MIDI driver lets one process own a port at a
+time. If the Morningstar editor, Nixie or Neuro has it, ``open_output`` raises ``PortBusyError``
+with that explanation; closing it there (or releasing it here) is the remedy.
 """
 
 from __future__ import annotations
 
 import threading
+from collections import Counter
 
 from .transport import EndpointInfo, OpenState, PortBusyError, ReceiveCallback, RecordingMixin, TransportError
 
@@ -26,6 +35,23 @@ except Exception as e:  # ImportError or a native load failure
     _IMPORT_ERROR = f"{type(e).__name__}: {e}"
 
 
+def _busy(text: str) -> bool:
+    t = text.lower()
+    return any(k in t for k in ("busy", "in use", "could not open", "already open", "access denied", "error creating"))
+
+
+def parse_endpoint_id(endpoint_id: str) -> tuple[str, str, int]:
+    """``rtmidi:out:Name#2`` → ("out", "Name", 2). A missing ordinal means 0."""
+    try:
+        _, direction, rest = endpoint_id.split(":", 2)
+    except ValueError as e:
+        raise TransportError(f"'{endpoint_id}' is not an rtmidi endpoint id") from e
+    name, sep, ordinal = rest.rpartition("#")
+    if sep and ordinal.isdigit():
+        return direction, name, int(ordinal)
+    return direction, rest, 0
+
+
 class RtMidiTransport(RecordingMixin):
     kind = "rtmidi"
 
@@ -36,53 +62,84 @@ class RtMidiTransport(RecordingMixin):
         self._open = OpenState()
         self._cb_lock = threading.Lock()
 
+    @staticmethod
+    def _lib():
+        if _rtmidi is None:
+            raise TransportError(f"python-rtmidi is not installed ({_IMPORT_ERROR})")
+        return _rtmidi
+
     def available(self) -> tuple[bool, str | None]:
         if _rtmidi is None:
             return False, f'python-rtmidi is not installed ({_IMPORT_ERROR}); install with: pip install -e ".[live]"'
         return True, None
 
     @staticmethod
-    def _id(direction: str, name: str) -> str:
-        return f"rtmidi:{direction}:{name}"
+    def _ids(direction: str, ports: list[str]) -> list[tuple[str, str, int]]:
+        """(id, name, peer_count) per port, ordinals assigned in enumeration order."""
+        seen: Counter[str] = Counter()
+        counts = Counter(ports)
+        out = []
+        for name in ports:
+            k = seen[name]
+            seen[name] += 1
+            out.append((f"rtmidi:{direction}:{name}#{k}", name, counts[name]))
+        return out
 
-    def enumerate(self) -> list[EndpointInfo]:  # pragma: no cover - needs the native library
+    def _ports(self, direction: str) -> list[str]:
+        lib = self._lib()
+        probe = lib.MidiOut() if direction == "out" else lib.MidiIn()
+        try:
+            return list(probe.get_ports())
+        finally:
+            try:
+                probe.delete()
+            except Exception:
+                pass
+            del probe
+
+    def enumerate(self) -> list[EndpointInfo]:
         if _rtmidi is None:
             return []
         out: list[EndpointInfo] = []
         try:
-            mo = _rtmidi.MidiOut()
-            for name in mo.get_ports():
-                out.append(EndpointInfo(self._id("out", name), name, "out", "rtmidi"))
-            del mo
-            mi = _rtmidi.MidiIn()
-            for name in mi.get_ports():
-                out.append(EndpointInfo(self._id("in", name), name, "in", "rtmidi"))
-            del mi
+            for direction in ("out", "in"):
+                for eid, name, peers in self._ids(direction, self._ports(direction)):
+                    note = f"{peers} ports share this name; told apart by position only" if peers > 1 else None
+                    out.append(EndpointInfo(eid, name, direction, "rtmidi", note=note, peer_count=peers))  # type: ignore[arg-type]
+        except TransportError:
+            raise
         except Exception as e:
             raise TransportError(f"MIDI enumeration failed: {e}") from e
         return out
 
     @staticmethod
-    def _index(ports: list[str], name: str) -> int:
-        try:
-            return ports.index(name)
-        except ValueError as e:
-            raise TransportError(f"MIDI port '{name}' is not present any more (unplugged?)") from e
+    def _index(ports: list[str], endpoint_id: str) -> int:
+        _, name, ordinal = parse_endpoint_id(endpoint_id)
+        matches = [i for i, p in enumerate(ports) if p == name]
+        if ordinal >= len(matches):
+            if not matches:
+                raise TransportError(f"MIDI port '{name}' is not present any more (unplugged?)")
+            raise TransportError(
+                f"only {len(matches)} port(s) named '{name}' are present now; '{endpoint_id}' refers to position {ordinal + 1}"
+            )
+        return matches[ordinal]
 
-    def open_output(self, endpoint_id: str) -> None:  # pragma: no cover - needs the native library
-        if _rtmidi is None:
-            raise TransportError("python-rtmidi is not installed")
+    def open_output(self, endpoint_id: str) -> None:
+        lib = self._lib()
         with self._lock:
             if endpoint_id in self._outs:
                 return
-            name = endpoint_id.split(":", 2)[2]
-            mo = _rtmidi.MidiOut()
+            _, name, _ = parse_endpoint_id(endpoint_id)
+            mo = lib.MidiOut()
             try:
-                mo.open_port(self._index(mo.get_ports(), name))
+                mo.open_port(self._index(list(mo.get_ports()), endpoint_id))
+            except TransportError:
+                del mo
+                raise
             except Exception as e:
                 del mo
                 text = str(e)
-                if "busy" in text.lower() or "in use" in text.lower() or "could not open" in text.lower():
+                if _busy(text):
                     raise PortBusyError(
                         f"'{name}' could not be opened: another application (an editor such as Morningstar, Nixie or Neuro) "
                         f"probably owns it. Close it there, then try again. ({text})"
@@ -91,16 +148,18 @@ class RtMidiTransport(RecordingMixin):
             self._outs[endpoint_id] = mo
             self._open.outputs.add(endpoint_id)
 
-    def open_input(self, endpoint_id: str, on_receive: ReceiveCallback) -> None:  # pragma: no cover
-        if _rtmidi is None:
-            raise TransportError("python-rtmidi is not installed")
+    def open_input(self, endpoint_id: str, on_receive: ReceiveCallback) -> None:
+        lib = self._lib()
         with self._lock:
             if endpoint_id in self._ins:
                 return
-            name = endpoint_id.split(":", 2)[2]
-            mi = _rtmidi.MidiIn()
+            _, name, _ = parse_endpoint_id(endpoint_id)
+            mi = lib.MidiIn()
             try:
-                mi.open_port(self._index(mi.get_ports(), name))
+                mi.open_port(self._index(list(mi.get_ports()), endpoint_id))
+            except TransportError:
+                del mi
+                raise
             except Exception as e:
                 del mi
                 raise PortBusyError(f"'{name}' could not be opened for input: {e}") from e
@@ -117,7 +176,7 @@ class RtMidiTransport(RecordingMixin):
             self._ins[endpoint_id] = mi
             self._open.inputs[endpoint_id] = on_receive
 
-    def close(self, endpoint_id: str) -> None:  # pragma: no cover
+    def close(self, endpoint_id: str) -> None:
         with self._lock:
             mo = self._outs.pop(endpoint_id, None)
             if mo is not None:
@@ -145,7 +204,7 @@ class RtMidiTransport(RecordingMixin):
         with self._lock:
             return endpoint_id in self._outs or endpoint_id in self._ins
 
-    def send(self, endpoint_id: str, data: bytes) -> None:  # pragma: no cover
+    def send(self, endpoint_id: str, data: bytes) -> None:
         with self._lock:
             mo = self._outs.get(endpoint_id)
             if mo is None:

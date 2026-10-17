@@ -10,6 +10,15 @@ below records three things separately, and the app's coverage table uses the sam
 | **simulation-tested** | the virtual transport delivered it in CI (`backend/tests/test_live_*.py`, `frontend/e2e/live.spec.ts`) |
 | **hardware-verified** | *you* observed it on your pedals and wrote it down here (and, optionally, in the app via "verified hops") |
 
+What the app will ask of you: before the first send over a route in each connection session, a
+dialog lists that route's hardware prerequisites (MC8 Cross MIDI Thru, Omniport MIDI-out mode, the
+Strymon MIDI EXP cable, ML10X DC power) and any unverified hop by name; nothing is queued until you
+confirm them. Stop and Disarm wait for the one message already handed to the driver and cancel the
+rest. While connected, the backend watches the ports every second and disarms by itself when a bound
+port disappears, whether or not the Live tab is open. On Windows two identical devices share one
+port name; the app tells them apart by position, and if the number of same-named ports changes it
+holds the binding closed until you re-save it.
+
 Rules that hold for the whole session: start disarmed; one message kind at a time; safe volume or
 the amp on standby; write down how to restore every preset you touch *before* you touch it; never
 send anything to the MC8 or ML10X that writes memory (Signal Loom cannot, but the Morningstar

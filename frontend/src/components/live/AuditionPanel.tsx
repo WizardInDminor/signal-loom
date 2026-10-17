@@ -58,6 +58,12 @@ export function AuditionPanel() {
               {!shownDry.messages.length && <tr><td colSpan={6} className="text-neutral-500">This scene compiles to no MIDI message.</td></tr>}
             </tbody>
           </table>
+          {shownDry.confirmations_required.length > 0 && (
+            <div className="mt-1 border border-amber-200 bg-amber-50 rounded px-2 py-1" data-testid="live-dry-run-confirmations">
+              <b>Before the first audition you will be asked to confirm:</b>
+              <ul className="list-disc pl-4">{shownDry.confirmations_required.map((c) => <li key={c}>{c}</li>)}</ul>
+            </div>
+          )}
           {shownDry.manual_steps.length > 0 && <div className="mt-1"><b>Still by hand:</b> {shownDry.manual_steps.join(" · ")}</div>}
           <DiagnosticList items={shownDry.diagnostics} empty="" />
         </div>

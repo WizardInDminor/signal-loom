@@ -36,6 +36,11 @@ class EndpointBinding(StrictModel):
     # Which direction(s) this binding covers on the computer side.
     direction: Literal["out", "in", "both"] = "out"
     note: str | None = None
+    # Number of same-named endpoints present when this binding was saved (filled in by the server).
+    # Identically named ports are told apart by ordinal only, so when the count changes the
+    # ordinal may now point at a different device: the binding is held (not opened) until the
+    # user re-saves it, and an armed session is disarmed.
+    peer_count: int | None = None
 
 
 class ChannelGroup(StrictModel):

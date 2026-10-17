@@ -25,7 +25,14 @@ interface LiveState {
   error: string | null;
   busy: boolean;
   /** Pending confirmation for messages the backend refused to send without it. */
-  pendingConfirm: { kind: "audition" | "send"; messages: { summary: string; explanation: string }[]; retry: () => Promise<void> } | null;
+  pendingConfirm: {
+    kind: "audition" | "send";
+    /** "toggle": state-dependent messages; "route": hardware prerequisites / unverified hops to acknowledge for this session. */
+    reason: "toggle" | "route";
+    items: string[];
+    messages: { summary: string; explanation: string }[];
+    retry: () => Promise<void>;
+  } | null;
 
   attach: (rigId: string) => Promise<void>;
   detach: () => void;
@@ -44,8 +51,8 @@ interface LiveState {
   release: (endpointId: string) => Promise<void>;
   reacquire: (endpointId: string) => Promise<void>;
   runDryRun: (sceneId: string) => Promise<void>;
-  audition: (sceneId: string, delayMs: number | null, confirm?: boolean) => Promise<void>;
-  send: (body: { instance_id: string; type: "pc" | "cc"; number: number; value?: number | null; coalesce?: boolean; label?: string | null; deterministic?: boolean | null }, confirm?: boolean) => Promise<void>;
+  audition: (sceneId: string, delayMs: number | null, confirm?: boolean, acknowledge?: string[]) => Promise<void>;
+  send: (body: { instance_id: string; type: "pc" | "cc"; number: number; value?: number | null; coalesce?: boolean; label?: string | null; deterministic?: boolean | null }, confirm?: boolean, acknowledge?: string[]) => Promise<void>;
   inject: (endpointId: string, type: "pc" | "cc", channel: number, number: number, value?: number | null) => Promise<void>;
   clearError: () => void;
   dismissConfirm: () => void;
@@ -282,35 +289,56 @@ export const useLiveStore = create<LiveState>((set, get) => ({
     }
   },
 
-  async audition(sceneId, delayMs, confirm = false) {
+  async audition(sceneId, delayMs, confirm = false, acknowledge = []) {
     const rigId = get().rigId;
     if (!rigId) return;
     set({ error: null, pendingConfirm: null });
     try {
-      const r = await api.live.audition(rigId, sceneId, { delay_ms: delayMs, confirm_nondeterministic: confirm });
+      const r = await api.live.audition(rigId, sceneId, { delay_ms: delayMs, confirm_nondeterministic: confirm, acknowledge });
       set({ lastWarnings: r.warnings });
       await get().poll();
     } catch (e) {
-      if (code(e) === "live.confirm_nondeterministic") {
-        const msgs = ((e as ApiError).detail as { messages?: { summary: string; explanation: string }[] }).messages ?? [];
-        set({ pendingConfirm: { kind: "audition", messages: msgs, retry: () => get().audition(sceneId, delayMs, true) } });
+      const c = code(e);
+      if (c === "live.confirm_route" || c === "live.confirm_nondeterministic") {
+        const d = (e as ApiError).detail as { items?: string[]; messages?: { summary: string; explanation: string }[] };
+        const items = d.items ?? [];
+        set({
+          pendingConfirm: {
+            kind: "audition",
+            reason: c === "live.confirm_route" ? "route" : "toggle",
+            items,
+            messages: d.messages ?? [],
+            // Acknowledging a route keeps the toggle confirmation separate: the second question may follow.
+            retry: () => (c === "live.confirm_route" ? get().audition(sceneId, delayMs, confirm, [...acknowledge, ...items]) : get().audition(sceneId, delayMs, true, acknowledge)),
+          },
+        });
         return;
       }
       set({ error: text(e) });
     }
   },
 
-  async send(body, confirm = false) {
+  async send(body, confirm = false, acknowledge = []) {
     const rigId = get().rigId;
     if (!rigId) return;
     set({ error: null });
     try {
-      const r = await api.live.send(rigId, { ...body, confirm_nondeterministic: confirm });
+      const r = await api.live.send(rigId, { ...body, confirm_nondeterministic: confirm, acknowledge });
       if (r.warnings.length) set({ lastWarnings: r.warnings });
     } catch (e) {
-      if (code(e) === "live.confirm_nondeterministic") {
-        const msgs = ((e as ApiError).detail as { messages?: { summary: string; explanation: string }[] }).messages ?? [];
-        set({ pendingConfirm: { kind: "send", messages: msgs, retry: () => get().send(body, true) } });
+      const c = code(e);
+      if (c === "live.confirm_route" || c === "live.confirm_nondeterministic") {
+        const d = (e as ApiError).detail as { items?: string[]; messages?: { summary: string; explanation: string }[] };
+        const items = d.items ?? [];
+        set({
+          pendingConfirm: {
+            kind: "send",
+            reason: c === "live.confirm_route" ? "route" : "toggle",
+            items,
+            messages: d.messages ?? [],
+            retry: () => (c === "live.confirm_route" ? get().send(body, confirm, [...acknowledge, ...items]) : get().send(body, true, acknowledge)),
+          },
+        });
         return;
       }
       set({ error: text(e) });

@@ -60,7 +60,9 @@ export function LiveSetup() {
                 {st?.open && <Badge tone="ok">open</Badge>}
                 {st?.missing && <Badge tone="bad">missing</Badge>}
                 {st?.released && <Badge tone="warn">released</Badge>}
-                {st?.error && !st.busy && <span className="text-red-700">{st.error}</span>}
+                {st?.ambiguous && <Badge tone="bad">held: port count changed — re-save the binding</Badge>}
+                {e.peer_count > 1 && <Badge tone="warn">{e.peer_count} ports share this name</Badge>}
+                {st?.error && !st.busy && !st.ambiguous && <span className="text-red-700">{st.error}</span>}
                 {connected && st && !st.released && <Button variant="ghost" className="!py-0 !px-1" onClick={() => void release(e.id)} title="Close this port in Signal Loom so another program (an editor) can own it">release</Button>}
                 {connected && st?.released && <Button variant="ghost" className="!py-0 !px-1" onClick={() => void reacquire(e.id)}>reacquire</Button>}
               </li>
@@ -81,7 +83,7 @@ export function LiveSetup() {
               return (
                 <tr key={k} className="border-t border-line">
                   <td><code className="text-[11px]">{ep?.name ?? b.endpoint_id}</code>{!ep && <Badge tone="bad">not present</Badge>}</td>
-                  <td>{inst?.label ?? b.instance_id}: {b.port_id}</td>
+                  <td>{inst?.label ?? b.instance_id}: {b.port_id}{b.peer_count != null && b.peer_count > 1 ? <span className="text-neutral-500"> · position among {b.peer_count} same-named ports</span> : null}</td>
                   <td>{b.direction === "in" ? "device → computer" : "computer → device"}</td>
                   <td><Button variant="ghost" aria-label={`Remove binding ${k + 1}`} onClick={() => edit((x) => { x.bindings.splice(k, 1); })}>✕</Button></td>
                 </tr>

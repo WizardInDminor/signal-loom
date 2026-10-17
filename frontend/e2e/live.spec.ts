@@ -71,6 +71,7 @@ test("live: connect, arm with the phrase, audition in order into simulated pedal
   await page.getByTestId("live-suggest").click();
   await page.getByTestId("live-connect").click();
   await expect(page.getByTestId("live-header")).toContainText("connected");
+  await expect(page.getByTestId("live-watching")).toContainText("ports watched");
   await expect(page.getByTestId("live-header")).toHaveAttribute("data-armed", "false");
   // Arming needs the phrase; a wrong one is refused and leaves everything disarmed.
   await page.getByTestId("live-arm").click();
@@ -82,10 +83,21 @@ test("live: connect, arm with the phrase, audition in order into simulated pedal
   await page.getByTestId("live-arm-confirm").click();
   await expect(page.getByTestId("live-header")).toHaveAttribute("data-armed", "true");
   await expect(page.getByTestId("rig-armed-badge")).toBeVisible();
-  // Audition "Solo" with a short delay: nine sent entries in compiled order; simulated pedals change.
+  // Audition "Solo" with a short delay. The routes carry hardware prerequisites (Cross MIDI Thru,
+  // Omniport mode, Strymon's MIDI EXP cable): the first send is refused until they are acknowledged
+  // in a dialog that names them; nothing is queued meanwhile. Then nine sent entries in compiled order.
   await page.getByLabel("Live scene").selectOption({ label: "Solo" });
+  await page.getByTestId("live-dry-run").click();
+  await expect(page.getByTestId("live-dry-run-confirmations")).toContainText("Cross MIDI Thru");
   await page.getByLabel("Audition delay").fill("5");
   await page.getByTestId("live-audition").click();
+  const confirm = page.getByTestId("live-confirm");
+  await expect(confirm).toHaveAttribute("data-reason", "route");
+  await expect(confirm.getByTestId("live-confirm-items")).toContainText("Cross MIDI Thru");
+  await expect(confirm.getByTestId("live-confirm-items")).toContainText("Omniport");
+  await expect(page.getByTestId("live-log").locator('li[data-kind="queued"]')).toHaveCount(0);
+  await confirm.getByTestId("live-confirm-send").click();
+  await expect(page.getByTestId("live-confirm")).toHaveCount(0);
   const sent = page.getByTestId("live-log").locator('li[data-kind="sent"]');
   await expect(sent).toHaveCount(9, { timeout: 10_000 });
   await expect(sent.last()).toContainText("1/9 CC 0 = 0 ch 10 → ML10X"); // newest first in the log
@@ -96,8 +108,10 @@ test("live: connect, arm with the phrase, audition in order into simulated pedal
   await expect(page.getByTestId("live-last-inst_sunset")).toContainText("CC 15 = 127");
   await expect(page.getByTestId("live-observed-inst_sunset")).toContainText("no reply observed");
   // Stop: a slow audition is cancelled, the log says so and that transmitted messages are not undone.
+  // The acknowledgement is remembered for the session: no second dialog.
   await page.getByLabel("Audition delay").fill("400");
   await page.getByTestId("live-audition").click();
+  await expect(page.getByTestId("live-confirm")).toHaveCount(0);
   await expect(page.getByTestId("live-log").locator('li[data-kind="queued"]').first()).toBeVisible();
   await page.getByTestId("live-stop").click();
   await expect(page.getByTestId("live-log").locator('li[data-kind="stopped"]').first()).toContainText("not undone");

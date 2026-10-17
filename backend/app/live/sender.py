@@ -4,10 +4,17 @@ Rules, each proven by a test:
 - Disarmed by construction; ``arm`` needs the explicit confirmation phrase; nothing re-arms.
 - ``dry_run`` resolves messages to endpoints and bytes and never touches the transport.
 - ``audition``/``send`` refuse while disarmed, refuse any type but PC/CC, refuse non-deterministic
-  (toggle) messages unless the caller confirmed them, and refuse a target whose route for that
-  kind is unsupported or unreachable (an *unverified* route is allowed with a warning).
+  (toggle) messages unless the caller confirmed them, refuse a target whose route for that kind is
+  unsupported or unreachable, and refuse — *before anything is queued* — a route whose
+  prerequisites (Cross MIDI Thru, Omniport mode, a special cable) or unverified hops the user has
+  not acknowledged in this connection session.
 - Messages go out in order from one worker thread with the configured delay; ``stop`` cancels
   what is still queued and says so; ``disarm``/``disconnect`` drop the queue.
+- **In-flight semantics.** A message is dequeued, checked against ``armed`` and handed to the
+  transport while the sender's lock is held. ``disarm``, ``stop``, ``attach_transport`` and
+  ``close`` take the same lock, so they cannot return while a send is in flight, and no send can
+  *begin* after any of them has returned. The one message already handed to the driver completes
+  (its bytes are gone) and is logged as sent; everything behind it is cancelled.
 - A slider's CC stream is coalesced: a queued, unsent CC for the same device and controller is
   replaced instead of piling up.
 - Everything is logged with a monotonic sequence so the UI can poll for what happened.
@@ -18,6 +25,8 @@ from __future__ import annotations
 import threading
 import time
 from collections import deque
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -58,6 +67,9 @@ class Resolved:
     explanation: str
     source_kind: str
     coalesce_key: str | None = None
+    # What the user must acknowledge once per connection session before this goes out: the route's
+    # hardware prerequisites and, for an unverified route, the undocumented hop.
+    needs_ack: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict:
         return {
@@ -76,6 +88,7 @@ class Resolved:
             "deterministic": self.deterministic,
             "explanation": self.explanation,
             "source_kind": self.source_kind,
+            "needs_ack": list(self.needs_ack),
             "summary": (f"PC {self.number}" if self.type == "pc" else f"CC {self.number} = {self.value}")
             + f" ch {self.channel} → {self.target_label}",
         }
@@ -155,6 +168,16 @@ class LiveSender:
         self._wake = threading.Event()
         self._worker: threading.Thread | None = None
         self._closing = False
+        self._in_flight: Queued | None = None
+        # Control calls (disarm, stop, attach, close) announce themselves before taking the lock, and
+        # the worker yields to them between messages, so a control call never waits behind more
+        # than the one message already in flight — whatever the lock's fairness.
+        self._ctl_lock = threading.Lock()
+        self._ctl_waiting = 0
+        self._ctl_free = threading.Event()
+        self._ctl_free.set()
+        # Route prerequisites / unverified hops the user acknowledged in this connection session.
+        self._acknowledged: set[str] = set()
         # last message Signal Loom attempted to send, per device: "last sent", never "device state"
         self.last_sent: dict[str, dict] = {}
         # The rig the sender currently works for; stamped on every log entry so a rig page shows
@@ -164,15 +187,43 @@ class LiveSender:
     # -- state ------------------------------------------------------------------------
     @property
     def armed(self) -> bool:
-        with self._lock:
-            return self._armed
+        return self._armed  # lock-free read: callers that need a consistent view hold the lock themselves
+
+    @property
+    def in_flight(self) -> Queued | None:
+        # Lock-free on purpose: readable while a send holds the lock (reading a reference is atomic).
+        return self._in_flight
+
+    @contextmanager
+    def hold_worker(self) -> Iterator[None]:
+        """Announce a pending control action: the worker finishes the message in flight (if any)
+        and then waits between messages until the block exits. Takes no lock itself, so a caller
+        may acquire other locks (the service's) inside without losing its priority."""
+        with self._ctl_lock:
+            self._ctl_waiting += 1
+            self._ctl_free.clear()
+        try:
+            yield
+        finally:
+            with self._ctl_lock:
+                self._ctl_waiting -= 1
+                if self._ctl_waiting == 0:
+                    self._ctl_free.set()
+
+    @contextmanager
+    def _control(self) -> Iterator[None]:
+        """Take the sender lock with priority over the worker's next message."""
+        with self.hold_worker(), self._lock:
+            yield
 
     def attach_transport(self, transport: Transport | None) -> None:
-        """Changing transport (connect/disconnect/mode switch) always disarms and drops the queue."""
-        with self._lock:
+        """Changing transport (connect/disconnect/mode switch) always disarms, drops the queue and
+        forgets the session's acknowledgements. Blocks while a send is in flight."""
+        with self._control():
             if self._armed or self._queue:
                 self._disarm_locked("transport changed")
             self._transport = transport
+            self._acknowledged.clear()
 
     def _emit(
         self, kind: LogKind, message: str, job_id: str | None = None, resolved: Resolved | None = None
@@ -207,8 +258,10 @@ class LiveSender:
                 "armed": self._armed,
                 "armed_at": self._armed_at,
                 "queue_length": self.queue_length(),
+                "in_flight": self._in_flight.resolved.as_dict()["summary"] if self._in_flight else None,
                 "seq": self._seq,
                 "arm_phrase": ARM_PHRASE,
+                "acknowledged": sorted(self._acknowledged),
                 "jobs": [j.as_dict() for j in self.jobs()],
             }
 
@@ -232,7 +285,8 @@ class LiveSender:
             )
 
     def disarm(self, reason: str = "user") -> None:
-        with self._lock:
+        """Returns only once no send is in flight; after it returns no send can begin."""
+        with self._control():
             self._disarm_locked(reason)
 
     def _disarm_locked(self, reason: str) -> None:
@@ -245,6 +299,15 @@ class LiveSender:
                 "disarmed",
                 f"Disarmed ({reason}). {dropped} queued message(s) dropped; already transmitted messages are not undone.",
             )
+
+    def acknowledge(self, items: list[str]) -> None:
+        with self._lock:
+            self._acknowledged.update(i for i in items if i)
+
+    @property
+    def acknowledged(self) -> set[str]:
+        with self._lock:
+            return set(self._acknowledged)
 
     # -- dry run ----------------------------------------------------------------------
     @staticmethod
@@ -273,6 +336,24 @@ class LiveSender:
                     f"'{r.target_label}': {r.type.upper()} route is {r.route_status} — {r.route_reason}",
                     {"target_instance_id": r.target_instance_id, "kind": r.type},
                 )
+        # Prerequisites and unverified hops: acknowledged once per connection session, before
+        # anything is queued. The list is specific (which setting, which hop, which device).
+        pending: list[str] = []
+        for r in resolved:
+            for item in r.needs_ack:
+                if item not in self._acknowledged and item not in pending:
+                    pending.append(item)
+        if pending:
+            raise LiveRefused(
+                "live.confirm_route",
+                "Before the first send over these routes, confirm that the hardware prerequisites are set and that "
+                "you accept the unverified hops. Nothing has been queued.",
+                {
+                    "items": pending,
+                    "messages": [r.as_dict() for r in resolved if any(i in pending for i in r.needs_ack)],
+                },
+            )
+        for r in resolved:
             if r.route_status == "unverified":
                 warnings.append(
                     f"'{r.target_label}': the route is unverified ({r.route_reason}); the message is sent, arrival is not known."
@@ -324,8 +405,9 @@ class LiveSender:
             return job, warnings
 
     def stop(self) -> int:
-        """Cancel everything still queued. Transmitted messages are not undone (and this says so)."""
-        with self._lock:
+        """Cancel everything still queued. Returns only once no send is in flight; transmitted
+        messages are not undone (and the log says so)."""
+        with self._control():
             n = self._cancel_queue_locked()
             self._emit(
                 "stopped",
@@ -364,52 +446,54 @@ class LiveSender:
 
     def _run(self) -> None:
         while not self._closing:
+            delay_ms = 0
+            if not self._ctl_free.wait(timeout=0.5):
+                continue  # a control call is waiting for the lock: let it go first
             with self._lock:
                 item = self._queue.popleft() if self._queue else None
-                transport = self._transport
-                armed = self._armed
+                if item is not None and not item.cancelled:
+                    delay_ms = self._send_locked(item)
             if item is None:
                 self._wake.clear()
                 self._wake.wait(timeout=0.5)
                 continue
-            if item.cancelled:
-                continue
-            r = item.resolved
-            job = self._jobs.get(item.job_id)
-            if not armed or transport is None:
-                with self._lock:
-                    item.cancelled = True
-                    if job:
-                        job.cancelled += 1
-                    self._emit("cancelled", f"{r.as_dict()['summary']} not sent: disarmed meanwhile", item.job_id, r)
-                continue
-            try:
-                data = encode(r.type, r.channel, r.number, r.value)
-                transport.send(r.endpoint_id or "", data)
-                with self._lock:
-                    if job:
-                        job.sent += 1
-                    self.last_sent[r.target_instance_id] = self._merge_last(self.last_sent.get(r.target_instance_id), r)
-                    self._emit(
-                        "sent",
-                        f"{item.index + 1}/{item.total} {r.as_dict()['summary']} → {r.endpoint_name}",
-                        item.job_id,
-                        r,
-                    )
-            except (TransportError, ForbiddenMessageError, ValueError) as e:
-                with self._lock:
-                    if job:
-                        job.failed += 1
-                    self._emit("failed", f"{r.as_dict()['summary']}: {e}", item.job_id, r)
-                    if isinstance(e, TransportError):
-                        # A port that vanished mid-audition: stop everything and disarm (no auto re-arm).
-                        self._disarm_locked(f"transport error: {e}")
-            finally:
-                with self._lock:
-                    if job and job.sent + job.failed + job.cancelled >= job.total and job.finished_at is None:
-                        job.finished_at = utcnow_iso()
-            if item.delay_ms and not self._closing:
-                time.sleep(item.delay_ms / 1000.0)
+            if delay_ms and not self._closing:
+                time.sleep(delay_ms / 1000.0)  # outside the lock: Stop/disarm never wait on a delay
+
+    def _send_locked(self, item: Queued) -> int:
+        """Dequeue-check-send as one critical section. Returns the delay to honour afterwards."""
+        r = item.resolved
+        job = self._jobs.get(item.job_id)
+        if not self._armed or self._transport is None:
+            item.cancelled = True
+            if job:
+                job.cancelled += 1
+                if job.sent + job.failed + job.cancelled >= job.total and job.finished_at is None:
+                    job.finished_at = utcnow_iso()
+            self._emit("cancelled", f"{r.as_dict()['summary']} not sent: disarmed meanwhile", item.job_id, r)
+            return 0
+        self._in_flight = item
+        try:
+            data = encode(r.type, r.channel, r.number, r.value)
+            self._transport.send(r.endpoint_id or "", data)
+            if job:
+                job.sent += 1
+            self.last_sent[r.target_instance_id] = self._merge_last(self.last_sent.get(r.target_instance_id), r)
+            self._emit(
+                "sent", f"{item.index + 1}/{item.total} {r.as_dict()['summary']} → {r.endpoint_name}", item.job_id, r
+            )
+        except (TransportError, ForbiddenMessageError, ValueError) as e:
+            if job:
+                job.failed += 1
+            self._emit("failed", f"{r.as_dict()['summary']}: {e}", item.job_id, r)
+            if isinstance(e, TransportError):
+                # A port that vanished mid-audition: stop everything and disarm (no auto re-arm).
+                self._disarm_locked(f"transport error: {e}")
+        finally:
+            self._in_flight = None
+            if job and job.sent + job.failed + job.cancelled >= job.total and job.finished_at is None:
+                job.finished_at = utcnow_iso()
+        return item.delay_ms
 
     @staticmethod
     def _merge_last(prev: dict | None, r: Resolved) -> dict:
@@ -428,7 +512,7 @@ class LiveSender:
         return cur
 
     def close(self) -> None:
-        with self._lock:
+        with self._control():
             self._closing = True
             self._disarm_locked("shutdown")
             self._wake.set()

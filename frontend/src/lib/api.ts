@@ -132,9 +132,9 @@ export const api = {
     disarm: () => request<LiveStatus>("/api/live/disarm", { method: "POST" }),
     stop: () => request<LiveStatus & { cancelled: number }>("/api/live/stop", { method: "POST" }),
     dryRun: (rigId: string, sceneId: string) => request<DryRun>(`/api/live/rigs/${rigId}/scenes/${sceneId}/dry-run`, { method: "POST" }),
-    audition: (rigId: string, sceneId: string, body: { delay_ms?: number | null; confirm_nondeterministic?: boolean }) =>
+    audition: (rigId: string, sceneId: string, body: { delay_ms?: number | null; confirm_nondeterministic?: boolean; acknowledge?: string[] }) =>
       request<{ job: LiveJob; warnings: string[]; messages: ResolvedMessage[]; delay_ms: number }>(`/api/live/rigs/${rigId}/scenes/${sceneId}/audition`, { method: "POST", body: JSON.stringify(body) }),
-    send: (rigId: string, body: { instance_id: string; type: "pc" | "cc"; number: number; value?: number | null; confirm_nondeterministic?: boolean; coalesce?: boolean; label?: string | null; deterministic?: boolean | null }) =>
+    send: (rigId: string, body: { instance_id: string; type: "pc" | "cc"; number: number; value?: number | null; confirm_nondeterministic?: boolean; coalesce?: boolean; label?: string | null; deterministic?: boolean | null; acknowledge?: string[] }) =>
       request<{ job: LiveJob; warnings: string[]; message: ResolvedMessage }>(`/api/live/rigs/${rigId}/send`, { method: "POST", body: JSON.stringify(body) }),
     panels: (rigId: string) => request<LivePanels>(`/api/live/rigs/${rigId}/panels`),
     follower: (rigId: string) => request<Follower>(`/api/live/rigs/${rigId}/follower`),

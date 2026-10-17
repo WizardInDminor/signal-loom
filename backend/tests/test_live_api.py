@@ -97,9 +97,26 @@ def test_virtual_round_trip_dry_run_arm_audition_capture_reload(client):
     # Arm explicitly.
     assert client.post("/api/live/arm", json={"confirm": "ok"}).status_code == 409
     assert client.post("/api/live/arm", json={"confirm": ARM_PHRASE}).json()["armed"] is True
-    # Audition with a 5 ms delay: ordered, logged, the simulated pedals change.
+    # The routes have hardware prerequisites (Cross MIDI Thru, Omniport mode, Strymon's MIDI EXP
+    # cable): the first send is refused until they are acknowledged, and nothing is queued meanwhile.
+    dry = client.post(f"/api/live/rigs/{RIG}/scenes/scene_solo/dry-run").json()
+    need = dry["confirmations_required"]
+    assert any("Cross MIDI Thru" in n for n in need) and any("Omniport" in n for n in need)
     r = client.post(f"/api/live/rigs/{RIG}/scenes/scene_solo/audition", json={"delay_ms": 5})
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "live.confirm_route"
+    assert r.json()["detail"]["items"] == need
+    assert client.get("/api/live/status").json()["queue_length"] == 0
+    assert [e["kind"] for e in client.get("/api/live/events").json()["log"] if e["kind"] == "queued"] == []
+    # Acknowledging a different (made-up) item does not satisfy the specific ones.
+    r = client.post(
+        f"/api/live/rigs/{RIG}/scenes/scene_solo/audition",
+        json={"delay_ms": 5, "acknowledge": ["prerequisite: something else"]},
+    )
+    assert r.status_code == 409
+    # Audition with a 5 ms delay after acknowledging: ordered, logged, the simulated pedals change.
+    r = client.post(f"/api/live/rigs/{RIG}/scenes/scene_solo/audition", json={"delay_ms": 5, "acknowledge": need})
     assert r.status_code == 200, r.text
+    assert client.post(f"/api/live/rigs/{RIG}/scenes/scene_solo/dry-run").json()["confirmations_required"] == []
     job = settle(client, r.json()["job"]["id"])
     assert job["sent"] == 9 and job["failed"] == 0
     ev = client.get("/api/live/events").json()
@@ -147,12 +164,15 @@ def test_virtual_round_trip_dry_run_arm_audition_capture_reload(client):
     st = client.post("/api/live/disconnect").json()
     assert st["armed"] is False and st["connected_rig_id"] is None and st["queue_length"] == 0
     assert client.get("/api/live/events").json()["log"][-1]["kind"] == "disarmed"
+    assert st["acknowledged"] == []  # a new connection session asks again
 
 
 def test_toggle_needs_confirmation_and_unsupported_routes_are_refused(client):
     client.post(f"/api/live/rigs/{RIG}/bindings/suggest")
     client.post(f"/api/live/rigs/{RIG}/connect")
     client.post("/api/live/arm", json={"confirm": ARM_PHRASE})
+    ack = client.post(f"/api/live/rigs/{RIG}/scenes/scene_solo/dry-run").json()["confirmations_required"]
+    client.post(f"/api/live/rigs/{RIG}/scenes/scene_solo/audition", json={"delay_ms": 0, "acknowledge": ack})
     r = client.post(
         f"/api/live/rigs/{RIG}/send",
         json={"instance_id": "inst_sunset", "type": "cc", "number": 15, "value": 127, "deterministic": False},
@@ -298,3 +318,99 @@ def test_restart_starts_disarmed_and_keeps_bindings(db_path):
         # Deleting the rig removes its workstation-local bindings too.
         c.delete(f"/api/rigs/{RIG}")
         assert c.get(f"/api/live/rigs/{RIG}/bindings").json()["bindings"] == []
+
+
+def test_unverified_route_needs_a_specific_acknowledgement_before_anything_is_queued(client):
+    """ML10X bound by its own USB: the BigSky behind the ML10X's Thru is 'unverified' (USB → Thru
+    forwarding is undocumented). A panel send to it is refused with the exact hop named, nothing is
+    queued, and it goes out only once that item is acknowledged; the acknowledgement is remembered
+    for the session and forgotten on reconnect."""
+    b = client.get(f"/api/live/rigs/{RIG}/bindings").json()
+    b["bindings"] = [
+        {"endpoint_id": "virt:inst_ml10x:out", "instance_id": "inst_ml10x", "port_id": "usb", "direction": "out"}
+    ]
+    client.put(f"/api/live/rigs/{RIG}/bindings", json=b)
+    client.post(f"/api/live/rigs/{RIG}/connect")
+    client.post("/api/live/arm", json={"confirm": ARM_PHRASE})
+    body = {"instance_id": "inst_bigsky", "type": "pc", "number": 3}
+    r = client.post(f"/api/live/rigs/{RIG}/send", json=body)
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "live.confirm_route"
+    items = r.json()["detail"]["items"]
+    assert (
+        len(items) == 1 and items[0].startswith("unverified route to BigSky MX for PC") and "not documented" in items[0]
+    )
+    assert client.app.state.live.virtual.send_count == 0
+    r = client.post(f"/api/live/rigs/{RIG}/send", json={**body, "acknowledge": items})
+    assert r.status_code == 200 and "unverified" in r.json()["warnings"][0]
+    settle(client, r.json()["job"]["id"])
+    assert client.app.state.live.virtual.send_count == 1
+    # Remembered within the session…
+    assert client.post(f"/api/live/rigs/{RIG}/send", json=body).status_code == 200
+    # …and the ML10X's own USB route asks for its own, different prerequisite (DC power for the relays).
+    r = client.post(f"/api/live/rigs/{RIG}/send", json={"instance_id": "inst_ml10x", "type": "pc", "number": 1})
+    assert r.status_code == 409
+    assert r.json()["detail"]["items"] == [
+        "prerequisite: ML10X powered from its DC inlet (USB alone does not switch relays)"
+    ]
+    r = client.post(
+        f"/api/live/rigs/{RIG}/send",
+        json={"instance_id": "inst_ml10x", "type": "pc", "number": 1, "acknowledge": r.json()["detail"]["items"]},
+    )
+    assert r.status_code == 200
+    # Reconnect: asked again.
+    client.post(f"/api/live/rigs/{RIG}/connect")
+    client.post("/api/live/arm", json={"confirm": ARM_PHRASE})
+    assert client.post(f"/api/live/rigs/{RIG}/send", json=body).status_code == 409
+
+
+def test_idle_armed_session_is_disarmed_automatically_when_an_endpoint_vanishes(db_path, monkeypatch):
+    """No rescan, no send, no UI: the backend watcher notices the loss and disarms."""
+    monkeypatch.setenv("SIGNAL_LOOM_LIVE_WATCH_S", "0.05")
+    os.environ.pop("SIGNAL_LOOM_NO_DEMO", None)
+    with TestClient(create_app(db_path)) as client:
+        svc = client.app.state.live
+        assert svc.watch_interval_s == 0.05
+        client.post(f"/api/live/rigs/{RIG}/bindings/suggest")
+        st = client.post(f"/api/live/rigs/{RIG}/connect").json()
+        assert st["watching"] is True
+        client.post("/api/live/arm", json={"confirm": ARM_PHRASE})
+        assert client.get("/api/live/status").json()["armed"] is True
+        checks_before = svc.check_count
+        svc.virtual.unplug("virt:inst_mc8:out")
+        deadline = time.time() + 3.0
+        while time.time() < deadline and client.get("/api/live/status").json()["armed"]:
+            time.sleep(0.02)
+        st = client.get("/api/live/status").json()
+        assert st["armed"] is False
+        assert next(e for e in st["endpoints"] if e["endpoint_id"] == "virt:inst_mc8:out")["missing"] is True
+        assert svc.check_count > checks_before and st["last_check_at"] is not None
+        assert any(
+            "endpoint change: lost virt:inst_mc8:out" in e["message"]
+            for e in client.get("/api/live/events").json()["log"]
+        )
+        # The simulated pedals were not reset by the watcher (unlike a manual rescan).
+        assert set(client.get("/api/live/events").json()["simulated"]) == {
+            "inst_mc8",
+            "inst_ml10x",
+            "inst_bigsky",
+            "inst_sunset",
+        }
+        # It comes back: rebound by the watcher, still disarmed, and an audition is refused until re-armed.
+        svc.virtual.unplug("virt:inst_mc8:out", False)
+        deadline = time.time() + 3.0
+        while (
+            time.time() < deadline
+            and not next(
+                e for e in client.get("/api/live/status").json()["endpoints"] if e["endpoint_id"] == "virt:inst_mc8:out"
+            )["open"]
+        ):
+            time.sleep(0.02)
+        st = client.get("/api/live/status").json()
+        assert next(e for e in st["endpoints"] if e["endpoint_id"] == "virt:inst_mc8:out")["open"] is True
+        assert st["armed"] is False
+        assert (
+            client.post(f"/api/live/rigs/{RIG}/scenes/scene_solo/audition", json={}).json()["detail"]["code"]
+            == "live.disarmed"
+        )
+        # Disconnect stops watching that rig; the thread stays idle.
+        assert client.post("/api/live/disconnect").json()["watching"] is False

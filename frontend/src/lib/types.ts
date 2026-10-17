@@ -260,13 +260,13 @@ export type MessageKind = "pc" | "cc" | "clock" | "sysex_read";
 export type RouteEvidence = "published" | "unknown" | "simulation_tested" | "hardware_verified";
 export type CoverageStatus = "supported" | "unverified" | "unsupported" | "unreachable";
 
-export interface LiveEndpoint { id: string; name: string; direction: "in" | "out"; transport: string; available: boolean; busy: boolean; note: string | null }
-export interface EndpointBinding { endpoint_id: string; instance_id: string; port_id: string; direction: "out" | "in" | "both"; note?: string | null }
+export interface LiveEndpoint { id: string; name: string; direction: "in" | "out"; transport: string; available: boolean; busy: boolean; note: string | null; peer_count: number }
+export interface EndpointBinding { endpoint_id: string; instance_id: string; port_id: string; direction: "out" | "in" | "both"; note?: string | null; peer_count?: number | null }
 export interface ChannelGroup { channel: number; instance_ids: string[]; note?: string | null }
 export interface LiveBindings { rig_id: string; transport_mode: TransportMode; bindings: EndpointBinding[]; channel_groups: ChannelGroup[]; send_delay_ms: number; verified_hops: Record<string, string>; updated_at?: string | null }
 
 export interface LiveJob { id: string; label: string; total: number; sent: number; failed: number; cancelled: number; pending: number; started_at: string; finished_at: string | null; done: boolean }
-export interface LiveEndpointState { endpoint_id: string; name: string; direction: string; open: boolean; busy: boolean; missing: boolean; released: boolean; error: string | null; bound_to: string[] }
+export interface LiveEndpointState { endpoint_id: string; name: string; direction: string; open: boolean; busy: boolean; missing: boolean; released: boolean; ambiguous: boolean; peer_count: number | null; error: string | null; bound_to: string[] }
 export interface LiveStatus {
   mode: TransportMode;
   transports: Record<TransportMode, { available: boolean; reason: string | null; label: string }>;
@@ -274,11 +274,18 @@ export interface LiveStatus {
   endpoints: LiveEndpointState[];
   released: string[];
   notes: string[];
+  watching: boolean;
+  watch_interval_s: number;
+  last_check_at: string | null;
   armed: boolean;
   armed_at: string | null;
   queue_length: number;
+  /** Summary of the one message currently being handed to the driver, if any. */
+  in_flight: string | null;
   seq: number;
   arm_phrase: string;
+  /** Route prerequisites / unverified hops acknowledged in this connection session. */
+  acknowledged: string[];
   jobs: LiveJob[];
 }
 
@@ -291,8 +298,8 @@ export interface CoverageRow { instance_id: string; label: string; kind: Message
 export interface ReceiverNetwork { endpoint_id: string; endpoint_name: string; members: { instance_id: string; label: string; channel: number | null; kinds: MessageKind[] }[]; collisions: Diagnostic[] }
 export interface LiveCoverage { targets: Record<string, LiveTarget>; networks: ReceiverNetwork[]; rows: CoverageRow[]; diagnostics: Diagnostic[] }
 
-export interface ResolvedMessage { type: "pc" | "cc"; channel: number; number: number; value: number | null; target_instance_id: string; target_label: string; endpoint_id: string | null; endpoint_name: string | null; hex: string; route_status: CoverageStatus; route_evidence: RouteEvidence | null; route_reason: string; deterministic: boolean; explanation: string; source_kind: string; summary: string }
-export interface DryRun { scene_id: string; scene_name: string; messages: ResolvedMessage[]; manual_steps: string[]; diagnostics: Diagnostic[]; sent: false; note: string }
+export interface ResolvedMessage { type: "pc" | "cc"; channel: number; number: number; value: number | null; target_instance_id: string; target_label: string; endpoint_id: string | null; endpoint_name: string | null; hex: string; route_status: CoverageStatus; route_evidence: RouteEvidence | null; route_reason: string; deterministic: boolean; explanation: string; source_kind: string; needs_ack: string[]; summary: string }
+export interface DryRun { scene_id: string; scene_name: string; messages: ResolvedMessage[]; confirmations_required: string[]; manual_steps: string[]; diagnostics: Diagnostic[]; sent: false; note: string }
 export interface LiveLogEntry { seq: number; at: string; kind: "armed" | "disarmed" | "queued" | "sent" | "failed" | "cancelled" | "stopped" | "refused" | "note"; message: string; job_id: string | null; resolved: ResolvedMessage | null; rig_id: string | null }
 export interface ObservedMessage { seq: number; at: string; endpoint_id: string; endpoint_name: string; type: string; channel: number | null; number: number | null; value: number | null; hex: string; summary: string }
 export interface LastSent { program: number | null; bank_msb: number | null; bank_lsb: number | null; cc: Record<string, { value: number; source_kind: string; at: string }>; at: string | null; last?: string }

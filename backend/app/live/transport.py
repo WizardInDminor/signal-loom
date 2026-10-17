@@ -41,6 +41,10 @@ class EndpointInfo:
     available: bool = True
     busy: bool = False  # owned by another application
     note: str | None = None
+    # How many endpoints of this direction share this name right now (Windows lists two identical
+    # devices under one name). The id disambiguates them by ordinal; a changed count means the
+    # ordinal may point at a different physical device, so the binding is held until re-saved.
+    peer_count: int = 1
 
     def as_dict(self) -> dict:
         return {
@@ -51,6 +55,7 @@ class EndpointInfo:
             "available": self.available,
             "busy": self.busy,
             "note": self.note,
+            "peer_count": self.peer_count,
         }
 
 

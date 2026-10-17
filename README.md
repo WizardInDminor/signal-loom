@@ -281,7 +281,9 @@ nothing performance-critical runs through the computer.
 4. **Audition.** Pick a scene, *Dry run* shows the exact bytes, order, endpoint and route status —
    the same compiled plan the Scenes tab shows. *Connect*, then *Arm…* (type `send MIDI to my rig`),
    then *Audition* transmits them in order with a conservative delay; *Stop* cancels what is queued
-   (and says that transmitted messages are not undone). Toggle-type messages ask for confirmation.
+   (and says that transmitted messages are not undone). Before the first send over a route you
+   confirm its hardware prerequisites and any unverified hop by name; toggle-type messages ask
+   separately. While connected, the backend watches the ports and disarms by itself if one vanishes.
 5. **Pedal panels.** Generated from each profile's documented PC range, bypass CC, CC map and named
    commands. Three columns stay apart: *last sent by Signal Loom*, *observed reply* (most pedals
    send none) and *simulated pedal* (virtual only). *Capture to scene…* shows what would change and

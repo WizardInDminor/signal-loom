@@ -9,6 +9,7 @@ reported, never substituted.
 
 from __future__ import annotations
 
+import os
 import threading
 from dataclasses import dataclass, field
 
@@ -17,9 +18,9 @@ from ..domain.compiler import compile_rig, compile_scene
 from ..domain.geometry import effective_ports
 from ..domain.wiring import wiring_diagnostics
 from ..models.common import DeviceCategory, SignalKind
-from ..models.live import LiveBindings, TransportMode
+from ..models.live import EndpointBinding, LiveBindings, TransportMode
 from ..models.profile import DeviceProfile
-from ..models.rig import Rig
+from ..models.rig import Rig, utcnow_iso
 from ..repo import ProfileRepository, RigRepository
 from .bindings import LiveBindingsRepository
 from .monitor import LiveMonitor
@@ -39,6 +40,10 @@ class EndpointState:
     busy: bool = False
     missing: bool = False
     released: bool = False
+    # The number of same-named ports changed since the binding was saved: the ordinal may point at
+    # a different device, so the port stays closed until the binding is re-saved.
+    ambiguous: bool = False
+    peer_count: int | None = None
     error: str | None = None
     bound_to: list[str] = field(default_factory=list)
 
@@ -60,6 +65,14 @@ class LiveService:
         self._released: set[str] = set()
         self._endpoint_states: dict[str, EndpointState] = {}
         self._last_change: list[str] = []
+        # Background hot-plug watcher: while a rig is connected, re-enumerates the transport every
+        # ``watch_interval_s`` seconds, closes and marks endpoints that vanished (disarming if armed),
+        # and re-opens ones that returned — never re-arming. Independent of any UI being open.
+        self.watch_interval_s = max(0.02, float(os.environ.get("SIGNAL_LOOM_LIVE_WATCH_S", "1.0")))
+        self._watch_stop = threading.Event()
+        self._watcher: threading.Thread | None = None
+        self.last_check_at: str | None = None
+        self.check_count = 0
 
     # -- helpers ----------------------------------------------------------------------
     def transport(self) -> Transport:
@@ -134,6 +147,11 @@ class LiveService:
                 "endpoints": [e.as_dict() for e in self._endpoint_states.values()],
                 "released": sorted(self._released),
                 "notes": self._last_change[-5:],
+                "watching": self._watcher is not None
+                and self._watcher.is_alive()
+                and self.connected_rig_id is not None,
+                "watch_interval_s": self.watch_interval_s,
+                "last_check_at": self.last_check_at,
                 **self.sender.status(),
             }
 
@@ -145,7 +163,7 @@ class LiveService:
             return [e.as_dict() for e in self._enumerate()]
 
     def set_mode(self, mode: TransportMode) -> dict:
-        with self._lock:
+        with self.sender.hold_worker(), self._lock:
             if mode == "rtmidi":
                 ok, reason = self.rtmidi.available()
                 if not ok:
@@ -164,8 +182,13 @@ class LiveService:
         return self.bindings_repo.get(rig_id)
 
     def save_bindings(self, rig_id: str, bindings: LiveBindings) -> LiveBindings:
-        with self._lock:
+        with self.sender.hold_worker(), self._lock:
             bindings.rig_id = rig_id
+            rig, profiles = self._load(rig_id)
+            present = {e.id: e for e in self._enumerate(rig, profiles)}
+            for b in bindings.bindings:
+                if b.endpoint_id in present:
+                    b.peer_count = present[b.endpoint_id].peer_count  # re-saving confirms the current set
             saved = self.bindings_repo.save(bindings)
             if self.connected_rig_id == rig_id:
                 # Routes changed under a connected rig: rebuild the world and re-open, disarmed.
@@ -271,28 +294,136 @@ class LiveService:
                 ),
             )
             st.bound_to.append(labels.get(b.instance_id, b.instance_id))
-            if b.endpoint_id not in present:
-                st.missing = True
-                continue
-            if b.endpoint_id in self._released:
-                st.released = True
-                continue
-            try:
-                if present[b.endpoint_id].direction == "out":
-                    transport.open_output(b.endpoint_id)
-                else:
-                    self.monitor.name_endpoint(b.endpoint_id, present[b.endpoint_id].name)
-                    transport.open_input(b.endpoint_id, self.monitor.on_receive)
-                st.open = True
-            except PortBusyError as e:
-                st.busy = True
-                st.error = str(e)
-            except TransportError as e:
-                st.error = str(e)
+            self._open_binding(transport, present, b, st)
         self._endpoint_states = states
+        self._bindings_cache = bindings
+
+    def _open_binding(
+        self, transport: Transport, present: dict[str, EndpointInfo], b: EndpointBinding, st: EndpointState
+    ) -> None:
+        """Open one bound endpoint if it is present, unambiguous and not released; record why not."""
+        st.open = False
+        st.busy = False
+        st.error = None
+        ep = present.get(b.endpoint_id)
+        if ep is None:
+            st.missing = True
+            return
+        st.missing = False
+        st.peer_count = ep.peer_count
+        if b.peer_count is not None and ep.peer_count != b.peer_count:
+            st.ambiguous = True
+            st.error = (
+                f"{ep.peer_count} port(s) named '{ep.name}' are present now, {b.peer_count} when this binding was saved; "
+                "the position may now point at a different device. Re-save the binding to confirm which one."
+            )
+            try:
+                transport.close(b.endpoint_id)
+            except TransportError:
+                pass
+            return
+        st.ambiguous = False
+        if b.endpoint_id in self._released:
+            st.released = True
+            return
+        st.released = False
+        try:
+            if ep.direction == "out":
+                transport.open_output(b.endpoint_id)
+            else:
+                self.monitor.name_endpoint(b.endpoint_id, ep.name)
+                transport.open_input(b.endpoint_id, self.monitor.on_receive)
+            st.open = True
+        except PortBusyError as e:
+            st.busy = True
+            st.error = str(e)
+        except TransportError as e:
+            st.error = str(e)
+
+    def check_endpoints(self) -> dict:
+        """One hot-plug pass: compare the transport's enumeration with the bound endpoints.
+
+        Lost or newly ambiguous endpoints are closed and marked; if the sender was armed it is
+        disarmed. Returned endpoints are re-opened (rebound) and the session stays disarmed. The
+        simulated world and pedal states are untouched (unlike ``refresh``, which rebuilds them)."""
+        with self._lock:
+            self.check_count += 1
+            self.last_check_at = utcnow_iso()
+            if not self.connected_rig_id:
+                return {"lost": [], "returned": [], "ambiguous": []}
+            transport = self.transport()
+            try:
+                present = {e.id: e for e in transport.enumerate()}
+            except TransportError as e:
+                self._last_change.append(f"enumeration failed: {e}")
+                return {"lost": [], "returned": [], "ambiguous": [], "error": str(e)}
+            bindings = getattr(self, "_bindings_cache", None) or self.bindings_repo.get(self.connected_rig_id)
+            by_id: dict[str, EndpointBinding] = {}
+            for b in bindings.bindings:
+                by_id.setdefault(b.endpoint_id, b)
+            lost: list[str] = []
+            returned: list[str] = []
+            ambiguous: list[str] = []
+            for eid, st in self._endpoint_states.items():
+                b = by_id.get(eid)
+                if b is None:
+                    continue
+                ep = present.get(eid)
+                if ep is None:
+                    if not st.missing:
+                        lost.append(eid)
+                        try:
+                            transport.close(eid)
+                        except TransportError:
+                            pass
+                        st.missing = True
+                        st.open = False
+                    continue
+                count_changed = b.peer_count is not None and ep.peer_count != b.peer_count
+                if count_changed and not st.ambiguous:
+                    ambiguous.append(eid)
+                    self._open_binding(transport, present, b, st)  # closes and records the reason
+                    continue
+                if (
+                    st.missing
+                    or (st.ambiguous and not count_changed)
+                    or (not st.open and not st.busy and not st.released and not st.ambiguous and st.error is None)
+                ):
+                    self._open_binding(transport, present, b, st)
+                    if st.open:
+                        returned.append(eid)
+                elif st.busy or st.error:
+                    # Retry a port another program held: it may have been closed there meanwhile.
+                    self._open_binding(transport, present, b, st)
+            if (lost or ambiguous) and self.sender.armed:
+                what = ", ".join([*(f"lost {e}" for e in lost), *(f"ambiguous {e}" for e in ambiguous)])
+                self.sender.disarm(f"endpoint change: {what}")
+            if lost:
+                self._last_change.append(f"lost {', '.join(lost)} (disarmed)")
+            if ambiguous:
+                self._last_change.append(f"ambiguous {', '.join(ambiguous)} (held closed; re-save the binding)")
+            if returned:
+                self._last_change.append(f"rebound {', '.join(returned)} (still disarmed)")
+            return {"lost": lost, "returned": returned, "ambiguous": ambiguous}
+
+    def _ensure_watcher(self) -> None:
+        if self._watcher is not None and self._watcher.is_alive():
+            return
+        self._watch_stop.clear()
+
+        def run() -> None:
+            while not self._watch_stop.wait(self.watch_interval_s):
+                try:
+                    if self.connected_rig_id:
+                        self.check_endpoints()
+                except Exception as e:  # the watcher must survive anything a driver throws
+                    self._last_change.append(f"watcher: {e}")
+
+        self._watcher = threading.Thread(target=run, name="signal-loom-midi-watch", daemon=True)
+        self._watcher.start()
 
     def connect(self, rig_id: str) -> dict:
-        with self._lock:
+        with self.sender.hold_worker(), self._lock:
             if self.connected_rig_id and self.connected_rig_id != rig_id:
                 self.disconnect()
             self.sender.attach_transport(None)  # disarms + drops queue, always
@@ -305,11 +436,12 @@ class LiveService:
             self._apply_world(rig_id)
             self.connected_rig_id = rig_id
             self.sender.attach_transport(self.transport())
+            self._ensure_watcher()
             self._last_change.append(f"connected rig {rig_id} on {self.mode} (disarmed)")
             return self.status()
 
     def disconnect(self) -> dict:
-        with self._lock:
+        with self.sender.hold_worker(), self._lock:
             self.sender.disarm("disconnected")
             self.sender.attach_transport(None)
             try:
@@ -341,7 +473,7 @@ class LiveService:
 
     def release(self, endpoint_id: str) -> dict:
         """Give a port to another application on purpose (e.g. the Morningstar editor)."""
-        with self._lock:
+        with self.sender.hold_worker(), self._lock:
             self._released.add(endpoint_id)
             if self.sender.armed:
                 self.sender.disarm(f"released {endpoint_id}")
@@ -393,7 +525,18 @@ class LiveService:
             explanation=explanation,
             source_kind=source_kind,
             coalesce_key=f"{msg['target_instance_id']}:cc:{msg['number']}" if kind == "cc" else None,
+            needs_ack=self._needs_ack(t.label if t else msg["target_instance_id"], kind, cov),
         )
+
+    @staticmethod
+    def _needs_ack(label: str, kind: str, cov) -> list[str]:
+        """The specific things a user must confirm before the first send over this route."""
+        if cov is None or cov.status in ("unsupported", "unreachable"):
+            return []
+        items = [f"prerequisite: {p}" for p in cov.prerequisites]
+        if cov.status == "unverified":
+            items.append(f"unverified route to {label} for {kind.upper()}: {cov.reason}")
+        return items
 
     def resolve_scene(self, rig_id: str, scene_id: str) -> tuple[list[Resolved], dict]:
         rig, profiles, graph = self.graph(rig_id)
@@ -413,6 +556,9 @@ class LiveService:
             "scene_id": scene_id,
             "scene_name": plan["scene_name"],
             "messages": LiveSender.dry_run(resolved),
+            "confirmations_required": [
+                i for i in dict.fromkeys(x for r in resolved for x in r.needs_ack) if i not in self.sender.acknowledged
+            ],
             "manual_steps": plan["manual_steps"],
             "diagnostics": plan["diagnostics"],
             "sent": False,
@@ -423,9 +569,17 @@ class LiveService:
         if self.connected_rig_id != rig_id:
             raise LiveRefused("live.not_connected", "Connect this rig to a transport first (then arm).")
 
-    def audition(self, rig_id: str, scene_id: str, delay_ms: int | None, confirm_nondeterministic: bool) -> dict:
+    def audition(
+        self,
+        rig_id: str,
+        scene_id: str,
+        delay_ms: int | None,
+        confirm_nondeterministic: bool,
+        acknowledge: list[str] | None = None,
+    ) -> dict:
         with self._lock:
             self._require_connected(rig_id)
+            self.sender.acknowledge(acknowledge or [])
             resolved, plan = self.resolve_scene(rig_id, scene_id)
             delay = delay_ms if delay_ms is not None else self.bindings_repo.get(rig_id).send_delay_ms
             job, warnings = self.sender.audition(
@@ -449,9 +603,11 @@ class LiveService:
         coalesce: bool,
         label: str | None,
         deterministic: bool | None,
+        acknowledge: list[str] | None = None,
     ) -> dict:
         with self._lock:
             self._require_connected(rig_id)
+            self.sender.acknowledge(acknowledge or [])
             rig, profiles, graph = self.graph(rig_id)
             t = graph.targets.get(instance_id)
             if t is None:
@@ -578,6 +734,7 @@ class LiveService:
             return {"delivered": True, "hex": data.hex(" ").upper()}
 
     def close(self) -> None:
+        self._watch_stop.set()
         with self._lock:
             self.sender.close()
             for t in (self.virtual, self.rtmidi):

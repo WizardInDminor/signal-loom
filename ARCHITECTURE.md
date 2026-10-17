@@ -399,6 +399,38 @@ polls `/api/live/events` for the send log, observations and simulated state. The
 client that is not loopback, including through the Next.js proxy (the forwarded address is checked),
 so a browser on another machine can plan but cannot send.
 
+**In-flight semantics and control priority (review follow-up).** The worker dequeues a message,
+re-checks `armed` and hands the bytes to the transport inside one critical section. `disarm`,
+`stop`, `attach_transport` (connect/disconnect/mode switch) and `close` announce themselves first
+(`hold_worker`), so the worker yields to them between messages whatever the lock's fairness, then
+take the same lock: none of them can return while a send is in flight, and no send can begin after
+any of them has returned. The one message already handed to the driver completes and is logged as
+sent; everything behind it is cancelled; the log says that transmitted messages are not undone.
+`tests/test_live_race.py` forces this interleaving with a transport that blocks inside `send`, for
+disarm, stop, disconnect, close, and through the service for disconnect, endpoint release and a
+mode switch. `status()` exposes `in_flight`.
+
+**Hot-plug detection is automatic.** While a rig is connected the service runs a watcher thread
+(`check_endpoints`, every `SIGNAL_LOOM_LIVE_WATCH_S` seconds, default 1.0) that re-enumerates the
+transport, closes and marks endpoints that vanished (disarming if armed), holds a binding whose
+same-named port count changed, and re-opens endpoints that returned — without re-arming and
+without resetting the simulated world (unlike the manual Rescan, which rebuilds it). It does not
+depend on the Live tab, or any browser, being open.
+
+**Acknowledged routes.** Each resolved message carries `needs_ack`: the route's hardware
+prerequisites (Cross MIDI Thru, Omniport mode, a special cable, DC power) and, for an unverified
+route, the undocumented hop by name. The sender refuses an audition or a panel send — before
+anything is queued — until every item has been acknowledged in this connection session
+(`409 live.confirm_route` lists them; the request's `acknowledge` echoes them back). A dry run
+lists them as `confirmations_required`. Acknowledgements are forgotten on disconnect/reconnect.
+
+**Endpoint identity on the real transport.** `rtmidi` ids are `rtmidi:<dir>:<name>#<k>`, `k` the
+ordinal among same-named ports (Windows lists two identical devices under one name). A binding
+records `peer_count` when saved; when the enumerated count differs, the port is held closed as
+*ambiguous* (the position may be another device) and the session is disarmed until the user
+re-saves the binding. `tests/test_live_rtmidi.py` exercises the adapter against a fake of the
+python-rtmidi API (duplicates, busy, disappearance, input callbacks, the service on top of it).
+
 **Disarmed by construction.** `LiveSender` starts disarmed and disarms itself on `attach_transport`
 (connect, disconnect, mode switch), on a bindings change, when a bound endpoint disappears, on a
 transport error mid-audition, and on shutdown. Arming requires the exact phrase and is never

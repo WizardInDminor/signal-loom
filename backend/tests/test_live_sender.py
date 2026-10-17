@@ -322,3 +322,36 @@ def test_virtual_transport_enumerates_filters_by_channel_and_models_busy_and_unp
     t.open_input("virt:mc8:in", lambda eid, data: got.append(data))
     assert t.inject("virt:mc8:in", bytes([0xC0, 1])) is True
     assert got == [bytes([0xC0, 1])]
+
+
+def test_route_prerequisites_and_unverified_hops_are_acknowledged_before_anything_is_queued():
+    s = LiveSender()
+    t, _ = world()
+    s.attach_transport(t)
+    s.arm(ARM_PHRASE)
+    r1 = resolved("pc", 1, None)
+    r1.needs_ack = ["prerequisite: MC8: enable Cross MIDI Thru"]
+    r2 = resolved("cc", 15, 1, status="unverified")
+    r2.needs_ack = ["prerequisite: MC8: enable Cross MIDI Thru", "unverified route to Sunset for CC: not documented"]
+    with pytest.raises(LiveRefused) as e:
+        s.audition("x", [r1, r2], 0)
+    assert e.value.code == "live.confirm_route"
+    assert e.value.detail["items"] == [
+        "prerequisite: MC8: enable Cross MIDI Thru",
+        "unverified route to Sunset for CC: not documented",
+    ]
+    assert s.queue_length() == 0 and t.send_count == 0 and [x.kind for x in s.log()] == ["armed"]
+    # A partial acknowledgement is still refused, naming only what is missing.
+    s.acknowledge(["prerequisite: MC8: enable Cross MIDI Thru"])
+    with pytest.raises(LiveRefused) as e:
+        s.audition("x", [r1, r2], 0)
+    assert e.value.detail["items"] == ["unverified route to Sunset for CC: not documented"]
+    job, _ = s.audition("x", [r1], 0)  # r1 alone is fully acknowledged
+    wait(s, job.id)
+    s.acknowledge(["unverified route to Sunset for CC: not documented"])
+    job, warnings = s.audition("x", [r1, r2], 0)
+    wait(s, job.id)
+    assert t.send_count == 3 and len(warnings) == 1
+    # A new transport (reconnect) forgets the session's acknowledgements.
+    s.attach_transport(t)
+    assert s.acknowledged == set()
