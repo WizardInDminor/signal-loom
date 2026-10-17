@@ -202,9 +202,9 @@ The backend binds to localhost only, as today. Do not expose MIDI control to the
 6. A user can dial in a pedal from its panel and capture the result into a scene, which compiles and exports like any other scene.
 7. Incoming MIDI is visible and decoded; an MC8 switch press (simulated in tests) shows the active scene, or an honest "unrecognised" result.
 8. Project files remain portable: live bindings are never part of them.
-11. Every owned device can be controlled through one fixed set of connections: the coverage view shows each device reachable for PC/CC with no USB re-plugging, channel collisions on shared routes are reported, and message types a route cannot carry are disabled with the reason.
 9. Core live behaviours have automated coverage with the virtual transport.
 10. `docs/live-hardware-validation.md` exists and every hardware claim carries an evidence level.
+11. Every owned device can be controlled through one fixed set of connections: the coverage view shows each device reachable for PC/CC with no USB re-plugging, channel collisions on shared routes are reported, and message types a route cannot carry are disabled with the reason.
 
 ## 13. Expected deliverables
 
