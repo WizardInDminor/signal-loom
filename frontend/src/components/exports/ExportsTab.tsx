@@ -75,7 +75,11 @@ export function ExportsTab() {
           </div>
           <h3 className="font-semibold mt-2">Signal Loom project file</h3>
           <p className="text-neutral-600">Versioned JSON with the rig and every device profile it uses. Re-import it from the Rigs page.</p>
-          <div><Button variant="primary" disabled={exportsLocked} onClick={() => withSaved(async () => downloadText(`${safe}.signal-loom.json`, JSON.stringify(await api.rigs.exportProject(rig.id), null, 2), "application/json"))}>Export project (.signal-loom.json)</Button></div>
+          <div className="flex flex-wrap gap-2 items-center">
+            <Button variant="primary" disabled={exportsLocked} onClick={() => withSaved(async () => downloadText(`${safe}.signal-loom.json`, JSON.stringify(await api.rigs.exportProject(rig.id), null, 2), "application/json"))}>Export project (.signal-loom.json)</Button>
+            <Button disabled={exportsLocked} title="Also embeds the PDF manuals attached to or cited by the rig's device profiles (format 3). Manuals are your own files; share such a backup only where you may." onClick={() => withSaved(async () => downloadText(`${safe}.with-documents.signal-loom.json`, JSON.stringify(await api.rigs.exportProject(rig.id, false, true), null, 2), "application/json"))}>Export with manuals (PDFs embedded)</Button>
+          </div>
+          <p className="text-neutral-500">The plain project never contains pictures or manuals, only references. Importing it on another computer keeps the device profiles, their MIDI commands and every scene; documents it cannot find are listed as “not on this computer”.</p>
         </div>
       </Panel>
       <Panel title="Native Morningstar formats — evidence levels">

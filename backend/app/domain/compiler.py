@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from ..models.common import DeviceCategory, Diagnostic, Severity
+from ..models.common import DeviceCategory, Diagnostic, Evidence, Severity
 from ..models.profile import DeviceProfile
 from ..models.rig import DeviceInstance, Mc8Message, Rig, Scene
 from ..morningstar import specs
@@ -185,7 +185,9 @@ def compile_scene(rig: Rig, scene: Scene, profiles: dict[str, DeviceProfile], ct
             continue
         check_reach(inst)
         assert prof is not None
+        _check_cc_conflicts(scene, inst, prof, st, plan)
         if st.program is not None:
+            _check_applied_command(scene, inst, prof, st.program.command, "PC", plan)
             _compile_program(scene, inst, prof, ch, st.program, plan)
         if st.enabled is not None:
             _compile_bypass(scene, inst, prof, ch, st.enabled, plan)
@@ -203,6 +205,17 @@ def compile_scene(rig: Rig, scene: Scene, profiles: dict[str, DeviceProfile], ct
                         related_ids=[inst.id],
                     )
                 )
+            deterministic = True
+            if cv.command is not None:
+                _check_applied_command(scene, inst, prof, cv.command, f"CC {cv.cc}", plan)
+                deterministic = cv.command.deterministic is not False
+                live = prof.midi.command(cv.command.command_id)
+                if live is not None and live.deterministic is False:
+                    deterministic = False
+                meaning = f" ({cv.command.value_label})" if cv.command.value_label else ""
+                explanation = f"Scene '{scene.name}' applies '{cv.command.name}' on {inst.label}: CC {cv.cc} = {cv.value}{meaning}."
+            else:
+                explanation = f"Scene '{scene.name}' sets {name} to {cv.value} on {inst.label}."
             plan.messages.append(
                 CompiledMessage(
                     type="cc",
@@ -213,13 +226,116 @@ def compile_scene(rig: Rig, scene: Scene, profiles: dict[str, DeviceProfile], ct
                     target_label=inst.label,
                     source_kind="device_cc",
                     scene_id=scene.id,
-                    explanation=f"Scene '{scene.name}' sets {name} to {cv.value} on {inst.label}.",
+                    explanation=explanation,
+                    deterministic=deterministic,
                 )
             )
         if st.manual_note:
             plan.manual_steps.append(f"{inst.label}: {st.manual_note}")
     plan.manual_steps.extend(scene.manual_steps)
     return plan
+
+
+def _check_applied_command(
+    scene: Scene, inst: DeviceInstance, prof: DeviceProfile, applied, what: str, plan: ScenePlan
+) -> None:
+    """Reproducibility guard. The scene's numbers are sent as saved; this only tells the user when
+    the library command they came from no longer says the same thing, or is gone, or is a toggle."""
+    if applied is None:
+        return
+    d = plan.diagnostics
+    live = prof.midi.command(applied.command_id)
+    if live is None:
+        d.append(
+            Diagnostic(
+                code="midi.command_removed",
+                severity=Severity.WARNING,
+                message=f"'{applied.name}' ({what}) on '{inst.label}' was removed from the {prof.display_name} command library; the scene still sends the values that were applied. Review or replace it.",
+                subject_type="scene",
+                subject_id=scene.id,
+                related_ids=[inst.id],
+            )
+        )
+        return
+    if live.fingerprint() != applied.definition:
+        d.append(
+            Diagnostic(
+                code="midi.command_changed",
+                severity=Severity.WARNING,
+                message=f"The definition of '{live.name}' on {prof.display_name} changed since it was applied in scene '{scene.name}' ({applied.definition} → {live.fingerprint()}); the scene still sends {what} as saved until you reapply the command.",
+                subject_type="scene",
+                subject_id=scene.id,
+                related_ids=[inst.id],
+            )
+        )
+    if live.deterministic is False or applied.deterministic is False:
+        d.append(
+            Diagnostic(
+                code="midi.command_toggle",
+                severity=Severity.WARNING,
+                message=f"'{live.name}' on '{inst.label}' is a toggle (the result depends on the device's prior state); scene recall cannot be guaranteed from an unknown starting state.",
+                subject_type="scene",
+                subject_id=scene.id,
+                related_ids=[inst.id],
+            )
+        )
+    if live.evidence == Evidence.UNKNOWN and not live.verified_on_hardware:
+        d.append(
+            Diagnostic(
+                code="midi.command_unverified",
+                severity=Severity.INFO,
+                message=f"'{live.name}' on '{inst.label}' has no stated source (evidence unknown); the device's response is not established.",
+                subject_type="scene",
+                subject_id=scene.id,
+                related_ids=[inst.id],
+            )
+        )
+
+
+def _check_cc_conflicts(scene: Scene, inst: DeviceInstance, prof: DeviceProfile, st, plan: ScenePlan) -> None:
+    """Two instructions for one CC on one device in one scene contradict each other unless they agree.
+    Bypass-by-CC and Bank Select CCs take part, so "engaged" plus "CC 10 = 0" is caught too."""
+    wants: dict[int, list[tuple[int, str]]] = {}
+    bp = prof.midi.bypass
+    if st.enabled is not None and bp.method == "cc" and bp.cc is not None:
+        on_v = bp.on_value if bp.on_value is not None else 127
+        off_v = bp.off_value if bp.off_value is not None else 0
+        wants.setdefault(bp.cc, []).append((on_v if st.enabled else off_v, "engaged" if st.enabled else "bypassed"))
+    if st.program is not None:
+        if st.program.bank_msb is not None:
+            wants.setdefault(CC_BANK_MSB, []).append((st.program.bank_msb, "Bank Select MSB"))
+        if st.program.bank_lsb is not None:
+            wants.setdefault(CC_BANK_LSB, []).append((st.program.bank_lsb, "Bank Select LSB"))
+    for cv in st.cc_values:
+        label = cv.command.name if cv.command else (cv.label or f"CC {cv.cc}")
+        wants.setdefault(cv.cc, []).append((cv.value, label))
+    for cc, entries in sorted(wants.items()):
+        if len(entries) < 2:
+            continue
+        values = {v for v, _ in entries}
+        described = " and ".join(f"{v} ({who})" for v, who in entries)
+        if len(values) > 1:
+            plan.diagnostics.append(
+                Diagnostic(
+                    code="scene.cc_conflict",
+                    severity=Severity.ERROR,
+                    message=f"CC {cc} on '{inst.label}' is set to {described} in scene '{scene.name}'; the device would receive contradictory instructions. Keep one.",
+                    subject_type="scene",
+                    subject_id=scene.id,
+                    related_ids=[inst.id],
+                )
+            )
+        else:
+            plan.diagnostics.append(
+                Diagnostic(
+                    code="scene.cc_repeated",
+                    severity=Severity.INFO,
+                    message=f"CC {cc} on '{inst.label}' is set twice to the same value ({described}) in scene '{scene.name}'.",
+                    subject_type="scene",
+                    subject_id=scene.id,
+                    related_ids=[inst.id],
+                )
+            )
 
 
 def _compile_ml10x(
@@ -430,6 +546,12 @@ def _compile_program(
         )
     shown = program.pc + 1 if pcs.display_numbering == "one_based" else program.pc
     numbering = f" (shown as preset {shown} on the device)" if pcs.display_numbering == "one_based" else ""
+    if program.command is not None:
+        explanation = (
+            f"Scene '{scene.name}' applies '{program.command.name}' on {inst.label}: PC {program.pc}{numbering}."
+        )
+    else:
+        explanation = f"Scene '{scene.name}' recalls program {program.pc}{numbering} on {inst.label}."
     plan.messages.append(
         CompiledMessage(
             type="pc",
@@ -440,7 +562,7 @@ def _compile_program(
             target_label=inst.label,
             source_kind="device_program",
             scene_id=scene.id,
-            explanation=f"Scene '{scene.name}' recalls program {program.pc}{numbering} on {inst.label}.",
+            explanation=explanation,
         )
     )
 

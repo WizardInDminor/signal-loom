@@ -218,6 +218,42 @@ documented minimums add up past its rating, a pedal on the 24 V expansion link. 
 not documented, which is never an approval. All currents are ratings and documented minimums, not
 measured draw, and passing every check does not make an installation safe.
 
+## Manuals and MIDI commands by name (Session 3)
+
+**Documents.** On a device profile (Device library), *Upload PDF* attaches your own manual,
+quick-start sheet or MIDI implementation chart. The file is checked by content (PDF header and
+trailer, and PDFium must open it; a photograph renamed `.pdf` is refused), stored under an opaque
+id in `backend/data/documents/` (or `$SIGNAL_LOOM_DOCS`), and the profile keeps only a title and a
+reference. *View* opens the document at `/documents/<id>?page=N`: every page is a picture rendered
+on your computer, so nothing inside the PDF can run in the app; *Find in document* searches the
+PDF's own text layer (scanned manuals have none and say so). The original is only ever a download.
+Rename and reclassify freely; *Replace* keeps the id so page citations stay valid (refused while
+another profile shares the file, unless you confirm); detaching never deletes the file unless you
+say so and nothing else uses it; *Documents on this computer* lists what is left. Signal Loom never
+downloads a manual for you, and never bundles one in a project unless you choose *Export with
+manuals*.
+
+**MIDI commands.** Below the documented MIDI map, *MIDI commands* is your own library for the
+profile: a name, a category, one CC (fixed value, documented value→meaning choices, or "any value
+0–127") or one PC (wire number and optional bank; the device's displayed number follows the
+profile's numbering), the intent (engage/bypass/set/toggle/recall), whether the result is
+deterministic, where the numbers come from, an optional manual citation with page, and a separate
+"I tried this on the device" claim. ★ marks favorites. *From documented map* turns the profile's
+bypass CC, CC map and program-change support into starter commands with the map's own evidence.
+A profile imported without MIDI data can hold commands, but scenes compile them only after you
+*Declare MIDI input* (recorded as your statement, never as documented).
+
+**In a scene.** Each MIDI pedal's row has *+ Command*: favorites first, search, the exact bytes
+with the placed unit's channel ("CC 10 = 127 on channel 3 → Sunset"), the evidence, a link to the
+cited manual page, a value choice where documented and a precise number for everything else, and
+warnings for toggles, unknown sources, undocumented CCs and contradictions with what the scene
+already says. *Add to scene* writes an ordinary CC value or program selection, compiled by the same
+compiler and MC8 plan as before; typing numbers by hand still works. Under the value the row
+remembers which command it came from. **Editing or deleting a command later never changes a saved
+scene's bytes**: the row shows *definition changed — review* (or *command removed*), the compiled
+plan carries a warning, and *reapply* is the deliberate act that updates it. Two different values
+for one CC on one pedal in one scene are an error, never a silent choice.
+
 ## A short tour: the three-scene demo
 
 1. **Rigs** — open *Demo rig: three-scene song* (or create a new rig, optionally "from the demo").
@@ -249,6 +285,9 @@ backend/   FastAPI app: models, SQLite repo + migrations, domain rules, compiler
 frontend/  Next.js app: rig library, board, wiring, scenes, controllers, exports, device library
 docs/      research notes (raw agent reports + consolidated research.md)
 ```
+
+Local data that is never committed: `backend/data/` holds the SQLite database, the managed
+picture directory (`assets/`) and the managed document directory (`documents/`).
 
 ## Licensing of data
 

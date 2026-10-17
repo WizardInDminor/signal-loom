@@ -56,6 +56,31 @@ export interface SupplyOption { voltage_v: number; current_ma_max: number | null
 
 export interface CcDef { cc: number; name: string; value_semantics?: string | null; evidence: Evidence }
 
+/** A user-supplied PDF attached to a profile, by reference only (bytes live in the local document store). */
+export type DocumentKind = "manual" | "quick_start" | "midi_chart" | "other";
+export const DOCUMENT_KINDS: { value: DocumentKind; label: string }[] = [
+  { value: "manual", label: "Manual" }, { value: "quick_start", label: "Quick start" }, { value: "midi_chart", label: "MIDI chart" }, { value: "other", label: "Other" },
+];
+export interface DocumentRef { document_id: string; title: string; kind: DocumentKind; note?: string | null }
+export interface DocumentRecord { id: string; kind: string; content_type: string; byte_size: number; sha256: string; page_count: number | null; original_name: string | null; created_at: string; updated_at: string; url: string; download_url: string }
+export interface DocumentFile { document_id: string; present: boolean; page_count?: number | null; byte_size?: number | null }
+
+/** One named MIDI command of a device (see backend MidiCommand). The channel is never part of it. */
+export type CommandKind = "cc" | "pc";
+export type ValueMode = "fixed" | "choice" | "any";
+export type CommandIntent = "engage" | "bypass" | "set" | "toggle" | "recall" | "other";
+export const COMMAND_INTENTS: CommandIntent[] = ["engage", "bypass", "set", "toggle", "recall", "other"];
+export interface ValueChoice { value: number; label: string }
+export interface CommandCitation { document_id: string; page?: number | null; note?: string | null }
+export interface MidiCommand {
+  id: string; name: string; category?: string | null; tags: string[]; description?: string | null; favorite: boolean;
+  kind: CommandKind;
+  cc?: number | null; value_mode: ValueMode; value?: number | null; choices: ValueChoice[];
+  pc?: number | null; bank_msb?: number | null; bank_lsb?: number | null;
+  intent?: CommandIntent | null; deterministic?: boolean | null;
+  evidence: Evidence; citation?: CommandCitation | null; verified_on_hardware: boolean; note?: string | null;
+}
+
 /** Normalized selection (0–1) in the stored, orientation-corrected photograph: the enclosure. */
 export interface ImageCrop { x: number; y: number; w: number; h: number }
 /** A user photograph fitted to a device's physical footprint (which stays the source of truth for size). */
@@ -93,8 +118,12 @@ export interface DeviceProfile {
     program_change: { supported: boolean | null; min: number | null; max: number | null; display_numbering?: string | null; bank_select_supported?: boolean | null; note?: string | null; evidence: Evidence };
     cc_map: CcDef[];
     bypass: { method?: string | null; cc?: number | null; on_value?: number | null; off_value?: number | null; deterministic?: boolean | null; evidence: Evidence; note?: string | null };
+    /** The user's named command library; absent on profiles saved before it existed. */
+    commands?: MidiCommand[];
     source_url?: string | null; evidence: Evidence; note?: string | null;
   };
+  /** Attached PDF documents by reference; absent on older profiles. */
+  documents?: DocumentRef[];
   capabilities: { bypass_method?: string | null; patch_selection?: string | null; params_via_midi?: boolean | null; is_stereo?: boolean | null; notes?: string | null };
   declared_unknowns: string[];
   tags: string[];
@@ -103,6 +132,8 @@ export interface DeviceProfile {
   // only on API responses
   unknown_attributes?: string[];
   source?: string;
+  /** What this computer knows about each referenced document (attached or cited). */
+  document_files?: DocumentFile[];
 }
 
 /** Where a device is mounted: on the board, under it (same x/y, seen through the board from above, not mirrored), or off the board. */
@@ -143,8 +174,10 @@ export interface Connection {
   id: string; kind: SignalKind; source: PortRef; target: PortRef; label?: string | null;
   cable_length_cm?: number | null; connector_style?: string | null; intentional: boolean; notes?: string | null;
 }
-export interface ProgramSelection { pc: number; bank_msb?: number | null; bank_lsb?: number | null }
-export interface CcValue { cc: number; value: number; label?: string | null }
+/** Snapshot of the library command a scene value was applied from. The numeric fields beside it stay authoritative. */
+export interface AppliedCommand { command_id: string; name: string; definition: string; value_label?: string | null; deterministic?: boolean | null; applied_at?: string | null }
+export interface ProgramSelection { pc: number; bank_msb?: number | null; bank_lsb?: number | null; command?: AppliedCommand | null }
+export interface CcValue { cc: number; value: number; label?: string | null; command?: AppliedCommand | null }
 export interface DeviceSceneState { instance_id: string; program: ProgramSelection | null; enabled: boolean | null; cc_values: CcValue[]; manual_note?: string | null }
 export interface Scene {
   id: string; name: string; song?: string | null; section?: string | null; order: number; color?: string | null;

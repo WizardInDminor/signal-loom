@@ -8,11 +8,19 @@ from pydantic import BaseModel, Field
 
 from ..assets import ImageAssetError
 from ..catalog.demo import demo_rig
+from ..documents import DocumentError
 from ..domain.geometry import rotated_size
-from ..exports.project import ProjectImportError, bundle_assets, export_project, parse_project
+from ..exports.project import (
+    ProjectImportError,
+    bundle_assets,
+    bundle_documents,
+    export_project,
+    parse_project,
+    project_dict,
+)
 from ..images import image_asset_ids, resolve_image
 from ..models.common import new_id
-from ..models.rig import PreviewDevice, ProjectFile, Rig, RigPreview, RigSummary, utcnow_iso
+from ..models.rig import PreviewDevice, Rig, RigPreview, RigSummary, utcnow_iso
 from .deps import asset_store, assets_for, load_rig, profile_repo, profiles_for, rig_repo
 
 router = APIRouter(prefix="/api/rigs", tags=["rigs"])
@@ -155,17 +163,23 @@ def duplicate_rig(rig_id: str, request: Request):
     return rig_repo(request).save(copy_rig)
 
 
-@router.get("/{rig_id}/export", response_model=ProjectFile)
-def export_rig(rig_id: str, request: Request, include_images: bool = False):
+@router.get("/{rig_id}/export")
+def export_rig(rig_id: str, request: Request, include_images: bool = False, include_documents: bool = False):
     """Project file. Plain by default (format_version 1, no binary data). With ``include_images=1``
-    the user explicitly opts into bundling their device photographs (format_version 2)."""
+    the user explicitly opts into bundling their device photographs (format_version 2); with
+    ``include_documents=1`` into bundling the PDF manuals their profiles attach or cite
+    (format_version 3). Manuals are the user's own files: they are never included implicitly."""
     rig = load_rig(request, rig_id)
     profiles = profiles_for(request, rig)
     project = export_project(rig, profiles)
     if include_images:
         store = asset_store(request)
         bundle_assets(project, store.get_many(image_asset_ids(rig, profiles)), store.read_bytes)
-    return project
+    if include_documents:
+        docs = request.app.state.documents
+        ids = [d for p in profiles.values() for d in p.document_ids()]
+        bundle_documents(project, docs.get_many(ids), docs.read_bytes)
+    return project_dict(project)
 
 
 class ImportResult(BaseModel):
@@ -208,6 +222,30 @@ async def import_rig(request: Request, keep_id: bool = False, name: str | None =
     for inst in project.rig.instances:
         if inst.image and store.get(inst.image.asset_id) is None:
             warnings.append(f"device {inst.label} refers to image {inst.image.asset_id}, which is not on this computer")
+    # Bundled manuals (opt-in exports) go through the same PDF validation as an upload. Missing
+    # ones are reported, never invented: the profile keeps its reference and the UI says "not here".
+    docs = request.app.state.documents
+    for dd in project.documents:
+        did = dd.get("id")
+        if not isinstance(did, str) or docs.get(did) is not None:
+            continue
+        try:
+            docs.ingest_pdf(
+                base64.b64decode(dd.get("data_base64", ""), validate=True), dd.get("original_name"), document_id=did
+            )
+        except (DocumentError, ValueError) as e:
+            warnings.append(f"bundled document {did} was not restored: {e}")
+    for p in project.profiles:
+        try:
+            prof_doc_ids = DeviceProfile.model_validate(p).document_ids()
+        except Exception:  # validated again below; a bad profile fails there with a clear message
+            prof_doc_ids = []
+        for did in prof_doc_ids:
+            if docs.get(did) is None:
+                title = next((d.get("title") for d in p.get("documents", []) if d.get("document_id") == did), None)
+                warnings.append(
+                    f"profile {p.get('id')} refers to document {did}{f' ({title})' if title else ''}, which is not on this computer; upload it again to view it"
+                )
 
     for p in project.profiles:
         prof = DeviceProfile.model_validate(p)

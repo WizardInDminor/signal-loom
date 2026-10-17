@@ -194,6 +194,60 @@ alone. TRS semantics are untouched: a stereo
 TRS jack is one port with `audio_channel = stereo_trs`; an L/R pair is two ports sharing a
 `pair_group`; per-conductor ML10X ports keep their `pair_group`/`loop` facts.
 
+## Device manuals and the MIDI command library (Session 3f)
+
+**Documents** (`app/documents.py`, table `documents`, migration 0004, files in the managed
+document directory next to the database; `SIGNAL_LOOM_DOCS` overrides it). A PDF is a different
+kind of thing from a photograph, so it does not share the image pipeline: the bytes are kept
+byte-for-byte (a manual must stay citable by page) and only *validated* and *rendered*. Validation
+is the `%PDF-` header, a `%%EOF` trailer in the last 8 KB, a 40 MB bound, and PDFium
+(`pypdfium2`, a bundled local binary) opening the file and counting at most 2000 pages; the
+client's content type is ignored. Ids are server-generated `doc_<12 hex>` and matched against a
+strict pattern before any lookup, so no caller can name a path. Serving is passive by design:
+`GET /api/documents/{id}/pages/{n}` rasterizes one page to PNG (cached under
+`documents/cache/<id>/`), which is what the in-app viewer shows, so a PDF's scripts, links and
+forms never execute in the browser; the original is only offered as `Content-Disposition:
+attachment` with `nosniff`, a `default-src 'none'; sandbox` CSP and `no-store`. Text search is
+local PDFium text extraction, cached per document; scanned PDFs report "no text layer". A profile
+carries `documents: [DocumentRef{document_id, title, kind, note}]` and a command may cite
+`{document_id, page}`; both are found by a JSON `instr` search, so `referenced_by` sees attachments
+and citations alike. Replace keeps the id (citations survive) and is refused while another profile
+shares the file; detach never deletes bytes unless asked and unreferenced; `DELETE
+/api/documents/{id}` is refused while referenced. The API's `document_files` echo tells the UI
+whether each referenced file is present on this computer, so an imported profile degrades to
+"not on this computer" instead of a broken link.
+
+**Commands** (`MidiCommand` in `models/profile.py`, `app/domain/commands.py`). A command is one CC
+(`value_mode` fixed / choice / any) or one PC (wire number, optional bank MSB/LSB), with intent,
+a tri-state `deterministic`, an evidence level, an optional citation and a separate
+`verified_on_hardware` claim. It lives in `MidiSpec.commands` beside the documented
+`cc_map`/`program_change`/`bypass`, which remain the *reference* the compiler checks numbers
+against (`midi.cc_undocumented`, `midi.pc_out_of_range`, bank support) exactly as for hand-typed
+values; `commands_from_midi_spec` derives starter commands from those facts copying their
+evidence, so the two never contradict by construction and nothing is invented for a profile that
+documents nothing. The MIDI channel is deliberately absent from a command: it is resolved from the
+placed instance (override, else profile default) at compile time.
+
+**Applied to scenes.** No new state shape: `CcValue` and `ProgramSelection` gained an optional
+`AppliedCommand{command_id, name, definition, value_label, deterministic, applied_at}`. The numeric
+fields beside it are still the compiler's only input; `definition` is `MidiCommand.fingerprint()`
+(the wire-relevant fields as a canonical string, identical in `frontend/src/lib/commands.ts`) taken
+at apply time. On every compile `_check_applied_command` compares it with the live command: equal →
+nothing; different → `midi.command_changed` (warning, names old and new); gone →
+`midi.command_removed`; toggle → `midi.command_toggle`; evidence unknown → `midi.command_unverified`.
+Bytes change only when the user reapplies. `_check_cc_conflicts` collects every instruction for
+one CC on one device in one scene (bypass-by-CC, Bank Select CCs, explicit values) and reports
+different values as `scene.cc_conflict` (error) and repeats as `scene.cc_repeated` (info); nothing
+is dropped or "corrected". The scene report names the command and the exact bytes and states that
+it is not a record of device behaviour.
+
+Project files: format 1 and 2 are unchanged and now carry `midi.commands`, `documents` references
+and applied snapshots as ordinary profile/rig JSON; `?include_documents=1` produces a format 3 file
+with the PDFs base64-bundled, restored on import through the same validation under the same ids.
+Format 1 and 2 files cannot carry `documents`. The plain export still writes `assets: []` as it
+always has, and omits the `documents` section entirely when empty, so older app versions keep
+reading plain files.
+
 ## Mounting surfaces and the underside (Session 3e, phase A)
 
 A placed device has a **mounting surface**: `top`, `underside` or `off_board`
@@ -286,7 +340,7 @@ device/cable/switch.
 
 SQLite with explicit SQL migrations (`backend/migrations/NNNN_name.sql`, applied once,
 tracked in `schema_migrations`). Tables: `device_profiles`, `rigs`, `device_instances`,
-`connections`, `scenes`. Core columns are relational; nested detail is the validated JSON of
+`connections`, `scenes`, `assets` (pictures) and `documents` (PDF manuals). Core columns are relational; nested detail is the validated JSON of
 the Pydantic model. Builtin profiles are re-seeded on start only if still marked `builtin`;
 editing one in the UI turns it into a user-owned copy.
 

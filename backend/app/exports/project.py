@@ -9,7 +9,14 @@ from typing import Any
 from pydantic import ValidationError
 
 from ..models.profile import DeviceProfile
-from ..models.rig import PROJECT_FORMAT, PROJECT_FORMAT_VERSION, PROJECT_FORMAT_VERSION_WITH_ASSETS, ProjectFile, Rig
+from ..models.rig import (
+    PROJECT_FORMAT,
+    PROJECT_FORMAT_VERSION,
+    PROJECT_FORMAT_VERSION_WITH_ASSETS,
+    PROJECT_FORMAT_VERSION_WITH_DOCUMENTS,
+    ProjectFile,
+    Rig,
+)
 
 MAX_BYTES = 50 * 1024 * 1024
 
@@ -42,8 +49,42 @@ def bundle_assets(project: ProjectFile, assets: dict, read_bytes) -> ProjectFile
         )
     project.assets = bundled
     if bundled:
-        project.format_version = PROJECT_FORMAT_VERSION_WITH_ASSETS
+        project.format_version = max(project.format_version, PROJECT_FORMAT_VERSION_WITH_ASSETS)
     return project
+
+
+def bundle_documents(project: ProjectFile, documents: dict, read_bytes) -> ProjectFile:
+    """Opt-in: embed the PDF documents the rig's profiles attach or cite (base64) and mark the file
+    as format_version 3. Documents whose file is not on this computer are skipped (their metadata
+    references travel with the profiles regardless)."""
+    bundled = []
+    for rec in sorted(documents.values(), key=lambda r: r.id):
+        data = read_bytes(rec)
+        if data is None:
+            continue
+        bundled.append(
+            {
+                "id": rec.id,
+                "content_type": rec.content_type,
+                "original_name": rec.original_name,
+                "page_count": rec.page_count,
+                "data_base64": base64.b64encode(data).decode("ascii"),
+            }
+        )
+    project.documents = bundled
+    if bundled:
+        project.format_version = PROJECT_FORMAT_VERSION_WITH_DOCUMENTS
+    return project
+
+
+def project_dict(project: ProjectFile) -> dict:
+    """The JSON a project file is written as. ``assets`` is always present (as every export since
+    format 1 has written it); the newer ``documents`` section is omitted when empty, so a plain
+    export stays readable by versions of the app that predate it."""
+    d = project.model_dump(mode="json")
+    if not d.get("documents"):
+        d.pop("documents", None)
+    return d
 
 
 def normalize_rig(rig: Rig) -> dict:
@@ -73,12 +114,14 @@ def parse_project(raw: str | bytes) -> tuple[ProjectFile, list[str]]:
     version = data.get("format_version")
     if not isinstance(version, int) or version < 1:
         raise ProjectImportError("missing format_version")
-    if version > PROJECT_FORMAT_VERSION_WITH_ASSETS:
+    if version > PROJECT_FORMAT_VERSION_WITH_DOCUMENTS:
         raise ProjectImportError(
-            f"project format_version {version} is newer than this app supports ({PROJECT_FORMAT_VERSION_WITH_ASSETS})"
+            f"project format_version {version} is newer than this app supports ({PROJECT_FORMAT_VERSION_WITH_DOCUMENTS})"
         )
     if version == PROJECT_FORMAT_VERSION and data.get("assets"):
         raise ProjectImportError("format_version 1 files cannot carry bundled assets")
+    if version < PROJECT_FORMAT_VERSION_WITH_DOCUMENTS and data.get("documents"):
+        raise ProjectImportError(f"format_version {version} files cannot carry bundled documents")
     warnings: list[str] = []
     try:
         project = ProjectFile.model_validate(data)

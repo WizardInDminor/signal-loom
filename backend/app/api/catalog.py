@@ -2,26 +2,95 @@ from __future__ import annotations
 
 import json
 from enum import Enum
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from fastapi import APIRouter, Form, HTTPException, Request, UploadFile
+from pydantic import BaseModel, Field, model_validator
 
 from ..catalog.boards import builtin_boards
 from ..catalog.pedalplayground import parse_pedalplayground
+from ..documents import MAX_DOCUMENT_BYTES, DocumentError, DocumentStore
+from ..domain.commands import commands_from_midi_spec
 from ..models.board import PedalboardSpec
-from ..models.profile import DeviceProfile, PortDef
+from ..models.profile import DeviceProfile, DocumentKind, DocumentRef, MidiCommand, PortDef
+from ..repo import RigRepository
 from .deps import profile_repo
 
 router = APIRouter(prefix="/api/catalog", tags=["catalog"])
 
 
+class DocumentFile(BaseModel):
+    """What is known on this computer about a document a profile refers to."""
+
+    document_id: str
+    present: bool  # metadata row and file both exist here
+    page_count: int | None = None
+    byte_size: int | None = None
+
+
 class ProfileOut(DeviceProfile):
     unknown_attributes: list[str] = []
     source: str = "builtin"
+    document_files: list[DocumentFile] = []
 
 
-def _out(p: DeviceProfile, source: str) -> ProfileOut:
-    return ProfileOut(**p.model_dump(), unknown_attributes=p.unknowns(), source=source)
+class ProfileIn(DeviceProfile):
+    """A profile exactly as the API returned it may be sent back: the read-only echo fields
+    (``unknown_attributes``, ``source``, ``document_files``) are accepted and ignored. Anything else
+    unknown is still refused, so typos keep surfacing."""
+
+    unknown_attributes: list[str] | None = None
+    source: str | None = None
+    document_files: list[DocumentFile] | None = None
+
+    def to_profile(self) -> DeviceProfile:
+        return DeviceProfile.model_validate(self.model_dump(exclude={"unknown_attributes", "source", "document_files"}))
+
+
+def _document_files(store: DocumentStore | None, p: DeviceProfile) -> list[DocumentFile]:
+    out: list[DocumentFile] = []
+    for did in p.document_ids():
+        rec = store.get(did) if store else None
+        present = bool(rec and store and store.has_file(rec))
+        out.append(
+            DocumentFile(
+                document_id=did,
+                present=present,
+                page_count=rec.page_count if rec else None,
+                byte_size=rec.byte_size if rec else None,
+            )
+        )
+    return out
+
+
+def _out(p: DeviceProfile, source: str, request: Request | None = None) -> ProfileOut:
+    store = getattr(request.app.state, "documents", None) if request else None
+    return ProfileOut(
+        **p.model_dump(), unknown_attributes=p.unknowns(), source=source, document_files=_document_files(store, p)
+    )
+
+
+def _document_store(request: Request) -> DocumentStore:
+    return request.app.state.documents
+
+
+def _load_editable(request: Request, profile_id: str) -> tuple[DeviceProfile, str]:
+    repo = profile_repo(request)
+    src = repo.source_of(profile_id)
+    profile = repo.get(profile_id)
+    if src is None or profile is None:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    return profile, src
+
+
+def _save_user_owned(request: Request, profile: DeviceProfile, src: str) -> ProfileOut:
+    """Persist a profile edit. Editing a builtin turns it into the user's own copy (same id)."""
+    if src == "builtin":
+        profile.builtin = False
+        profile.provenance.source = "user"
+        src = "custom"
+    profile_repo(request).save(profile, source=src)
+    return _out(profile, src, request)
 
 
 @router.get("/boards", response_model=list[PedalboardSpec])
@@ -33,7 +102,7 @@ def list_boards():
 @router.get("/devices", response_model=list[ProfileOut])
 def list_devices(request: Request, q: str | None = None, category: str | None = None):
     repo = profile_repo(request)
-    return [_out(p, repo.source_of(p.id) or "custom") for p in repo.list(query=q, category=category)]
+    return [_out(p, repo.source_of(p.id) or "custom", request) for p in repo.list(query=q, category=category)]
 
 
 @router.get("/devices/{profile_id}", response_model=ProfileOut)
@@ -42,7 +111,7 @@ def get_device(profile_id: str, request: Request):
     p = repo.get(profile_id)
     if p is None:
         raise HTTPException(status_code=404, detail="Profile not found")
-    return _out(p, repo.source_of(p.id) or "custom")
+    return _out(p, repo.source_of(p.id) or "custom", request)
 
 
 def _check_image(request: Request, profile: DeviceProfile) -> None:
@@ -51,7 +120,8 @@ def _check_image(request: Request, profile: DeviceProfile) -> None:
 
 
 @router.post("/devices", response_model=ProfileOut, status_code=201)
-def create_device(profile: DeviceProfile, request: Request):
+def create_device(body: ProfileIn, request: Request):
+    profile = body.to_profile()
     repo = profile_repo(request)
     if repo.get(profile.id) is not None:
         raise HTTPException(status_code=409, detail=f"Profile id '{profile.id}' already exists")
@@ -59,11 +129,12 @@ def create_device(profile: DeviceProfile, request: Request):
     profile.reconcile_declared_unknowns()
     profile.builtin = False
     repo.save(profile, source="custom")
-    return _out(profile, "custom")
+    return _out(profile, "custom", request)
 
 
 @router.put("/devices/{profile_id}", response_model=ProfileOut)
-def update_device(profile_id: str, profile: DeviceProfile, request: Request):
+def update_device(profile_id: str, body: ProfileIn, request: Request):
+    profile = body.to_profile()
     repo = profile_repo(request)
     src = repo.source_of(profile_id)
     if src is None:
@@ -78,7 +149,7 @@ def update_device(profile_id: str, profile: DeviceProfile, request: Request):
         profile.provenance.source = "user"
         src = "custom"
     repo.save(profile, source=src)
-    return _out(profile, src)
+    return _out(profile, src, request)
 
 
 @router.get("/devices/{profile_id}/port-usage")
@@ -185,7 +256,7 @@ def update_ports(profile_id: str, body: PortsBody, request: Request):
         profile.provenance.source = "user"
         src = "custom"
     repo.save(profile, source=src)
-    return _out(profile, src)
+    return _out(profile, src, request)
 
 
 @router.delete("/devices/{profile_id}", status_code=204)
@@ -227,3 +298,212 @@ async def import_pedalplayground(request: Request):
         repo.save(p, source="imported")
         imported += 1
     return ImportReport(imported=imported, skipped_existing=skipped, problems=problems[:50])
+
+
+# ----------------------------------------------------------------------------- documents (manuals)
+
+
+@router.post("/devices/{profile_id}/documents", response_model=ProfileOut, status_code=201)
+async def attach_document(
+    profile_id: str,
+    request: Request,
+    file: UploadFile,
+    title: Annotated[str | None, Form()] = None,
+    kind: Annotated[DocumentKind, Form()] = "manual",
+    note: Annotated[str | None, Form()] = None,
+):
+    """Upload a PDF and attach it to the profile in one step. The file is validated as a PDF
+    (header, trailer, PDFium can open it), stored under an opaque id in the document directory,
+    and the profile gains only a reference with the user's title."""
+    profile, src = _load_editable(request, profile_id)
+    data = await file.read(MAX_DOCUMENT_BYTES + 1)
+    try:
+        rec = _document_store(request).ingest_pdf(data, file.filename)
+    except DocumentError as e:
+        raise HTTPException(status_code=e.status, detail=str(e)) from e
+    clean_title = (
+        (title or "").strip() or (rec.original_name or "").removesuffix(".pdf").removesuffix(".PDF") or "Manual"
+    )
+    profile.documents.append(DocumentRef(document_id=rec.id, title=clean_title[:120], kind=kind, note=note or None))
+    return _save_user_owned(request, profile, src)
+
+
+class DocumentRefPatch(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=120)
+    kind: DocumentKind | None = None
+    note: str | None = None
+    clear_note: bool = False
+
+
+@router.patch("/devices/{profile_id}/documents/{document_id}", response_model=ProfileOut)
+def rename_document(profile_id: str, document_id: str, body: DocumentRefPatch, request: Request):
+    """Change how the profile titles/classifies an attached document (the file is untouched)."""
+    profile, src = _load_editable(request, profile_id)
+    ref = profile.document(document_id)
+    if ref is None:
+        raise HTTPException(status_code=404, detail="Document is not attached to this profile")
+    if body.title is not None:
+        ref.title = body.title.strip() or ref.title
+    if body.kind is not None:
+        ref.kind = body.kind
+    if body.clear_note:
+        ref.note = None
+    elif body.note is not None:
+        ref.note = body.note or None
+    return _save_user_owned(request, profile, src)
+
+
+@router.post("/devices/{profile_id}/documents/{document_id}/replace", response_model=ProfileOut)
+async def replace_document(profile_id: str, document_id: str, request: Request, file: UploadFile, force: bool = False):
+    """Swap the PDF behind an attached document, keeping its id so page citations stay valid.
+    Refused (409) while another profile shares the same file, unless forced."""
+    profile, src = _load_editable(request, profile_id)
+    if profile.document(document_id) is None:
+        raise HTTPException(status_code=404, detail="Document is not attached to this profile")
+    store = _document_store(request)
+    rec = store.get(document_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="Document not found on this computer")
+    others = [p for p in store.referenced_by(document_id) if p != profile_id]
+    if others and not force:
+        raise HTTPException(
+            status_code=409,
+            detail=f"This document is also used by {', '.join(others)}; replacing it would change their manual too. Confirm to replace anyway.",
+        )
+    data = await file.read(MAX_DOCUMENT_BYTES + 1)
+    try:
+        store.replace_pdf(rec, data, file.filename)
+    except DocumentError as e:
+        raise HTTPException(status_code=e.status, detail=str(e)) from e
+    return _save_user_owned(request, profile, src)
+
+
+@router.delete("/devices/{profile_id}/documents/{document_id}", response_model=ProfileOut)
+def detach_document(profile_id: str, document_id: str, request: Request, purge: bool = False):
+    """Detach a document from the profile. Commands citing it keep their citation but are reported
+    as citing a document that is no longer attached. With ``purge=1`` the file is also deleted,
+    but only when nothing else refers to it any more (cleanup is deliberate, never implicit)."""
+    profile, src = _load_editable(request, profile_id)
+    if profile.document(document_id) is None:
+        raise HTTPException(status_code=404, detail="Document is not attached to this profile")
+    profile.documents = [d for d in profile.documents if d.document_id != document_id]
+    out = _save_user_owned(request, profile, src)
+    if purge:
+        store = _document_store(request)
+        if not store.referenced_by(document_id):
+            store.delete(document_id)
+    return out
+
+
+# ----------------------------------------------------------------------------- MIDI commands
+
+
+class CommandsBody(BaseModel):
+    commands: list[MidiCommand]
+
+    @model_validator(mode="after")
+    def _unique(self) -> CommandsBody:
+        ids = [c.id for c in self.commands]
+        if len(set(ids)) != len(ids):
+            raise ValueError("command ids must be unique within a profile")
+        return self
+
+
+@router.put("/devices/{profile_id}/commands", response_model=ProfileOut)
+def update_commands(profile_id: str, body: CommandsBody, request: Request):
+    """Replace only the profile's command library (jacks, dimensions, picture, documented MIDI map
+    untouched). Scenes that applied a changed or removed command keep their saved values and are
+    flagged for review by the compiler; nothing is rewritten here."""
+    profile, src = _load_editable(request, profile_id)
+    profile.midi.commands = body.commands
+    return _save_user_owned(request, profile, src)
+
+
+class MidiCapabilityBody(BaseModel):
+    """An explicit user statement that the device has a MIDI input (for imported profiles that came
+    without any MIDI data). Recorded with evidence ``user``; never marked documented."""
+
+    interfaces: list[str] = Field(min_length=1)
+    default_channel: int | None = Field(default=None, ge=1, le=16)
+    note: str | None = None
+
+
+@router.post("/devices/{profile_id}/midi-capability", response_model=ProfileOut)
+def declare_midi_capability(profile_id: str, body: MidiCapabilityBody, request: Request):
+    profile, src = _load_editable(request, profile_id)
+    for i in body.interfaces:
+        if i not in profile.midi.interfaces:
+            profile.midi.interfaces.append(i)
+    if body.default_channel is not None:
+        profile.midi.default_channel = body.default_channel
+    from ..models.common import Evidence
+
+    if profile.midi.evidence in (Evidence.UNKNOWN,):
+        profile.midi.evidence = Evidence.USER
+    stamp = "MIDI capability declared by the user, not taken from a manual."
+    profile.midi.note = (
+        f"{profile.midi.note} {stamp}"
+        if profile.midi.note and stamp not in profile.midi.note
+        else profile.midi.note or stamp
+    )
+    if body.note:
+        profile.midi.note = f"{profile.midi.note} {body.note}"
+    return _save_user_owned(request, profile, src)
+
+
+class FromMapResult(BaseModel):
+    profile: ProfileOut
+    added: list[str]
+
+
+@router.post("/devices/{profile_id}/commands/from-map", response_model=FromMapResult)
+def commands_from_map(profile_id: str, request: Request):
+    """Add the commands implied by the documented MIDI map (bypass on/off, each CC, program recall),
+    copying the map's evidence. Existing commands are kept; nothing is invented."""
+    profile, src = _load_editable(request, profile_id)
+    fresh = commands_from_midi_spec(profile.midi)
+    profile.midi.commands = [*profile.midi.commands, *fresh]
+    out = _save_user_owned(request, profile, src)
+    return FromMapResult(profile=out, added=[c.id for c in fresh])
+
+
+@router.get("/devices/{profile_id}/command-usage")
+def command_usage(profile_id: str, request: Request):
+    """Where each command of this profile has been applied: rig, scene, device, and whether the
+    saved snapshot still matches the current definition. Keyed by command id; removed commands that
+    scenes still reference appear too, so a user sees what a deletion left behind."""
+    repo = profile_repo(request)
+    profile = repo.get(profile_id)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    rigs = RigRepository(request.app.state.db)
+    live = {c.id: c.fingerprint() for c in profile.midi.commands}
+    usage: dict[str, list[dict]] = {}
+    for rig_id in repo.referenced_by(profile_id):
+        rig = rigs.get(rig_id)
+        if rig is None:
+            continue
+        ours = {i.id: i for i in rig.instances if i.profile_id == profile_id}
+        for scene in rig.scenes:
+            for st in scene.device_states:
+                inst = ours.get(st.instance_id)
+                if inst is None:
+                    continue
+                applied = [cv.command for cv in st.cc_values if cv.command] + (
+                    [st.program.command] if st.program and st.program.command else []
+                )
+                for a in applied:
+                    usage.setdefault(a.command_id, []).append(
+                        {
+                            "rig_id": rig.id,
+                            "rig_name": rig.name,
+                            "scene_id": scene.id,
+                            "scene_name": scene.name,
+                            "instance_id": inst.id,
+                            "instance_label": inst.label,
+                            "name_at_apply": a.name,
+                            "changed": live.get(a.command_id) != a.definition,
+                            "removed": a.command_id not in live,
+                        }
+                    )
+    return usage

@@ -38,6 +38,23 @@ or redistribute Pedal Playground's or any vendor's product photography, and uplo
 not taken as proof of redistribution rights: the UI says so next to the upload control. The test
 fixture `pedal-photo.jpg` is a synthetic drawing made with Pillow for this repository.
 
+### User-supplied documents and MIDI commands (Session 3f)
+
+Manuals are the user's own PDFs, stored only on their computer and never fetched, bundled or
+redistributed by the app (a project export embeds them only on an explicit, separately named
+request). The test fixture `manual.pdf` and every PDF in the backend tests are synthetic files
+written by `backend/tests/support/pdf.py`; no manufacturer document is read in the repository.
+
+A command's evidence level says where its numbers come from, nothing more: *documented* with a
+citation means "written on that page of the attached PDF", *user* means "typed from memory or own
+notes", *unknown* means exactly that. Citing a manual does not make a command verified, and
+"verified on hardware" is a separate claim the user makes about their own test. Commands derived
+with *From documented map* inherit the evidence of the map entry they came from (Sunset's bypass
+CC 10 → documented; its CC 100 expression row → unknown). What remains unknown on purpose: the
+full knob CC charts of the shipped profiles (never typed in from memory), whether any derived or
+user command actually produces the described result on a device, and the MIDI capability of
+Pedal Playground imports until the user declares it (recorded as *user*, never *documented*).
+
 ## 2. Device profile facts shipped (evidence per attribute)
 
 | Device | Footprint | Power | Jacks / MIDI | Unknown on purpose |

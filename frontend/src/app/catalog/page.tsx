@@ -8,6 +8,8 @@ import { Badge, Button, ErrorBanner, EvidenceBadge, Field, Panel } from "@/compo
 import { JackEditor } from "@/components/board/JackEditor";
 import { DeviceImageSection } from "@/components/images/DeviceImageSection";
 import { ConfigureJacksButton, JackMapper } from "@/components/images/JackMapper";
+import { DocumentsSection } from "@/components/library/DocumentsSection";
+import { MidiCommandsSection } from "@/components/library/MidiCommandsSection";
 import { enclosureFill } from "@/lib/boardLayout";
 import type { PortDef, SignalKind, PortDirection, Edge } from "@/lib/types";
 import { CONNECTORS } from "@/lib/types";
@@ -17,9 +19,35 @@ function blankProfile(): DeviceProfile {
     id: "", manufacturer: "", model: "", category: "effect", provenance: { source: "user", evidence: "user" },
     footprint: { width: { value_mm: null, evidence: "user" }, depth: { value_mm: null, evidence: "user" }, height: { value_mm: null, evidence: "user" }, includes_jacks: null, display_unit: "mm" },
     ports: [], power: { voltage_v: null, polarity: "unknown", current_ma_min: null, connector: "unknown", evidence: "unknown" },
-    midi: { interfaces: [], default_channel: null, program_change: { supported: null, min: null, max: null, evidence: "unknown" }, cc_map: [], bypass: { evidence: "unknown" }, evidence: "unknown" },
+    midi: { interfaces: [], default_channel: null, program_change: { supported: null, min: null, max: null, evidence: "unknown" }, cc_map: [], bypass: { evidence: "unknown" }, commands: [], evidence: "unknown" },
+    documents: [],
     capabilities: {}, declared_unknowns: [], tags: [], builtin: false,
   };
+}
+
+function DocumentsOnThisComputer() {
+  const [docs, setDocs] = useState<Awaited<ReturnType<typeof api.documents.list>> | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const refresh = () => api.documents.list().then(setDocs).catch(() => setDocs(null));
+  useEffect(() => { void refresh(); }, []);
+  const unused = docs?.filter((d) => !d.referenced_by.length) ?? [];
+  return (
+    <Panel title="Documents on this computer">
+      <div className="text-xs flex flex-col gap-1" data-testid="document-cleanup">
+        {docs === null ? <span className="text-neutral-500">…</span> : (
+          <>
+            <span>{docs.length} PDF{docs.length === 1 ? "" : "s"} stored · <b data-testid="document-unused-count">{unused.length}</b> attached to nothing ({Math.round(unused.reduce((n, d) => n + d.byte_size, 0) / 1024)} KB)</span>
+            <span className="text-neutral-500">Detached manuals stay here until you remove them. A document a profile attaches or cites is never removed here.</span>
+            <div className="flex gap-2 items-center">
+              <Button disabled={!unused.length} onClick={async () => { if (!window.confirm(`Remove ${unused.length} unattached document(s) from this computer?`)) return; try { await api.documents.removeUnreferenced(); await refresh(); } catch (e) { setError((e as Error).message); } }}>Remove unattached documents</Button>
+              <Button variant="ghost" onClick={() => void refresh()}>Refresh</Button>
+            </div>
+            {error && <span className="text-red-700">{error}</span>}
+          </>
+        )}
+      </div>
+    </Panel>
+  );
 }
 
 export default function CatalogPage() {
@@ -97,6 +125,7 @@ export default function CatalogPage() {
             )}
           </div>
         </Panel>
+        <DocumentsOnThisComputer />
         <Panel title="Import Pedal Playground catalog">
           <p className="text-xs text-neutral-600 mb-1">Upload your own copy of <code>pedals.json</code> (Brand/Name/Width/Height in inches). The dataset has no published license, so Signal Loom never bundles it; images are not imported. Records become third-party-evidence profiles without ports or power data.</p>
           <input type="file" accept=".json,application/json" aria-label="Pedal Playground file" onChange={async (e) => { const f = e.target.files?.[0]; if (!f) return; try { const r = await api.catalog.importPedalPlayground(await f.text()); setReport(`Imported ${r.imported}, skipped ${r.skipped_existing} existing, ${r.problems.length} problems${r.problems.length ? ": " + r.problems.slice(0, 3).join("; ") : ""}`); void refresh(); } catch (err) { setError((err as Error).message); } }} />
@@ -165,6 +194,8 @@ export default function CatalogPage() {
               <tbody>{sel.ports.map((p) => <tr key={p.id} className="border-t border-line"><td>{p.label}</td><td>{p.kind}</td><td>{p.direction}</td><td>{p.connector}{p.midi_trs_type ? ` (${p.midi_trs_type})` : ""}{p.audio_channel ? ` ${p.audio_channel}` : ""}{p.kind === "power" && p.direction === "out" && (p.role === "expansion_out" ? <> · <Badge tone="warn">{p.supply_voltage_v ?? "?"} V expansion link, not a pedal outlet</Badge></> : <> · supplies {p.supply_voltage_v ?? "?"} V {p.supply_current_ma_max ?? "?"} mA{p.supply_options?.length ? ` (selectable: ${p.supply_options.map((o) => `${o.voltage_v} V/${o.current_ma_max ?? "?"} mA`).join(", ")})` : ""}{p.supply_isolated === true ? ", isolated" : p.supply_isolated === false ? ", shared" : ""}</>)}</td><td>{p.edge}</td><td>{p.position == null ? <Badge tone="bad">unknown</Badge> : <>{p.position} <EvidenceBadge evidence={p.position_evidence} /></>}</td><td className="text-neutral-500">{p.notes}</td></tr>)}</tbody>
             </table></div>
             {sel.capabilities.notes && <div className="text-neutral-600">{sel.capabilities.notes}</div>}
+            <MidiCommandsSection profile={sel} onSaved={(saved) => { setSel(saved); void refresh(); }} />
+            <DocumentsSection profile={sel} onSaved={(saved) => { setSel(saved); void refresh(); }} />
             <DeviceImageSection
               heading="Picture"
               value={sel.image ?? null}

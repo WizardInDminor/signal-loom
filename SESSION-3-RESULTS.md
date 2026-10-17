@@ -398,6 +398,137 @@ board, and can this supply run the planned rig. Two phases, each left usable and
 - Per-instance outlet overrides (editing a supply's outlet facts on one unit) use the existing port
   editor; the planner reads them like any port.
 
+## Part five: device manuals and the MIDI command library (same branch, same PR)
+
+Charter: `SESSION-3-MANUALS-MIDI-CHARTER.md`. Reconnaissance first, then three increments
+(manual storage, command definitions, scene picker), each with backend and browser tests.
+
+### Execution plan (written before the edits)
+
+1. **Manuals (Part A).** A `documents` table and a `DocumentStore` modelled on the image asset
+   store but with its own pipeline: `%PDF-` header and `%%EOF` trailer checks, a 40 MB bound,
+   PDFium (`pypdfium2`, bundled binary, local only) must open the file and report its page count;
+   files are named `doc_<12 hex>.pdf` in a managed directory next to the database (`SIGNAL_LOOM_DOCS`
+   or `data/documents`, git-ignored). A profile keeps only `documents: [{document_id, title, kind,
+   note}]`; bytes never enter profile JSON. Viewing is passive: the server renders a page to PNG
+   on request (cached on disk) and the browser shows pictures, so a PDF's scripts never run in
+   the app; the original file is offered only as an explicit download (`Content-Disposition:
+   attachment`, `nosniff`, `default-src 'none'` CSP). Page text search is local PDFium text
+   extraction. Replace keeps the id (citations stay valid) and is refused while another profile
+   shares the file; detach never deletes bytes unless asked and unreferenced. Export bundles
+   manual bytes only with `include_documents=1` (format_version 3); import restores them through
+   the same validation and only warns about files that are not on this computer.
+2. **Commands (Part B).** `MidiSpec.commands: list[MidiCommand]` beside the existing `cc_map`,
+   `program_change` and `bypass`. A command is one CC (fixed value, a documented list of
+   value→meaning choices, or "any value") or one PC (wire number, optional bank MSB/LSB; display
+   numbering comes from the profile's `program_change`), with intent, a deterministic flag, an
+   evidence level, an optional citation (`document_id` + page) and a separate, explicit
+   `verified_on_hardware` claim. Relationship to the documented map: `commands_from_midi_spec`
+   derives starter commands from `bypass`/`cc_map`/`program_change` copying their evidence, and
+   the compiler keeps checking every CC/PC against the map and range exactly as before. A
+   profile that declares no MIDI interface gets one only through an explicit user action
+   (evidence `user`).
+3. **Scenes (Part C).** No new state shape: a `CcValue` or `ProgramSelection` may carry an
+   `AppliedCommand` snapshot `{command_id, name, definition, value_label, deterministic}`. The
+   numeric fields stay the only input to the compiler; the snapshot's `definition` fingerprint is
+   compared with the live command so a rename changes nothing and an edited number produces a
+   `midi.command_changed` review warning instead of new bytes. Same-CC contradictions in one scene
+   are an error (`scene.cc_conflict`). The Scene editor gets an "Add MIDI command" picker
+   (favorites first, search, exact preview with the instance's channel, value choices plus a
+   numeric input, manual/page link); the scene report names the command and the exact bytes.
+
+### What was built (and what a user does)
+
+- **Device library → Documents.** Upload a PDF with a title and kind; the row shows pages and
+  size, *View* opens the passive viewer (`/documents/<id>?page=N`, page pictures, ← → keys, zoom,
+  *Find in document* over the PDF's text layer, *Download PDF*), *Rename*, *Replace* (same id),
+  *Detach* (file kept unless you say otherwise). A *Documents on this computer* panel lists
+  unattached files for deliberate cleanup. Non-PDF, truncated, encrypted and oversized files are
+  refused by content with a readable reason, and the profile is untouched.
+- **Device library → MIDI commands.** Add/edit form with CC (fixed / documented choices / any
+  value) or PC (wire number, bank, the device's displayed number shown from the profile's
+  numbering), intent, deterministic tri-state, evidence source, manual citation with page, the
+  separate hardware claim, ★ favorite; *From documented map* derives starter commands from the
+  bypass spec, CC map and PC support with their evidence; usage per command ("used in N scene
+  values · some need review") is read from every rig; deleting warns what scenes will show.
+  Profiles without MIDI data show *Declare MIDI input (your statement)*.
+- **Scenes → + Command** per MIDI pedal: favorites first, search, the exact bytes with the placed
+  instance's channel, evidence phrase, link to the cited page, value choice buttons or a number,
+  warnings (no channel, toggle, unknown source, undocumented CC, PC support not documented,
+  contradiction with the scene's state column, replacing an existing value for the same CC).
+  Applied rows show `★ “Engage A side” · manual p. 2 ↗`; *+ CC by number* keeps hand entry. The
+  compiled plan says "applies 'Engage A side' on Sunset: CC 10 = 127"; the scene report (Markdown)
+  names commands and states it is not a record of device behaviour. *Exports → Export with manuals*
+  is the opt-in documents-inclusive project (format 3).
+
+### Decisions
+
+1. **PDFs are rendered, not embedded.** The browser's PDF engine never receives the file from the
+   app: PDFium rasterizes pages on this computer and the viewer shows PNGs. This is the only way I
+   could honour "no active content from a PDF" without promising anything about per-browser
+   viewer behaviour; the cost is one native dependency (`pypdfium2`, manylinux wheel, pinned
+   `>=4.30,<6`) and a page cache on disk. Page jumps are therefore reliable (`?page=N` is the
+   app's own state, not a PDF deep link).
+2. **Bytes stay byte-for-byte; pictures stay in their own pipeline.** A manual must stay citable,
+   so documents are validated and rendered but never re-encoded, and nothing from `assets.py` is
+   reused except the shape of the store (ids, strict patterns, instr-based reference search).
+3. **Commands live in `MidiSpec.commands`, not in a parallel model.** The documented map remains
+   the reference the compiler checks against; `commands_from_midi_spec` is the explicit, tested
+   bridge and copies evidence rather than claiming it. No channel in a command, ever.
+4. **Reproducibility = numbers + fingerprint.** `AppliedCommand.definition` is a canonical string
+   of the wire-relevant fields (same function in Python and TypeScript, tested). Renames,
+   favorites, descriptions and evidence changes are invisible to scenes; number changes raise
+   `midi.command_changed` and the bytes stay until *reapply*. Hand-editing a number on an applied
+   row drops the snapshot (the row becomes a hand-set value), because the snapshot would otherwise
+   describe something it no longer is.
+5. **Contradictions are errors.** `scene.cc_conflict` includes bypass-by-CC and Bank Select CCs,
+   so "engaged" plus a `CC 10 = 0` command is caught; repeats are info. The picker warns before
+   applying and offers to replace the conflicting value for the same CC.
+6. **Project format 3 only when documents are bundled.** Plain exports keep `assets: []` as every
+   format-1 file has written it and omit `documents` when empty, so older app versions still read
+   them; the API accepts its own echo fields (`unknown_attributes`, `source`, `document_files`) on
+   profile writes so the catalog page can round-trip what it was given.
+
+### Verification (performed, with the numbers)
+
+- Backend: 110 tests (`pytest -q`), ruff check and format clean. New: `tests/test_documents.py`
+  (4: upload/view/search/download/reopen after restart; non-PDF, oversized, truncated, traversal,
+  hostile filename; rename/replace/detach/reference-aware deletion; export opt-in, format-1
+  refusal, import with missing files and with bundled files, corrupt bundle) and
+  `tests/test_midi_commands.py` (10: model rules, fingerprint, derivation from the documented
+  map, apply helpers, CC favorite → channel/number/value/MC8 plan/report, PC with one-based
+  display, toggle/unknown/conflict flags, definition change and deletion never change bytes,
+  API round trip with usage and export/import, Pedal Playground profile without MIDI).
+- Frontend: typecheck, lint and production build clean. Playwright 40/40 (37 previous scenarios
+  unchanged plus `e2e/manuals.spec.ts`: manuals upload/reject/view/search/rename/detach; favorite
+  with citation → scene picker → exact plan rows → reload → definition change → review → reapply;
+  imported profile declaring MIDI explicitly). Screenshots inspected: command library, command
+  picker, scene with applied commands, document viewer at the found page.
+- Charter acceptance scenarios 1–10 are each covered by at least one backend test and, for 1–5,
+  7, 9 and 10, by a browser scenario as well; 6 and 8 are backend-only in the browser sense
+  (the picker's warnings are rendered from the same diagnostics, and the export button is a
+  one-line call that the API tests exercise).
+
+### Limits and honest unknowns
+
+- Nothing here verifies that a device does what a command says. Evidence describes the source of
+  the numbers; "verified on hardware" is the user's own claim and is labelled as such.
+- Text search needs a text layer; scanned manuals yield nothing and the viewer says so. No OCR.
+- Replacing a shared document changes it for every profile that references it (hence the 409 and
+  explicit confirmation); citations keep their page numbers, which may no longer match a newer
+  edition. Nothing re-checks page numbers.
+- The viewer renders one page at a time at three fixed widths; there is no thumbnail strip or
+  continuous scroll. Very large manuals render each page on first view (cached afterwards).
+- Command usage is computed by scanning every rig on request (fine at this scale; not indexed).
+- Multi-message macros, Pedal Playground MIDI lookups, live MIDI, and any automatic manual
+  retrieval remain out of scope as the charter required.
+
+### Deferred follow-ups
+
+- "Apply to all scenes" / bulk reapply after a deliberate definition change.
+- A command-usage view that opens the scene directly from the Device library.
+- Per-page thumbnails in the viewer and remembering the last-viewed page per document.
+
 ## Backlog from the owner's physical build (2026-10-16, not in this PR)
 
 Recorded from the owner's hands-on test with MC8 and pedals above, ML10X and Zuma below.

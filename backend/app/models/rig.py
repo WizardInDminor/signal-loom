@@ -18,6 +18,7 @@ Surface = Literal["top", "underside", "off_board"]
 PROJECT_FORMAT = "signal-loom-project"
 PROJECT_FORMAT_VERSION = 1  # plain project files
 PROJECT_FORMAT_VERSION_WITH_ASSETS = 2  # opt-in: image assets bundled (base64) inside the file
+PROJECT_FORMAT_VERSION_WITH_DOCUMENTS = 3  # opt-in: PDF documents bundled (base64) as well
 
 
 def utcnow_iso() -> str:
@@ -106,16 +107,36 @@ class Connection(StrictModel):
     notes: str | None = None
 
 
+class AppliedCommand(StrictModel):
+    """Snapshot of the profile command a scene value was applied from.
+
+    The numeric fields beside it (``cc``/``value`` or ``pc``/bank) are what the compiler sends and
+    stay authoritative; this record only says *where they came from*. ``definition`` is the
+    command's ``fingerprint()`` at apply time: when it no longer matches the live command the
+    compiler raises a review warning instead of changing the bytes. Renaming a command, editing its
+    description or un-favoriting it changes nothing here. ``name`` and ``value_label`` are kept so a
+    deleted command still reads sensibly in reports."""
+
+    command_id: str
+    name: str
+    definition: str
+    value_label: str | None = None  # the chosen meaning for a "choice" command ("engage")
+    deterministic: bool | None = None
+    applied_at: str | None = None
+
+
 class ProgramSelection(StrictModel):
     pc: int = Field(ge=0, le=127)  # value on the wire (0-127)
     bank_msb: int | None = Field(default=None, ge=0, le=127)
     bank_lsb: int | None = Field(default=None, ge=0, le=127)
+    command: AppliedCommand | None = None
 
 
 class CcValue(StrictModel):
     cc: int = Field(ge=0, le=127)
     value: int = Field(ge=0, le=127)
     label: str | None = None
+    command: AppliedCommand | None = None
 
 
 class DeviceSceneState(StrictModel):
@@ -300,3 +321,6 @@ class ProjectFile(StrictModel):
     # Only present (format_version 2) when the user explicitly asked for an image-inclusive backup:
     # {id, content_type, original_name, data_base64}. Bytes are re-validated on import like an upload.
     assets: list[dict] = Field(default_factory=list)
+    # Only present (format_version 3) when the user explicitly asked for a documents-inclusive
+    # backup: {id, content_type, original_name, data_base64}. Validated on import like an upload.
+    documents: list[dict] = Field(default_factory=list)

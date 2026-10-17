@@ -166,6 +166,10 @@ def scene_report_markdown(rig: Rig, compiled: dict) -> str:
     out.append(
         f"MC8 firmware assumed: {compiled['mc8']['firmware_assumed']}. ML10X firmware assumed: {rig.controllers.ml10x.firmware_version or 'not set'}."
     )
+    out.append(
+        "The MIDI below is what the original MC8 is intended to send, compiled from the saved scene values; "
+        "it is not a record of what any device has been observed to do."
+    )
     out.append("")
     for sp in compiled["scenes"]:
         scene = rig.scene(sp["scene_id"])
@@ -186,17 +190,22 @@ def scene_report_markdown(rig: Rig, compiled: dict) -> str:
                 inst = rig.instance(st.instance_id)
                 bits = []
                 if st.program is not None:
-                    bits.append(
-                        f"PC {st.program.pc}"
-                        + (
-                            f" bank {st.program.bank_msb}/{st.program.bank_lsb}"
-                            if st.program.bank_msb is not None or st.program.bank_lsb is not None
-                            else ""
-                        )
+                    pc_text = f"PC {st.program.pc}" + (
+                        f" bank {st.program.bank_msb}/{st.program.bank_lsb}"
+                        if st.program.bank_msb is not None or st.program.bank_lsb is not None
+                        else ""
                     )
+                    if st.program.command is not None:
+                        pc_text = f"'{st.program.command.name}' ({pc_text})"
+                    bits.append(pc_text)
                 if st.enabled is not None:
                     bits.append("engaged" if st.enabled else "bypassed")
-                bits += [f"CC{c.cc}={c.value}" for c in st.cc_values]
+                for c in st.cc_values:
+                    cc_text = f"CC{c.cc}={c.value}"
+                    if c.command is not None:
+                        meaning = f" {c.command.value_label}" if c.command.value_label else ""
+                        cc_text = f"'{c.command.name}'{meaning} ({cc_text})"
+                    bits.append(cc_text)
                 if st.manual_note:
                     bits.append(f"note: {st.manual_note}")
                 out.append(f"- {inst.label if inst else st.instance_id}: {', '.join(bits) or 'no change'}")
