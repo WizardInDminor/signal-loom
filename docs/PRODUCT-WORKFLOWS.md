@@ -27,7 +27,7 @@ Hardware facts, CC maps, native editor formats, cable pinouts and measured clear
 
 **Acceptance evidence**
 
-- Moving a pedal changes the same \`DeviceInstance\` that Wiring, Stage and exports reference; port overrides remain attached after rotation and reload.
+- Moving a pedal changes the same `DeviceInstance` that Wiring, Stage and exports reference; port overrides remain attached after rotation and reload.
 - Measurements with unknown confidence, unverified mounting fit and clearance allowances are not rendered as certified fit.
 - An intentional overlap is distinguished from an accident; top and underside devices are not treated as occupying the same surface.
 - A project import/export does not silently discard custom geometry, manual attachments or images; the export explains whether it includes external assets.
@@ -113,7 +113,7 @@ Hardware facts, CC maps, native editor formats, cable pinouts and measured clear
 - Capturing last-sent values never masquerades as reading the pedal's actual controls or backing up its stored preset.
 - Real Windows hardware testing is logged per hop and per message. Simulator success is not hardware verification.
 
-**Validation boundary:** On the Session 4 development branch the virtual path has automated coverage, while real MC8/ML10X and pedal tests remain user-run. See [Session 4 validation checklist](../docs/live-hardware-validation.md) **when merged**; until then see [the active branch version](https://github.com/WizardInDminor/signal-loom/blob/experiment/session-4-live-control/docs/live-hardware-validation.md).
+**Validation boundary:** On the Session 4 development branch the virtual path has automated coverage, while real MC8/ML10X and pedal tests remain user-run. See Session 4 validation checklist is currently [on the active development branch](https://github.com/WizardInDminor/signal-loom/blob/experiment/session-4-live-control/docs/live-hardware-validation.md).
 
 ## W6 — Reconstruct a sound months later
 
