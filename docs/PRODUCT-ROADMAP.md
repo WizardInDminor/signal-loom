@@ -11,7 +11,7 @@
 | Label | Meaning |
 | --- | --- |
 | **Merged / available in main** | Implementation is on the default branch. Its limitations still apply. |
-| **Built in draft PR / unmerged** | Code exists for review, but must not be described as shipped from \`main\`. |
+| **Built in draft PR / unmerged** | Code exists for review, but must not be described as shipped from `main`. |
 | **Hardware-verified** | A documented test was actually performed on the specified physical device/firmware/wiring. |
 | **Proposed / not implemented** | Product opportunity; no promise or permission to develop without an explicit session decision. |
 
@@ -45,7 +45,7 @@ Current action boundary:
 
 **Safety constraints:** MIDI arming is explicit; PC/CC-only output in the initial live layer; no writing hardware memories or arbitrary SysEx; no automatic send or rearm; MC8 stays operable without Signal Loom.
 
-The product can be valuable even without Session 4 merging: the first five rows in the table are already on \`main\`.
+The product can be valuable even without Session 4 merging: the first five rows in the table are already on `main`.
 
 ## Next opportunities (prioritization candidates, not scheduled milestones)
 
@@ -84,7 +84,7 @@ Use the existing sources rather than duplicating undocumented assertions:
 
 - **Manufacturer manuals and research:** [docs/research.md](research.md) and user-attached manuals (with page citations where possible).
 - **Architecture and model decisions:** [ARCHITECTURE.md](../ARCHITECTURE.md) for current merged implementation.
-- **Development history:** Session 1–3 charters/results on \`main\`; [PR #4](https://github.com/WizardInDminor/signal-loom/pull/4) for unmerged Session 4 changes.
+- **Development history:** Session 1–3 charters/results on `main`; [PR #4](https://github.com/WizardInDminor/signal-loom/pull/4) for unmerged Session 4 changes.
 - **Hardware verification:** dated checklist/table recording device, firmware, transport, port, MIDI channel, command, expected effect, observed effect, restoration steps, and confidence. Avoid silently updating a route to “hardware verified” just because the button was clicked.
 
 ### Decisions carried forward
@@ -104,7 +104,7 @@ Use the existing sources rather than duplicating undocumented assertions:
 At the start of a substantial new development session:
 
 1. Read [PROJECT-CHARTER.md](../PROJECT-CHARTER.md), this roadmap, relevant workflows, the **current** architecture, and the session charter.
-2. Check GitHub PR and branch state. A capability in a **draft branch** is not automatically present on \`main\`. Treat the snapshot above as historical when dates diverge.
+2. Check GitHub PR and branch state. A capability in a **draft branch** is not automatically present on `main`. Treat the snapshot above as historical when dates diverge.
 3. State the targeted musician workflow, dependencies, validation gate and data ownership before implementation.
 4. Follow established branch/review/CI rules; do not merge feature branches without explicit authorization.
 5. Update the appropriate session results; update this status table only when evidence changes. Do not rewrite enduring product vision to describe incremental code.
