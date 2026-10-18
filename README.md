@@ -15,6 +15,12 @@ tools, evidence levels and the hardware verification procedure) and
 [ARCHITECTURE.md](ARCHITECTURE.md); research and licensing findings in
 [docs/research.md](docs/research.md).
 
+## Product direction and planning
+
+Start with the [**Project Charter**](PROJECT-CHARTER.md): the enduring product mission, principles, hardware-honesty rules, safety boundaries and long-term direction. The [Product Workflows](docs/PRODUCT-WORKFLOWS.md) describe real musician tasks and acceptance evidence. The [Product Roadmap](docs/PRODUCT-ROADMAP.md) distinguishes what is merged into \`main\`, in a draft PR, awaiting real-hardware validation or merely proposed.
+
+These product documents are **not** a substitute for [ARCHITECTURE.md](ARCHITECTURE.md) or an active \`SESSION-N-CHARTER.md\`. For new autonomous development sessions, read the charter, roadmap, relevant workflows, current architecture and the active session charter. Historical session reports retain their original context.
+
 ## Prerequisites
 
 | Tool | Version used in Session 1 |
