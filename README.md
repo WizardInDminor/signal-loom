@@ -15,6 +15,10 @@ tools, evidence levels and the hardware verification procedure) and
 [ARCHITECTURE.md](ARCHITECTURE.md); research and licensing findings in
 [docs/research.md](docs/research.md).
 
+Future product concepts (proposed, not implemented or scheduled) are tracked in
+[docs/future-features.md](docs/future-features.md), starting with a deliberately isolated
+**Experiment Mode** for capturing serendipitous multi-pedal combinations.
+
 ## Prerequisites
 
 | Tool | Version used in Session 1 |
