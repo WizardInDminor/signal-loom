@@ -1,8 +1,10 @@
 # Live MIDI — hardware validation checklist (Session 4, P0b)
 
-A user-run procedure. Nothing in this file has been performed by the autonomous session: the build
-sandbox has no MIDI hardware and `python-rtmidi` could not even be installed there. Every step
-below records three things separately, and the app's coverage table uses the same words:
+A user-run procedure. The autonomous build sandbox performed **no hardware tests**; the owner
+subsequently ran the real transport on Windows on **2026-10-18**. Results and outstanding items are
+recorded in [the dated hardware session record](live-hardware-validation-2026-10-18.md). This
+checklist remains **partially complete**. Every step records three things separately, and the
+app's coverage table uses the same words:
 
 | Word | Meaning |
 |---|---|
@@ -24,6 +26,20 @@ the amp on standby; write down how to restore every preset you touch *before* yo
 send anything to the MC8 or ML10X that writes memory (Signal Loom cannot, but the Morningstar
 editor can — keep it closed while Signal Loom owns the ports).
 
+## Status after 2026-10-18
+
+| Step | Status | Evidence / gap |
+|---|---|---|
+| 0 | **Partial** | Real MIDI ports opened; firmware, OS and backend versions unrecorded |
+| 1 | **Pass for monitoring** | MC8 USB input showed independently generated multi-channel PC traffic; echo completeness not established |
+| 2 | **Open** | Direct pedal PC plus documented bypass CC pair not completed |
+| 3 | **Pass for ML10X USB PC** | CC 0/PC 0 sent, preset recalled; cross-bank selection not isolated |
+| 4 | **Pass for tested PC paths** | MC8 DIN → ML10X Thru → Volante Out/Thru → Collider, using the real board's topology |
+| 5 | **Pass for PC 0 and PC 1** | All four Omniport-connected pedals responded; bypass CCs still open |
+| 6 | **Pass for full-rig PC audition** | Eight messages, seven devices, default 20 ms delay; MC8 bank mapping is planner-only |
+| 7 | **Partial** | Physical footswitch traffic observed; exact matching-scene follower/echo audit open |
+| 8 | **Not tried (optional)** | Hub, isolator, noise, simultaneous editor access |
+
 ## 0. Setup on the Windows workstation
 
 1. `cd backend && .venv\Scripts\pip install -e ".[live]"` (installs `python-rtmidi`; a wheel exists
@@ -38,12 +54,12 @@ editor can — keep it closed while Signal Loom owns the ports).
 
 ## 1. Monitor only — all sending disarmed
 
-- [ ] Bind the MC8 USB **input** (device → computer) only. Connect. Stay disarmed.
-- [ ] Press footswitches on the MC8 in a bank whose presets send PC/CC to your pedals.
-- [ ] Record whether anything appears under *Observed on inputs*. Documented: the MC8 sends to USB
+- [x] Bind the MC8 USB **input** (device → computer) only. Connect. Stay disarmed (initial listening test).
+- [x] Press footswitches on the MC8 in a bank whose presets send PC/CC to your pedals.
+- [x] Record whether anything appears under *Observed on inputs*. PC messages on channels 1, 10, 12 and 13 were observed; this **does not establish complete echoing**. Documented: the MC8 sends to USB
   whatever its presets address "USB" or "all ports"; whether footswitch traffic for DIN/Omniport-only
   messages is echoed to USB is **not documented** (evidence: unknown). Write what you see.
-- [ ] Inspect the fixed cabling against the Wiring tab and note any difference.
+- [x] Inspect the fixed cabling against the Wiring tab: the actual chain and four Omniports were confirmed; see the dated report.
 
 Result template: `1. monitor: observed = yes/no; messages seen: …; MC8 setting "MIDI Thru"/port routing: …`
 
@@ -70,62 +86,71 @@ port is actually the pedal (not the hub), and whether the pedal needs "MIDI in: 
 
 ## 3. ML10X receives a PC while externally powered
 
-- [ ] ML10X powered from its DC inlet (USB alone does not switch the relays).
-- [ ] Bind the ML10X USB endpoint. Dry run a scene with only `ML10X preset n`: bytes are `CC 0 =
-  bank`, then `PC n`.
-- [ ] Arm, audition, disarm. Record the preset the ML10X displays and whether the bank CC was needed.
+- [x] ML10X powered from its DC inlet (USB alone does not switch the relays).
+- [x] Bind the ML10X USB endpoint. Dry run a scene with only `ML10X preset n`: bytes `B9 00 00` then `C9 00`, and physical preset recall worked.
+- [x] Arm and audition; observe Bank 1, Program 3 → Program 0. Bank CC 0=0 was sent but its *necessity* was not separately tested; verify with a cross-bank recall later.
 - [ ] Keep this result separate from anything about the ML10X **Thru** jack: the Thru is a copy of
   the 5-pin **In**; it is *not documented* to repeat USB traffic (the coverage table says
   "unverified" for pedals behind the Thru when the ML10X is reached over USB).
 
 ## 4. MC8 Cross MIDI Thru chain, one hop at a time
 
-Reference configuration 1: computer USB → MC8 → **DIN Out** → ML10X In → ML10X Thru → Collider
-In → Collider Thru → Meris MIDI I/O → Hedra / Enzo.
+**Actual owner-rig reference, verified for tested PC commands:** computer USB → MC8 → DIN Out
+→ ML10X In → ML10X Thru → Volante In → Volante MIDI Out (forwarding) → Collider In.
+Separately: MC8 Omniport 1 → Sunset, 2 → Zelzah, 3 → Hedra, 4 → MOOD MKII. There
+is no return cable and no Meris MIDI I/O or Enzo in this tested MIDI route. See the
+[dated record](live-hardware-validation-2026-10-18.md).
 
 Prerequisites (documented, must be set on the hardware): MC8 **Cross MIDI Thru** on (USB in →
 MIDI Out / Omniports); every pedal on a distinct channel unless you *declared* a shared channel in
 the Live tab's bindings.
 
-- [ ] Hop 1 — MC8 USB → DIN → ML10X: bind the MC8 USB output, unbind the ML10X's own USB. Dry run
-  the ML10X-only scene: endpoint must read "MC8". Arm, audition, disarm. Record the ML10X display.
-- [ ] Hop 2 — … → ML10X Thru → next device (Collider / BigSky MX): add that device's PC to the
-  scene. Audition. Record. (If the next device's MIDI OUT is a *settable* Thru, like the BigSky
-  MX, note the setting you used.)
-- [ ] Hop 3 — Collider Thru → Meris MIDI I/O → Hedra: Meris TRS wiring and channel per the Meris
-  I/O manual; record the I/O's switch positions. Audition one PC. Record.
-- [ ] Hop 4 — → Enzo, same.
+- [x] Hop 1 — MC8 USB → DIN → ML10X: unbind ML10X's own USB; CC 0/PC via MC8;
+  hardware responded. A separate USB-only ML10X test was also completed.
+- [x] Hop 2 — ML10X physical Thru → Volante: PC 0 on channel 1 via MC8; preset
+  responded.
+- [x] Hop 3 — Volante MIDI Out (configured/working as forwarding) → Collider:
+  modeled cable already present; Volante profile's MIDI Out role changed to `thru`
+  to expose the path. PC on channel 3 recalled a Collider preset.
+- [ ] Further device-specific CC, Clock or SysEx behavior on these hops remains untested.
+  The earlier proposed Meris MIDI I/O / Enzo chain was **not** the rig tested.
 - [ ] For each hop that worked, you may mark it hardware-verified in the Live tab (bindings →
   verified hops; stored on this computer only). Do not mark hops you did not observe.
 
-Note: the virtual demo rig models ML10X → BigSky MX over the Thru; your board's Collider, Meris
-MIDI I/O, Hedra and Enzo are not shipped profiles yet. Add them in the Device library (jacks: MIDI
-In / Thru / Out as they physically are; channel) before step 4 so the coverage table can trace
-them; leave CC maps empty rather than guessing.
+Note: the virtual demo rig models ML10X → BigSky MX over the Thru. The owner's
+imported/custom pedals do **not** imply manufacturer-verified profiles. Keep missing
+CC maps unknown rather than inventing them; preserve user-verified PC test evidence.
 
-## 5. MC8 Omniports → TRS MIDI Strymon pedals, separately
+## 5. MC8 Omniports → TRS MIDI pedals (four outputs on this rig)
 
 - [ ] Omniport n set to **MIDI Out** (Standard = tip active, or Type B) matching the cable; the
   pedal's TRS MIDI type per its manual (Sunset: Strymon MIDI EXP cable or Conduit, EXP jack in MIDI
   mode, firmware 1.20+).
-- [ ] One pedal per Omniport, one PC, then one bypass CC. Record. Three Omniports used for MIDI
-  leave one for an expression pedal.
+- [x] PC test: all four used Omniports recalled **PC 0 then PC 1** in two scene auditions
+  (Sunset ch 12, Zelzah ch 7, Hedra ch 5, MOOD MKII ch 4); physical responses confirmed.
+- [ ] Documented deterministic bypass/engage CC test on each pedal remains open.
+  All four Omniports are occupied by MIDI on this rig; none is reserved for expression.
 - [ ] Do not try SysEx: Omniports cannot carry it and have no return path (documented).
 
 ## 6. Audition one real scene
 
-- [ ] Dry run the scene; read every row; confirm every prerequisite listed in the coverage table.
-- [ ] Amp at a safe volume. Arm. Audition with the default delay (20 ms). Disarm.
-- [ ] Compare what each pedal shows with the intended messages. Record differences per pedal.
+- [x] Dry run the `Full Rig Test`: eight intended messages, all through MC8 USB output.
+- [x] Arm and audition with the default delay (20 ms); the eight messages logged `SENT`.
+- [x] Compare physical response with intended messages: owner reported all seven devices
+  responding as intended. The scene's MC8 `Bank 1 · G` assignment does **not**
+  transmit an MC8 bank-change message. Restore status and safe-volume detail were not recorded.
   A scene audition proves that *messages were sent*; the pedals' displays are your evidence of
   arrival.
 
 ## 7. MC8 footswitch traffic
 
-- [ ] With the MC8 USB input bound and listening, press the switch that recalls the scene from
-  step 6. Record what *Observed on inputs* shows and what the follower says ("possible" at best).
-- [ ] Record whether the MC8 echoes DIN/Omniport messages to USB at all; the follower is only as
-  good as that.
+- [x] With MC8 USB input bound and listening, press several existing MC8 footswitches.
+  Multiple PC messages appeared and the follower showed *ambiguous* partial matches to
+  the **unrelated** Signal Loom scenes (e.g. 1/2 and 1/4).
+- [ ] Program a scene matching one physical switch's exact messages, then check
+  `possible active scene` (if unambiguous).
+- [ ] Determine whether **every** DIN/Omniport-only MC8 message is echoed to USB:
+  observed multi-channel traffic is not a complete per-port echo audit.
 
 ## 8. Optional: powered hub, isolator, noise
 

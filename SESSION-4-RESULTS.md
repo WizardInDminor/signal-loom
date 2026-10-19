@@ -252,3 +252,9 @@ the error and rebinds, and the session stays disarmed until the user re-arms. Te
 with a pending audition) and `test_watcher_fails_closed_when_the_native_enumerator_raises_while_armed`
 (rtmidi fake, the watcher thread acting on its own). Backend 146 passed, 4 skipped; Playwright
 unchanged at 43.
+
+## Owner-run follow-up — 2026-10-18
+
+The Windows hardware validation is underway. The owner reported successful MC8 USB input monitoring, direct ML10X USB PC recall, Cross MIDI Thru through the MC8, ML10X Thru to Volante, forwarding through Volante to Collider, all four MC8 Omniports (PC 0 and PC 1), and one eight-message full-rig audition at 20 ms delay. See [the dated hardware record](docs/live-hardware-validation-2026-10-18.md) and the [updated checklist](docs/live-hardware-validation.md) for routes, bytes, observed results, limitations, and resume steps.
+
+The manually selected MC8 bank/switch assignment is a **planner mapping**, not a live MC8 bank selection; no MC8 bank-change command compiled in the full-rig test. Documented follow-up product issues: Volante MIDI Out `role: "thru"` required a raw JSON edit to expose a physically working path to Collider, the JSON parser error gave no location, and a released (but still bound) ML10X endpoint was still favored in dry-run routing. PC hardware success does **not** verify bypass CC, Clock, SysEx, state capture, automatic unplug/disarm, or a complete scene follower match. The Session 4 PR remains draft pending remaining validation and review.
