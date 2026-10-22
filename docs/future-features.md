@@ -143,3 +143,41 @@ Musician goal: dial in real parameters through Signal Loom, capture a **draft na
 Safety gates: documented slot inventory (factory/user/free/unknown; unknown is **not free**), explicit backup/recovery, state confidence/provenance, destructive-write warning and two-stage confirmation, exact route/slot/message preview, auditing, reject writes during ordinary Scene/Texture editing or continuous performance, and failure recovery without pretending rollback is guaranteed.
 
 Recommended milestones: (1) offline draft preset capture/inventory, (2) one manually assisted safe vendor-specific save, (3) readback/import only where actually supported, (4) broader model adapters and optional multi-pedal programming after independent physical verification. No saving commands should be enabled by this backlog item.
+
+
+## UX follow-ups observed during owner testing — 2026-10-22
+
+**Status:** Captured for a focused UX/polish pass, **not implemented** and **not part of the ongoing offline Undertow/hardware-validation test**. These observations come from real use of the current app, not an automated regression reproduction.
+
+### UX-ML10X-01 — ML10X preset number entry and unintended movement
+
+**Owner observation:** Editing the Morningstar ML10X preset number is cumbersome: the control effectively forces arrow-by-arrow incrementing rather than direct number entry; while stepping through numbers that are already assigned, the preset can move/reorder with each increment. The behavior when a requested number already belongs to another active preset is confusing. This needs a deliberate, predictable interaction before considering the ML10X planning workflow polished.
+
+**Desired behavior and acceptance:**
+- Permit direct typed entry (and normal keyboard shortcuts), with a clear valid range and consistent display numbering versus MIDI wire numbering.
+- **Separate editing a desired preset number from committing a move**. Intermediate typing, focus changes and arrow increment steps must not repeatedly reshuffle active preset assignments.
+- Detect occupied numbers before applying; show an explicit conflict with a comprehensible choice (cancel, swap, choose another slot, or another deliberately designed rule). Never silently overwrite or move a different active preset.
+- Make current vs proposed assignment visible, with clear Save/Cancel or explicit commit semantics; preserve stable IDs and unrelated assigned preset positions.
+- Add UI regression tests for direct entry, stepping across occupied numbers, duplicate assignments, undo/save/reload and export consistency; verify no unintended MIDI or hardware programming.
+
+**Priority:** High UX correctness for the ML10X planner. Investigate actual control/component implementation before choosing fix.
+
+### UX-LIBRARY-01 — Device Library search drops its filter intermittently
+
+**Owner observation:** While a term remains entered in the Device Library search field (example shown: `Mood`), the list sometimes reverts to displaying the full imported catalog. Removing and retyping one letter usually refreshes the filtered results. Screenshot observed a populated input and unrelated alphabetical results simultaneously. The query should never be silently discarded.
+
+**Desired behavior and acceptance:**
+- The visible list consistently reflects the visible search query, including during rapid typing, navigation, profile selection, saves and async catalog refreshes.
+- Diagnose whether state restoration, query filtering, stale request responses, pagination or rerendering caused the intermittent reset; do not assume the root cause from the screenshot.
+- Ensure out-of-order async responses cannot overwrite newer query results; provide predictable clear/reset, loading and zero-results states.
+- Add reliable browser regression tests for typing/pasting `Mood`, typing quickly, deleting/readding a character, switching a profile, returning from Edit, and triggering data refresh while a query remains set.
+- Avoid loading/re-rendering thousands of irrelevant results while a valid filter is active. Preserve keyboard focus and input value.
+
+**Priority:** High polish/usability; keep distinct from MIDI/hardware correctness.
+
+### Additional workflow observations (existing requests)
+
+- **UX-MANUAL-01:** Two vendor MIDI guides were uploaded and one relevant continuous CC per pedal was manually inserted in full-profile JSON to prepare the Undertow Texture. Both controls became `documented continuous` without claimed hardware verification. This proves the data model works, but the upload → JSON edit → refresh workflow is too clerical for a creative instrument. Track under [official-manual MIDI mapping library](#official-manual-midi-mapping-library-requested-2026-10-22) and verification **F-Q08**; review/approval should be native UI, no JSON required.
+- **UX-INSTRUMENT-01:** Functional grouping still shows Volante, Collider, Zelzah, Hedra and MOOD MKII as `Other` on the existing rig. Per-Texture roles are editable, but classification/onboarding could suggest meaningful multi-role categories without misrepresenting audio topology. Keep this a future interface refinement; don't block the offline Texture test. Existing macro-undo coalescing remains **F-Q02**.
+
+**Scope discipline:** These are future implementation inputs, not authority to add new live MIDI commands or hardware preset writes. Preserve the user's present Texture, manufacturer-sourced CC entries, attached manuals and physical evidence flags during a future polish pass.
