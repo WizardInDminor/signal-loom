@@ -1,5 +1,11 @@
 # Live MIDI — hardware validation checklist (Session 4, P0b)
 
+> **Ongoing tracking:** See the [living Verification Register](verification-register.md) for
+> completed and open claims across Sessions 4–5. This is the detailed original **Session 4**
+> checklist; continuous-control testing now has a separate
+> [Session 5 owner acceptance procedure](session-5-hardware-acceptance.md).
+> A verified Program Change path does not establish support for every CC/Clock/SysEx kind.
+
 A user-run procedure. The autonomous build sandbox performed **no hardware tests**; the owner
 subsequently ran the real transport on Windows on **2026-10-18** and **2026-10-21**.
 Results are recorded in the [first session](live-hardware-validation-2026-10-18.md)

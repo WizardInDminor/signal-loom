@@ -363,3 +363,21 @@ with its next whole-document save, as the whole-document model always did).
   Partial updates (jacks, commands, capability, documents) are now serialised and lossless.
 - The configuration write lock is a process-wide `RLock`; writers that bypass the API (direct
   SQLite edits) are outside its protection, as before.
+
+## Merge and verification tracking — 2026-10-22
+
+Session 5 was reviewed and merged into `main` via
+[PR #7](https://github.com/WizardInDminor/signal-loom/pull/7), merge commit
+`5285d35146d5ce94fc6294ffbd5aa8aed10a671b`.
+Its implementation head `4c434023bf0950055a69d3a9677d98e897d7b2f7` passed
+[GitHub Actions run 43](https://github.com/WizardInDminor/signal-loom/actions/runs/39803197037):
+210 backend passed, 4 skipped; lint/format and frontend checks green;
+47 Playwright tests passed.
+
+**Evidence boundary remains unchanged:** full virtual/software integration passes;
+continuous two-pedal modulation and fault/lease behavior on the owner's real hardware
+remain untested. See the [living Verification Register](docs/verification-register.md)
+for unique tracked IDs and prior Session 4 evidence, and the
+[Session 5 hardware acceptance procedure](docs/session-5-hardware-acceptance.md)
+for the next owner-run steps. Do not promote any open item to physical PASS
+until a dated record describes actual observed device behavior.

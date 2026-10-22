@@ -31,6 +31,12 @@ through an explicit connect → arm → **Start** under a message budget and a b
 companion [Creative Instrument Vision](docs/creative-instrument-vision.md) captures the longer
 musical direction (movements, transitions, Experiment Lab); those remain plans.
 
+**Hardware and software verification:** [Living Verification Register](docs/verification-register.md) is
+the continuously maintained index of physically verified, virtual-only, outstanding and deferred
+test claims. The [Session 5 hardware acceptance procedure](docs/session-5-hardware-acceptance.md)
+is the guided real-pedal checklist. Continuous cross-device modulation is **virtual/CI-verified,
+not yet physically tested**; see the [dated Session 4 observations](docs/live-hardware-validation-2026-10-21.md).
+
 ## Prerequisites
 
 | Tool | Version used in Session 1 |
