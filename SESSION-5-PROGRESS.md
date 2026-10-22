@@ -118,3 +118,15 @@ P0 commit: `84b35f9` (direction + ledger).
 - Backend `pytest -q`: **204 passed, 4 skipped**; Ruff clean; frontend lint/typecheck/build clean.
 - Playwright (production build, fresh DB, one worker): **47 passed (2.1 m)**.
 - GitHub Actions run 40 on the corrected head `483861e`: https://github.com/WizardInDminor/signal-loom/actions/runs/39793755824 — backend ✓, frontend ✓, e2e ✓ (`success`). This ledger line is the last commit; its own run is linked from the PR checks.
+
+## Final pre-merge concurrency review (2026-10-22, after the review of `483861e`)
+
+- Traced rig PATCH, MC8 bank import, catalog partial updates (ports, commands, capability,
+  from-map, document attach/rename/replace/detach) and the full-profile PUT.
+- Reproduced five lost-update interleavings with repository hooks on the pre-fix code
+  (`tests/test_metadata_races.py`: 5 failed, 1 passed before; 6 passed after).
+- Corrections: `RigRepository.update_metadata` (single UPDATE for rename), MC8 import
+  read-modify-save under the configuration write lock, `_modify_profile` locked helper for every
+  catalog partial update, document replace no longer rewrites the profile.
+- Backend `pytest -q`: **210 passed, 4 skipped**; Ruff clean; frontend lint/typecheck/build clean.
+- Playwright and CI on the final head: recorded below once run.

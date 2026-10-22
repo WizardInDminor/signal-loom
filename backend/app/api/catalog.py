@@ -93,6 +93,18 @@ def _guard_profile(request: Request, profile_id: str, what: str) -> None:
         raise HTTPException(status_code=409, detail={"code": e.code, "message": str(e), **e.detail}) from e
 
 
+def _modify_profile(request: Request, profile_id: str, mutate, *, guard: str | None = None) -> ProfileOut:
+    """Read-modify-save of one profile as a single critical section under the configuration write
+    lock (the live service's lock, which every whole-object writer takes), so two concurrent
+    partial updates — a document rename and a command change, say — are serialised and neither
+    overwrites the other. ``mutate(profile)`` may raise an HTTPException. ``guard`` names a
+    MIDI/jack/command change refused while the performing rig uses the profile."""
+    with request.app.state.live.mutation_guard():
+        profile, src = _load_editable(request, profile_id)
+        mutate(profile)
+        return _save_user_owned(request, profile, src, guard)
+
+
 def _save_user_owned(request: Request, profile: DeviceProfile, src: str, guard: str | None = None) -> ProfileOut:
     """Persist a profile edit. Editing a builtin turns it into the user's own copy (same id).
     ``guard`` names a MIDI/jack/command change that is refused while the performing rig uses the
@@ -151,19 +163,21 @@ def create_device(body: ProfileIn, request: Request):
 def update_device(profile_id: str, body: ProfileIn, request: Request):
     profile = body.to_profile()
     repo = profile_repo(request)
-    src = repo.source_of(profile_id)
-    if src is None:
-        raise HTTPException(status_code=404, detail="Profile not found")
     if profile.id != profile_id:
         raise HTTPException(status_code=400, detail="Profile id mismatch")
     _check_image(request, profile)
     profile.reconcile_declared_unknowns()
-    if src == "builtin":
-        # Editing a builtin turns it into a user-owned profile so reseeding never clobbers it.
-        profile.builtin = False
-        profile.provenance.source = "user"
-        src = "custom"
+    # A full replacement from the client's copy (no revision on profiles, as before); the source
+    # lookup, the guard and the write share the configuration write lock.
     with request.app.state.live.mutation_guard():
+        src = repo.source_of(profile_id)
+        if src is None:
+            raise HTTPException(status_code=404, detail="Profile not found")
+        if src == "builtin":
+            # Editing a builtin turns it into a user-owned profile so reseeding never clobbers it.
+            profile.builtin = False
+            profile.provenance.source = "user"
+            src = "custom"
         _guard_profile(request, profile_id, "replacing this device profile")
         repo.save(profile, source=src)
     return _out(profile, src, request)
@@ -224,10 +238,6 @@ def update_ports(profile_id: str, body: PortsBody, request: Request):
     references is reported with the affected cables and refused until confirmed; so is changing
     what a used jack *is* (signal kind, direction, connector, channel, TRS wiring, pair, role)."""
     repo = profile_repo(request)
-    src = repo.source_of(profile_id)
-    profile = repo.get(profile_id)
-    if src is None or profile is None:
-        raise HTTPException(status_code=404, detail="Profile not found")
     ids = [p.id for p in body.ports]
     if len(set(ids)) != len(ids):
         dup = sorted({i for i in ids if ids.count(i) > 1})
@@ -240,42 +250,38 @@ def update_ports(profile_id: str, body: PortsBody, request: Request):
                 status_code=422,
                 detail=f"jack '{p.id}' is anchored on image {p.image_anchor.asset_id}, which is not on this computer",
             )
-    before = {p.id: p for p in profile.ports}
-    changes: dict[str, str] = {pid: "removed" for pid in sorted(set(before) - set(ids))}
-    for p in body.ports:
-        if p.id in before:
-            diff = port_semantic_changes(before[p.id], p)
-            if diff:
-                changes[p.id] = "; ".join(diff)
-    if changes and not body.force:
-        usage = repo.port_usage(profile_id)
-        affected = [dict(u, port_id=pid, change=changes[pid]) for pid in changes for u in usage.get(pid, [])]
-        if affected:
-            removed_ids = sorted({a["port_id"] for a in affected if a["change"] == "removed"})
-            changed_ids = sorted({a["port_id"] for a in affected if a["change"] != "removed"})
-            parts = []
-            if removed_ids:
-                parts.append("removing or renaming " + ", ".join(removed_ids))
-            if changed_ids:
-                parts.append("changing the type of " + ", ".join(changed_ids))
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "code": "ports_in_use",
-                    "message": f"{len(affected)} cable(s) are plugged into jack(s) you are " + " and ".join(parts),
-                    "affected": affected,
-                },
-            )
-    profile.ports = body.ports
-    profile.reconcile_declared_unknowns()
-    if src == "builtin":
-        profile.builtin = False
-        profile.provenance.source = "user"
-        src = "custom"
-    with request.app.state.live.mutation_guard():
-        _guard_profile(request, profile_id, "changing this device's jacks")
-        repo.save(profile, source=src)
-    return _out(profile, src, request)
+
+    def mutate(profile: DeviceProfile) -> None:
+        before = {p.id: p for p in profile.ports}
+        changes: dict[str, str] = {pid: "removed" for pid in sorted(set(before) - set(ids))}
+        for p in body.ports:
+            if p.id in before:
+                diff = port_semantic_changes(before[p.id], p)
+                if diff:
+                    changes[p.id] = "; ".join(diff)
+        if changes and not body.force:
+            usage = repo.port_usage(profile_id)
+            affected = [dict(u, port_id=pid, change=changes[pid]) for pid in changes for u in usage.get(pid, [])]
+            if affected:
+                removed_ids = sorted({a["port_id"] for a in affected if a["change"] == "removed"})
+                changed_ids = sorted({a["port_id"] for a in affected if a["change"] != "removed"})
+                parts = []
+                if removed_ids:
+                    parts.append("removing or renaming " + ", ".join(removed_ids))
+                if changed_ids:
+                    parts.append("changing the type of " + ", ".join(changed_ids))
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "ports_in_use",
+                        "message": f"{len(affected)} cable(s) are plugged into jack(s) you are " + " and ".join(parts),
+                        "affected": affected,
+                    },
+                )
+        profile.ports = body.ports
+        profile.reconcile_declared_unknowns()
+
+    return _modify_profile(request, profile_id, mutate, guard="changing this device's jacks")
 
 
 @router.delete("/devices/{profile_id}", status_code=204)
@@ -336,17 +342,20 @@ async def attach_document(
     """Upload a PDF and attach it to the profile in one step. The file is validated as a PDF
     (header, trailer, PDFium can open it), stored under an opaque id in the document directory,
     and the profile gains only a reference with the user's title."""
-    profile, src = _load_editable(request, profile_id)
+    _load_editable(request, profile_id)  # 404 before the upload is processed
     data = await file.read(MAX_DOCUMENT_BYTES + 1)
     try:
-        rec = _document_store(request).ingest_pdf(data, file.filename)
+        rec = _document_store(request).ingest_pdf(data, file.filename)  # the slow part: outside any lock
     except DocumentError as e:
         raise HTTPException(status_code=e.status, detail=str(e)) from e
     clean_title = (
         (title or "").strip() or (rec.original_name or "").removesuffix(".pdf").removesuffix(".PDF") or "Manual"
     )
-    profile.documents.append(DocumentRef(document_id=rec.id, title=clean_title[:120], kind=kind, note=note or None))
-    return _save_user_owned(request, profile, src)
+
+    def mutate(profile: DeviceProfile) -> None:
+        profile.documents.append(DocumentRef(document_id=rec.id, title=clean_title[:120], kind=kind, note=note or None))
+
+    return _modify_profile(request, profile_id, mutate)
 
 
 class DocumentRefPatch(BaseModel):
@@ -359,19 +368,21 @@ class DocumentRefPatch(BaseModel):
 @router.patch("/devices/{profile_id}/documents/{document_id}", response_model=ProfileOut)
 def rename_document(profile_id: str, document_id: str, body: DocumentRefPatch, request: Request):
     """Change how the profile titles/classifies an attached document (the file is untouched)."""
-    profile, src = _load_editable(request, profile_id)
-    ref = profile.document(document_id)
-    if ref is None:
-        raise HTTPException(status_code=404, detail="Document is not attached to this profile")
-    if body.title is not None:
-        ref.title = body.title.strip() or ref.title
-    if body.kind is not None:
-        ref.kind = body.kind
-    if body.clear_note:
-        ref.note = None
-    elif body.note is not None:
-        ref.note = body.note or None
-    return _save_user_owned(request, profile, src)
+
+    def mutate(profile: DeviceProfile) -> None:
+        ref = profile.document(document_id)
+        if ref is None:
+            raise HTTPException(status_code=404, detail="Document is not attached to this profile")
+        if body.title is not None:
+            ref.title = body.title.strip() or ref.title
+        if body.kind is not None:
+            ref.kind = body.kind
+        if body.clear_note:
+            ref.note = None
+        elif body.note is not None:
+            ref.note = body.note or None
+
+    return _modify_profile(request, profile_id, mutate)
 
 
 @router.post("/devices/{profile_id}/documents/{document_id}/replace", response_model=ProfileOut)
@@ -396,7 +407,10 @@ async def replace_document(profile_id: str, document_id: str, request: Request, 
         store.replace_pdf(rec, data, file.filename)
     except DocumentError as e:
         raise HTTPException(status_code=e.status, detail=str(e)) from e
-    return _save_user_owned(request, profile, src)
+    # The profile itself is unchanged by a replace (same document id): it is not rewritten, so a
+    # concurrent profile edit cannot be lost here. Return the current stored profile.
+    profile, src = _load_editable(request, profile_id)
+    return _out(profile, src, request)
 
 
 @router.delete("/devices/{profile_id}/documents/{document_id}", response_model=ProfileOut)
@@ -404,11 +418,13 @@ def detach_document(profile_id: str, document_id: str, request: Request, purge: 
     """Detach a document from the profile. Commands citing it keep their citation but are reported
     as citing a document that is no longer attached. With ``purge=1`` the file is also deleted,
     but only when nothing else refers to it any more (cleanup is deliberate, never implicit)."""
-    profile, src = _load_editable(request, profile_id)
-    if profile.document(document_id) is None:
-        raise HTTPException(status_code=404, detail="Document is not attached to this profile")
-    profile.documents = [d for d in profile.documents if d.document_id != document_id]
-    out = _save_user_owned(request, profile, src)
+
+    def mutate(profile: DeviceProfile) -> None:
+        if profile.document(document_id) is None:
+            raise HTTPException(status_code=404, detail="Document is not attached to this profile")
+        profile.documents = [d for d in profile.documents if d.document_id != document_id]
+
+    out = _modify_profile(request, profile_id, mutate)
     if purge:
         store = _document_store(request)
         if not store.referenced_by(document_id):
@@ -435,9 +451,11 @@ def update_commands(profile_id: str, body: CommandsBody, request: Request):
     """Replace only the profile's command library (jacks, dimensions, picture, documented MIDI map
     untouched). Scenes that applied a changed or removed command keep their saved values and are
     flagged for review by the compiler; nothing is rewritten here."""
-    profile, src = _load_editable(request, profile_id)
-    profile.midi.commands = body.commands
-    return _save_user_owned(request, profile, src, guard="changing this device's command library")
+
+    def mutate(profile: DeviceProfile) -> None:
+        profile.midi.commands = body.commands
+
+    return _modify_profile(request, profile_id, mutate, guard="changing this device's command library")
 
 
 class MidiCapabilityBody(BaseModel):
@@ -451,25 +469,26 @@ class MidiCapabilityBody(BaseModel):
 
 @router.post("/devices/{profile_id}/midi-capability", response_model=ProfileOut)
 def declare_midi_capability(profile_id: str, body: MidiCapabilityBody, request: Request):
-    profile, src = _load_editable(request, profile_id)
-    for i in body.interfaces:
-        if i not in profile.midi.interfaces:
-            profile.midi.interfaces.append(i)
-    if body.default_channel is not None:
-        profile.midi.default_channel = body.default_channel
     from ..models.common import Evidence
 
-    if profile.midi.evidence in (Evidence.UNKNOWN,):
-        profile.midi.evidence = Evidence.USER
-    stamp = "MIDI capability declared by the user, not taken from a manual."
-    profile.midi.note = (
-        f"{profile.midi.note} {stamp}"
-        if profile.midi.note and stamp not in profile.midi.note
-        else profile.midi.note or stamp
-    )
-    if body.note:
-        profile.midi.note = f"{profile.midi.note} {body.note}"
-    return _save_user_owned(request, profile, src, guard="declaring this device's MIDI capability")
+    def mutate(profile: DeviceProfile) -> None:
+        for i in body.interfaces:
+            if i not in profile.midi.interfaces:
+                profile.midi.interfaces.append(i)
+        if body.default_channel is not None:
+            profile.midi.default_channel = body.default_channel
+        if profile.midi.evidence in (Evidence.UNKNOWN,):
+            profile.midi.evidence = Evidence.USER
+        stamp = "MIDI capability declared by the user, not taken from a manual."
+        profile.midi.note = (
+            f"{profile.midi.note} {stamp}"
+            if profile.midi.note and stamp not in profile.midi.note
+            else profile.midi.note or stamp
+        )
+        if body.note:
+            profile.midi.note = f"{profile.midi.note} {body.note}"
+
+    return _modify_profile(request, profile_id, mutate, guard="declaring this device's MIDI capability")
 
 
 class FromMapResult(BaseModel):
@@ -481,11 +500,15 @@ class FromMapResult(BaseModel):
 def commands_from_map(profile_id: str, request: Request):
     """Add the commands implied by the documented MIDI map (bypass on/off, each CC, program recall),
     copying the map's evidence. Existing commands are kept; nothing is invented."""
-    profile, src = _load_editable(request, profile_id)
-    fresh = commands_from_midi_spec(profile.midi)
-    profile.midi.commands = [*profile.midi.commands, *fresh]
-    out = _save_user_owned(request, profile, src, guard="adding commands from this device's MIDI map")
-    return FromMapResult(profile=out, added=[c.id for c in fresh])
+    added: list[str] = []
+
+    def mutate(profile: DeviceProfile) -> None:
+        fresh = commands_from_midi_spec(profile.midi)
+        profile.midi.commands = [*profile.midi.commands, *fresh]
+        added.extend(c.id for c in fresh)
+
+    out = _modify_profile(request, profile_id, mutate, guard="adding commands from this device's MIDI map")
+    return FromMapResult(profile=out, added=added)
 
 
 @router.get("/devices/{profile_id}/command-usage")

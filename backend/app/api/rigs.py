@@ -166,11 +166,13 @@ def _validate_references(rig: Rig) -> None:
 
 @router.patch("/{rig_id}", response_model=Rig)
 def rename_rig(rig_id: str, body: RenameBody, request: Request):
-    rig = load_rig(request, rig_id)
-    rig.name = body.name
-    if body.description is not None:
-        rig.description = body.description
-    return rig_repo(request).save(rig)
+    """Rename / re-describe a rig. A metadata-only UPDATE: it never rewrites the document, so it
+    cannot overwrite a newer device, cable, scene or texture change, and it leaves the revision
+    alone. Allowed while the rig performs (a name is not MIDI addressing)."""
+    load_rig(request, rig_id)  # 404 if unknown
+    repo = rig_repo(request)
+    repo.update_metadata(rig_id, name=body.name, description=body.description)
+    return load_rig(request, rig_id)
 
 
 @router.delete("/{rig_id}", status_code=204)

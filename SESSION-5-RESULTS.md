@@ -288,3 +288,78 @@ first performance value follows the audition byte. The sender was not refactored
   structural edits while performing.
 - The MC8 bank import has no revision check (pre-existing); the guard only classifies addressing.
 - The guard is by API path. Direct edits to the SQLite file are out of scope, as before.
+
+## Final pre-merge concurrency review — 2026-10-22 (PR #7, reviewed head `483861e`)
+
+The last independent review asked whether metadata-oriented handlers could write an older snapshot
+over newer configuration. They could. Each suspected path was traced and the interleaving forced
+with a repository hook (the handler's first read is observed and a newer write is made to land
+before the handler's own write; a concurrent writer runs on a thread through the real API). On the
+pre-fix code five of the six new scenarios failed; after the fix all six pass.
+
+### What was reproduced
+
+| Path | Pre-fix behaviour | Reproduced |
+|---|---|---|
+| `PATCH /api/rigs/{id}` (rename/description) | read whole rig → set name → save whole rig, outside any lock and without a revision check: a concurrent PUT's channel, cable, device, scene and texture changes were overwritten and the **revision was written back to the older value** | yes |
+| `POST /api/rigs/{id}/import/mc8-bank` | read before taking the lock, whole-document save inside it: a concurrent PUT between read and write was lost | yes |
+| catalog `PATCH …/documents/{doc}` (rename) | `_load_editable` before the lock, save inside: a concurrent command-library change was lost | yes |
+| catalog `POST …/documents` (attach) / `DELETE …/documents/{doc}` (detach) | same pattern, with the upload inside the window: a concurrent MIDI-capability declaration / jack change was lost | yes |
+| catalog `PUT …/commands` vs `POST …/midi-capability` (two partial updates) | both read-modify-save outside the lock: one lost | yes |
+| catalog `POST …/documents/{doc}/replace` | saved the **unchanged** whole profile after the upload (a pure lost-update hazard) | by inspection |
+
+### Corrections (smallest reliable per path)
+
+- **Rig rename** is now a field-specific `UPDATE rigs SET name/description/updated_at` in one
+  statement (`RigRepository.update_metadata`); the handler never reads-modifies-saves the document,
+  so it cannot overwrite anything and leaves the revision untouched. Still allowed while performing.
+- **MC8 bank import** parses the file first, then reads, modifies and saves the document under the
+  configuration write lock (the live service's lock, which the rig PUT already holds for its own
+  read-and-save), so a concurrent PUT is serialised before or after it.
+- **Catalog partial updates** go through one helper, `_modify_profile(request, id, mutate, guard)`:
+  read, mutate and save as a single critical section under the same lock. Used by ports, commands,
+  MIDI capability, commands-from-map, document attach, rename and detach. The full-profile PUT
+  (a client-side replacement with no revision, as before) takes its source lookup, guard and write
+  under the lock too. Uploads and PDF validation run **before** the lock; the critical section is
+  the profile read-modify-save only.
+- **Document replace** no longer writes the profile at all (the profile is unchanged by a replace).
+
+Lock order is unchanged: service lock → engine lock → sender lock; repositories and SQLite
+transactions are taken only while holding (or without) the service lock, never the other way
+round; the performance tick thread never takes the service lock. Reads never take the lock.
+
+Revision semantics are intact: a stale PUT is still refused, a newer one accepted, and a rename
+neither bumps nor regresses the revision (a tab that still holds the old name will write it back
+with its next whole-document save, as the whole-document model always did).
+
+### Tests (`tests/test_metadata_races.py`, 6)
+
+1. Rename racing a newer channel + cable + device + scene + texture change: all kept, revision not
+   regressed; stale/newer PUT semantics intact.
+2. MC8 bank import racing a concurrent locked PUT: both the writer's configuration and the imported
+   bank stand.
+3. Document rename racing a command-library change: both kept.
+4. Document attach racing a MIDI-capability declaration; detach racing a jack change; replace
+   racing a command change: all kept.
+5. Two partial profile updates (commands vs capability): both kept.
+6. While performing: rig rename and document attach/rename/replace/detach on the performing rig's
+   own profile pass; the channel PUT and the command PUT are still refused; the stream keeps its
+   resolved channels; Stop, Disarm and reconnect intersect a thread hammering rename and attach
+   without deadlock or error.
+
+### Verification after the corrections
+
+| Check | Result |
+|---|---|
+| `backend: python -m pytest -q` | **210 passed, 4 skipped** (6 new) |
+| `ruff check` / `ruff format --check` | clean |
+| `npm run lint` / `typecheck` / `build` | clean (no frontend change) |
+| Playwright (production build, fresh DB, one worker) | E2E_FINAL_PLACEHOLDER |
+| GitHub Actions on the final PR head | CI_FINAL_PLACEHOLDER |
+
+### Remaining notes
+
+- Profiles have no revision counter; the full-profile PUT remains client-last-write-wins by design.
+  Partial updates (jacks, commands, capability, documents) are now serialised and lossless.
+- The configuration write lock is a process-wide `RLock`; writers that bypass the API (direct
+  SQLite edits) are outside its protection, as before.
