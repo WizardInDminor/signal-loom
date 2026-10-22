@@ -333,9 +333,7 @@ async def import_rig(request: Request, keep_id: bool = False, name: str | None =
             # Source/builtin ownership is local-library metadata, not pedal capabilities.
             # Compare the actual profile content before deciding whether to fork it.
             comparable = {"id", "builtin"}
-            if existing.model_dump(mode="json", exclude=comparable) == prof.model_dump(
-                mode="json", exclude=comparable
-            ):
+            if existing.model_dump(mode="json", exclude=comparable) == prof.model_dump(mode="json", exclude=comparable):
                 continue
             replacement_id = new_id("prof")
             while prof_repo.get(replacement_id) is not None:

@@ -26,9 +26,7 @@ def test_owner_customizations_survive_seeded_builtin_collisions(tmp_path):
     original_images = {}
     with TestClient(create_app(tmp_path / "source.sqlite3")) as source:
         for profile_id in ("morningstar-mc8", "strymon-sunset"):
-            photo = source.post(
-                "/api/assets/images", files={"file": (f"{profile_id}.jpg", PHOTO, "image/jpeg")}
-            )
+            photo = source.post("/api/assets/images", files={"file": (f"{profile_id}.jpg", PHOTO, "image/jpeg")})
             assert photo.status_code == 201, photo.text
             image_id = photo.json()["id"]
             original_images[profile_id] = image_id
@@ -84,9 +82,7 @@ def test_owner_customizations_survive_seeded_builtin_collisions(tmp_path):
             {
                 "id": "scene_restore",
                 "name": "Keep references",
-                "device_states": [
-                    {"instance_id": "inst_restore_sunset", "program": {"pc": 0}}
-                ],
+                "device_states": [{"instance_id": "inst_restore_sunset", "program": {"pc": 0}}],
             }
         ]
         rig["textures"] = [
@@ -113,9 +109,7 @@ def test_owner_customizations_survive_seeded_builtin_collisions(tmp_path):
         rig["revision"] += 1
         saved = source.put(f"/api/rigs/{rig['id']}", json=rig)
         assert saved.status_code == 200, saved.text
-        exported = source.get(
-            f"/api/rigs/{rig['id']}/export?include_images=1&include_documents=1&require_complete=1"
-        )
+        exported = source.get(f"/api/rigs/{rig['id']}/export?include_images=1&include_documents=1&require_complete=1")
         assert exported.status_code == 200, exported.text
         backup = exported.json()
         assert len(backup["assets"]) == 2
@@ -161,12 +155,13 @@ def test_owner_customizations_survive_seeded_builtin_collisions(tmp_path):
         assert new_rig["textures"][0]["macros"][0]["mappings"][0]["instance_id"] == "inst_restore_sunset"
         analysis = restored.get(f"/api/rigs/{new_rig['id']}/analysis")
         assert analysis.status_code == 200, analysis.text
-        assert analysis.json()["instances"]["inst_restore_mc8"]["image"]["asset_id"] == original_images[
-            "morningstar-mc8"
-        ]
-        assert analysis.json()["instances"]["inst_restore_sunset"]["image"]["asset_id"] == original_images[
-            "strymon-sunset"
-        ]
+        assert (
+            analysis.json()["instances"]["inst_restore_mc8"]["image"]["asset_id"] == original_images["morningstar-mc8"]
+        )
+        assert (
+            analysis.json()["instances"]["inst_restore_sunset"]["image"]["asset_id"]
+            == original_images["strymon-sunset"]
+        )
         repeat_export = restored.get(
             f"/api/rigs/{new_rig['id']}/export?include_images=1&include_documents=1&require_complete=1"
         )
@@ -185,9 +180,7 @@ def test_custom_profile_collision_preserves_destination_and_remaps_only_imported
         )
         assert created.status_code == 201, created.text
         rig = source.post("/api/rigs", json={"name": "Imported copy"}).json()
-        rig["instances"] = [
-            {"id": "inst_imported_device", "label": "Owner pedal", "profile_id": profile_id}
-        ]
+        rig["instances"] = [{"id": "inst_imported_device", "label": "Owner pedal", "profile_id": profile_id}]
         rig["revision"] += 1
         assert source.put(f"/api/rigs/{rig['id']}", json=rig).status_code == 200
         exported = source.get(f"/api/rigs/{rig['id']}/export").json()
@@ -199,9 +192,7 @@ def test_custom_profile_collision_preserves_destination_and_remaps_only_imported
         )
         assert original.status_code == 201, original.text
         existing_rig = destination.post("/api/rigs", json={"name": "Already here"}).json()
-        existing_rig["instances"] = [
-            {"id": "inst_existing_device", "label": "Owner pedal", "profile_id": profile_id}
-        ]
+        existing_rig["instances"] = [{"id": "inst_existing_device", "label": "Owner pedal", "profile_id": profile_id}]
         existing_rig["revision"] += 1
         assert destination.put(f"/api/rigs/{existing_rig['id']}", json=existing_rig).status_code == 200
 
