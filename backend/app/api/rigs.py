@@ -316,15 +316,44 @@ async def import_rig(request: Request, keep_id: bool = False, name: str | None =
                     f"profile {p.get('id')} refers to document {did}{f' ({title})' if title else ''}, which is not on this computer; upload it again to view it"
                 )
 
+    # A fresh database already contains seeded built-ins. An exported customised MC8 or
+    # Sunset may have the *same id* as its seed but different photos, jacks, documents or
+    # MIDI capabilities. Silently keeping the seed loses the owner's rig definition.
+    #
+    # Never replace an existing library profile (other rigs may use it). If its content
+    # differs, save the imported variant under a unique id and point only the imported
+    # rig's instances at it. Scenes, cables and Texture mappings reference instance ids,
+    # so they remain intact without being retargeted.
+    remapped_profiles: dict[str, str] = {}
     for p in project.profiles:
         prof = DeviceProfile.model_validate(p)
-        src = prof_repo.source_of(prof.id)
-        if src is None:
-            prof.builtin = False
-            prof_repo.save(prof, source="imported")
-            imported.append(prof.id)
-        # Never overwrite an existing profile on import; the user's library wins.
+        original_id = prof.id
+        existing = prof_repo.get(original_id)
+        if existing is not None:
+            # Source/builtin ownership is local-library metadata, not pedal capabilities.
+            # Compare the actual profile content before deciding whether to fork it.
+            comparable = {"id", "builtin"}
+            if existing.model_dump(mode="json", exclude=comparable) == prof.model_dump(
+                mode="json", exclude=comparable
+            ):
+                continue
+            replacement_id = new_id("prof")
+            while prof_repo.get(replacement_id) is not None:
+                replacement_id = new_id("prof")
+            prof.id = replacement_id
+            remapped_profiles[original_id] = replacement_id
+            warnings.append(
+                f"profile {original_id} differs from the device library; restored as {replacement_id} "
+                "(the existing profile was not changed)"
+            )
+        prof.builtin = False
+        prof_repo.save(prof, source="imported")
+        imported.append(prof.id)
+
     rig = project.rig
+    for inst in rig.instances:
+        if inst.profile_id in remapped_profiles:
+            inst.profile_id = remapped_profiles[inst.profile_id]
     if not keep_id or repo.exists(rig.id):
         rig.id = new_id("rig")
     if name:
