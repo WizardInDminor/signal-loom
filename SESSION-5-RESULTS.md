@@ -354,8 +354,8 @@ with its next whole-document save, as the whole-document model always did).
 | `backend: python -m pytest -q` | **210 passed, 4 skipped** (6 new) |
 | `ruff check` / `ruff format --check` | clean |
 | `npm run lint` / `typecheck` / `build` | clean (no frontend change) |
-| Playwright (production build, fresh DB, one worker) | E2E_FINAL_PLACEHOLDER |
-| GitHub Actions on the final PR head | CI_FINAL_PLACEHOLDER |
+| Playwright (production build, fresh DB, one worker) | **47 passed** (1.9 min; unchanged suite) |
+| GitHub Actions (PR #7, corrected head `817dba4`) | run 42: backend ✓, frontend ✓, e2e ✓ — https://github.com/WizardInDminor/signal-loom/actions/runs/39801163379; the rerun on the final docs commit is linked from the PR checks |
 
 ### Remaining notes
 

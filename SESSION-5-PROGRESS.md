@@ -129,4 +129,5 @@ P0 commit: `84b35f9` (direction + ledger).
   read-modify-save under the configuration write lock, `_modify_profile` locked helper for every
   catalog partial update, document replace no longer rewrites the profile.
 - Backend `pytest -q`: **210 passed, 4 skipped**; Ruff clean; frontend lint/typecheck/build clean.
-- Playwright and CI on the final head: recorded below once run.
+- Playwright (production build, fresh DB, one worker): **47 passed (1.9 m)**.
+- GitHub Actions run 42 on the corrected head `817dba4`: https://github.com/WizardInDminor/signal-loom/actions/runs/39801163379 — backend ✓, frontend ✓, e2e ✓ (`success`). This ledger line is the last commit; its own run is linked from the PR checks.
