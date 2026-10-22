@@ -89,8 +89,8 @@ enter the document). Renaming the texture and reloading brings it back as author
 | `backend: python -m pytest -q` | **193 passed, 4 skipped** (46 new) |
 | `ruff check app tests` / `ruff format --check app tests` | clean |
 | `npm run lint` / `npm run typecheck` / `npm run build` | clean |
-| Playwright (production build, fresh DB, one worker) | **RESULT_PLACEHOLDER** |
-| GitHub Actions on the final PR head | CI_PLACEHOLDER |
+| Playwright (production build, fresh DB, one worker) | **47 passed** (1.8 min; 43 existing + 4 new) |
+| GitHub Actions on the final PR head | reported in SESSION-5-PROGRESS.md and the PR once the run on the final commit completes |
 
 New backend tests: `test_instrument_evaluator.py` (9), `test_instrument_eligibility.py` (6),
 `test_instrument_model.py` (6), `test_performance_engine.py` (14), `test_instrument_api.py` (5);
@@ -133,7 +133,11 @@ New backend tests: `test_instrument_evaluator.py` (9), `test_instrument_eligibil
 - The whole-rig texture, inverted ranges, tempo-related modulator, visual routing, honest status:
   `e2e/instrument.spec.ts` scenario 1; the not-controllable state on the real demo rig, bypass
   refusal, user declaration: scenario 3; phone width, reduced motion, keyboard: scenario 4.
-- Screenshots: `docs/screenshots/session-5/` (captured from the production build and inspected).
+- Screenshots (production build, virtual Undertow rig, captured by Playwright and inspected):
+  `docs/screenshots/session-5/instrument-1-preview.png` (preview, nothing connected),
+  `instrument-2-armed.png` (armed, Start a separate step), `instrument-3-performing.png`
+  (performing, lease, counters, last commanded), `instrument-4-phone-performing.png` and
+  `instrument-5-phone-stopped.png` (390 px wide, stop reason shown).
 - Board/Wiring/Stage/Scenes/Live/exports intact: the 43 pre-existing Playwright scenarios.
 
 ## Adversarial self-review (sender, engine, persistence)

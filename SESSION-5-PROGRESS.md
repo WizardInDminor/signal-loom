@@ -88,3 +88,13 @@ P0 commit: `84b35f9` (direction + ledger).
 - Docs: README and ARCHITECTURE sections, `docs/future-features.md` backlog entry, results draft.
 - Next: full suite result → screenshots into `docs/screenshots/session-5/` → final numbers in the
   results → push → draft PR → CI on the final head.
+
+## P4 checkpoint — full suite green locally, screenshots, PR
+
+- Full Playwright on the final frontend build with a fresh backend database and one worker:
+  **47 passed (1.8 m)**; backend **193 passed, 4 skipped**; Ruff, lint, typecheck, build clean.
+- `docs/screenshots/session-5/` captured from the production build (preview / armed / performing /
+  phone performing / phone stopped) and inspected.
+- Branch pushed; draft PR opened against `main` (title "Session 5: First Playable Whole-Rig
+  Instrument"). Next: wait for GitHub Actions on the PR head, fix anything it finds, record the
+  final run here.
