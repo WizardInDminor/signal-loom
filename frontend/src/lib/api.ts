@@ -1,4 +1,4 @@
-import type { Analysis, AssetRecord, DeviceProfile, DocumentKind, DocumentRecord, ExportStatus, MidiCommand, PedalboardSpec, PortDef, Rig, RigSummary } from "./types";
+import type { Analysis, AssetRecord, DeviceProfile, DocumentKind, DocumentRecord, DryRun, ExportStatus, Follower, LiveBindings, LiveCoverage, LiveEndpoint, LiveEvents, LiveJob, LivePanels, LiveStatus, MidiCommand, PedalboardSpec, PortDef, ResolvedMessage, Rig, RigSummary, TransportMode } from "./types";
 
 export interface CommandUse { rig_id: string; rig_name: string; scene_id: string; scene_name: string; instance_id: string; instance_label: string; name_at_apply: string; changed: boolean; removed: boolean }
 export interface DocumentMeta extends DocumentRecord { referenced_by: string[]; file_present: boolean }
@@ -113,6 +113,33 @@ export const api = {
     search: (id: string, q: string) => request<DocumentSearch>(`/api/documents/${encodeURIComponent(id)}/search?q=${encodeURIComponent(q)}`),
     remove: (id: string, force = false) => request<void>(`/api/documents/${encodeURIComponent(id)}${force ? "?force=1" : ""}`, { method: "DELETE" }),
     removeUnreferenced: () => request<{ removed: string[]; count: number }>("/api/documents/unreferenced", { method: "DELETE" }),
+  },
+  /** Live MIDI control (Session 4). The backend owns every port; these calls never send unless armed. */
+  live: {
+    status: () => request<LiveStatus>("/api/live/status"),
+    endpoints: (rigId?: string) => request<LiveEndpoint[]>(`/api/live/endpoints${rigId ? `?rig_id=${encodeURIComponent(rigId)}` : ""}`),
+    setMode: (mode: TransportMode) => request<LiveStatus>("/api/live/mode", { method: "POST", body: JSON.stringify({ mode }) }),
+    refresh: () => request<LiveStatus>("/api/live/refresh", { method: "POST" }),
+    release: (endpointId: string) => request<LiveStatus>("/api/live/release", { method: "POST", body: JSON.stringify({ endpoint_id: endpointId }) }),
+    reacquire: (endpointId: string) => request<LiveStatus>("/api/live/reacquire", { method: "POST", body: JSON.stringify({ endpoint_id: endpointId }) }),
+    bindings: (rigId: string) => request<LiveBindings>(`/api/live/rigs/${rigId}/bindings`),
+    saveBindings: (rigId: string, b: LiveBindings) => request<LiveBindings>(`/api/live/rigs/${rigId}/bindings`, { method: "PUT", body: JSON.stringify(b) }),
+    suggestBindings: (rigId: string) => request<LiveBindings>(`/api/live/rigs/${rigId}/bindings/suggest`, { method: "POST" }),
+    coverage: (rigId: string) => request<LiveCoverage>(`/api/live/rigs/${rigId}/coverage`),
+    connect: (rigId: string) => request<LiveStatus>(`/api/live/rigs/${rigId}/connect`, { method: "POST" }),
+    disconnect: () => request<LiveStatus>("/api/live/disconnect", { method: "POST" }),
+    arm: (confirm: string) => request<LiveStatus>("/api/live/arm", { method: "POST", body: JSON.stringify({ confirm }) }),
+    disarm: () => request<LiveStatus>("/api/live/disarm", { method: "POST" }),
+    stop: () => request<LiveStatus & { cancelled: number }>("/api/live/stop", { method: "POST" }),
+    dryRun: (rigId: string, sceneId: string) => request<DryRun>(`/api/live/rigs/${rigId}/scenes/${sceneId}/dry-run`, { method: "POST" }),
+    audition: (rigId: string, sceneId: string, body: { delay_ms?: number | null; confirm_nondeterministic?: boolean; acknowledge?: string[] }) =>
+      request<{ job: LiveJob; warnings: string[]; messages: ResolvedMessage[]; delay_ms: number }>(`/api/live/rigs/${rigId}/scenes/${sceneId}/audition`, { method: "POST", body: JSON.stringify(body) }),
+    send: (rigId: string, body: { instance_id: string; type: "pc" | "cc"; number: number; value?: number | null; confirm_nondeterministic?: boolean; coalesce?: boolean; label?: string | null; deterministic?: boolean | null; acknowledge?: string[] }) =>
+      request<{ job: LiveJob; warnings: string[]; message: ResolvedMessage }>(`/api/live/rigs/${rigId}/send`, { method: "POST", body: JSON.stringify(body) }),
+    panels: (rigId: string) => request<LivePanels>(`/api/live/rigs/${rigId}/panels`),
+    follower: (rigId: string) => request<Follower>(`/api/live/rigs/${rigId}/follower`),
+    events: (sinceLog = 0, sinceObserved = 0, rigId?: string) => request<LiveEvents>(`/api/live/events?since_log=${sinceLog}&since_observed=${sinceObserved}${rigId ? `&rig_id=${encodeURIComponent(rigId)}` : ""}`),
+    inject: (body: { endpoint_id: string; type: "pc" | "cc"; channel: number; number: number; value?: number | null }) => request<{ delivered: boolean; hex: string }>("/api/live/virtual/inject", { method: "POST", body: JSON.stringify(body) }),
   },
   catalog: {
     boards: () => request<PedalboardSpec[]>("/api/catalog/boards"),
