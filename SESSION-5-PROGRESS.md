@@ -67,3 +67,24 @@ P0 commit: `84b35f9` (direction + ledger).
 - Tests: `test_performance_engine.py` (14, fake clock / blocking / failing transports),
   `test_instrument_api.py` (5). `pytest -q`: **193 passed, 4 skipped**; Ruff clean.
 - Next: frontend (types, API, evaluator mirror, performance store, Instrument tab), then P4 e2e.
+
+## P1 (frontend) + P2 + P4 — Instrument workspace, journey, review — commit `a70c6ee` and after
+
+- Frontend: `types.ts` (Texture/Macro/Mapping/Lfo, TextureReport, PerformanceStatus, Readiness),
+  `api.ts` (readiness/start/stop/heartbeat/params), `lib/instrument.ts` (evaluator mirror + function
+  lens), `store/instrumentStore.ts`, rig-store texture helpers, `components/instrument/*`
+  (InstrumentTab, TextureHeader, PatchBay, PerformancePanel, usePreviewClock), page wiring
+  (Instrument first tab, PERFORMING badge, heartbeat owned by the page), rig-library template,
+  reduced-motion CSS.
+- Browser inspection (production build, scratch DB) at 1280 px and 390 px: preview / armed /
+  performing / stopped screenshots captured and read; fixes made from them: Connect binds the
+  simulated USB in virtual mode; destination table scroll and column order; header wrap at phone
+  width; stop reason from backend status; heartbeat moved from the tab to the page.
+- Adversarial review of sender/engine/persistence (see SESSION-5-RESULTS.md); one engine refinement
+  (a disarm racing a tick keeps the disarm reason). Backend `pytest -q`: 193 passed, 4 skipped.
+- `e2e/instrument.spec.ts` (4 scenarios) green alone; the first full run found a cross-file
+  interference on the single live service (two workers) → `workers: 1` in the Playwright config;
+  full suite rerun pending at this checkpoint.
+- Docs: README and ARCHITECTURE sections, `docs/future-features.md` backlog entry, results draft.
+- Next: full suite result → screenshots into `docs/screenshots/session-5/` → final numbers in the
+  results → push → draft PR → CI on the final head.

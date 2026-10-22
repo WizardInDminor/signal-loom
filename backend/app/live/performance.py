@@ -449,6 +449,8 @@ class PerformanceEngine:
                 with self._lock:
                     if self.session is not None:
                         self.session.counters.refused += 1
+                    # A disarm that raced this tick has already asked us to stop: honour its reason.
+                    self._apply_pending_stop_locked()
                     self._fault_locked(f"sender refused: {e}")
                 return {"performing": False}
             with self._lock:

@@ -99,3 +99,24 @@ boundary before broadening exploration.
 ---
 
 Other ideas can be added as separate dated entries, with scope and status kept explicit.
+
+## Deferred from Session 5 — the instrument beyond the first Texture
+
+**Status:** Backlog, captured 2026-10-22 at the end of Session 5 (see SESSION-5-RESULTS.md).
+**Not authorized to transmit by this entry.**
+
+Session 5 shipped one Texture, one macro, one triangle LFO, two-device opposite ranges, a budgeted
+backend performance engine with a browser lease, and a synthetic virtual fixture. Deliberately
+left for later sessions, with the seams already in place:
+
+- More modulation sources and shapes (`Lfo.shape` is a one-value literal today), envelopes, step
+  modulators, phase relationships and any summing/priority semantics between sources.
+- Movements (time-structured development of a texture), Transitions (independently scaled moves
+  between textures with per-device jump/hold limits) and Compositions; the engine evaluates a
+  `Texture` and knows nothing of scenes or arrangements.
+- Per-texture expressive input (one physical expression pedal/footswitch mapped to different
+  meanings per texture), MIDI learn; browser Web MIDI is explicitly not the path.
+- MIDI Clock out (tempo is an internal reference only), SysEx and read-only identity queries.
+- Experiment Lab (above) as an isolated opt-in; nothing random ever enters scenes or performance.
+- Coalesced undo/autosave for continuous macro gestures; configurable lease/budget in the UI;
+  marking continuous controls hardware-verified from a recorded owner test.
