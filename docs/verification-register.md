@@ -63,6 +63,9 @@ Evidence: [SESSION-5-RESULTS](../SESSION-5-RESULTS.md), [PR #7](https://github.c
 | F-Q06 | **DEFERRED** | Hardware expression routing via actual controller/Meris MIDI I/O; don't assume a spare MC8 Omniport |
 | F-Q07 | **DEFERRED** | Manufacturer editor write, SysEx, full MIDI Clock, sound-loop playback and program inventory readback |
 
+| F-Q08 | **DEFERRED** | Source-backed manufacturer MIDI-map ingestion, control semantics, user custom maps and per-control physical evidence; never mark documented controls as hardware-verified by default |
+| F-Q09 | **DEFERRED** | Draft pedal presets and guarded vendor-specific hardware save; slot inventory, backup, overwrite approval, verified procedure and observed write evidence |
+
 ## How to update this register
 
 1. **Before work:** reference affected IDs in the next PR/charter; distinguish SW-PASS from pending real-hardware tests.

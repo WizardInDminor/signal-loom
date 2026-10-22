@@ -120,3 +120,26 @@ left for later sessions, with the seams already in place:
 - Experiment Lab (above) as an isolated opt-in; nothing random ever enters scenes or performance.
 - Coalesced undo/autosave for continuous macro gestures; configurable lease/budget in the UI;
   marking continuous controls hardware-verified from a recorded owner test.
+
+
+## Official-manual MIDI mapping library (requested 2026-10-22)
+
+**Priority:** High after first Instrument authoring experience; foundational for expressive control, scenes and later preset editing. **Status: future / not implemented.** The existing device profile model supports `midi.cc_map`, control `continuous`, commands and evidence, but the app does not yet offer a complete assisted official-manual-to-MIDI-map ingestion and review flow.
+
+Desired workflow: attach or link an official manufacturer manual / MIDI implementation chart in the Device Library, extract the MIDI controls into **proposed** profile entries, inspect/edit a structured diff and approve. Record manufacturer/model, firmware/manual revision where known, source URL or attachment and page, CC number, semantic name, valid range, continuous vs discrete/toggle/unknown, warnings, and per-control provenance. Preserve uncertainty, user edits, and meaningful Scene/Texture links; never auto-promote documented data to physically verified.
+
+Keep a manufacturer's **default mapping** separate from **the user's actual device configuration**. The Source Audio Collider supports global remapping of CC assignments in Neuro; a documented factory CC may not match this particular pedal. Require configuration review and later owner-observed physical verification before marking a hop/control hardware verified. Never infer a safe sweep from an undocumented CC or a bypass/trigger.
+
+First useful targets: Strymon Volante Echo Level CC12 and Source Audio Collider Delay A Mix CC3 are manufacturer-documented **candidates**, not physical hardware-verified. Existing Undertow Texture maps these with opposed ranges. Prioritize complete vendor-sourced, auditable profiles for the actual rig—Volante, Collider, Zelzah, Hedra, MOOD MKII and Sunset—without manufacturing settings the manuals do not establish. Tests should cover provenance, default-vs-custom values, round-trip/import idempotency, safe/unsafe CC classification, legacy data and impact review.
+
+## Hardware pedal preset creation and safe saving (requested 2026-10-22)
+
+**Priority:** After validating the first real Instrument Texture and establishing manufacturer-backed control maps/preset slot knowledge. **Status: proposed, not implemented, no new MIDI write behavior authorized.**
+
+Musician goal: dial in real parameters through Signal Loom, capture a **draft named pedal preset** into a persistent, versioned library, select an *identified and deliberately approved* destination slot, preview the exact vendor-specific save procedure, confirm any overwrite explicitly, save only with deliberate hardware authorization, and verify the outcome wherever feedback is actually possible. Integrate the authored preset with Textures and Scenes without automatically rewriting either.
+
+**Critical distinction:** PC recall is not generally a write operation. Strymon's Volante explicitly documents a *manual* save-arm gesture (hold FAV until blue flashing) followed by MIDI PC to select a location. This cannot be assumed to be an unattended software-only write. Other models may require an editor-specific protocol/SysEx or have no supported remote-saving interface. Each writable device needs a reviewed protocol, firmware notes, the verified route, and owner-led tests. Never invent or blast unknown SysEx, assume readback, or infer that sending means memory changed.
+
+Safety gates: documented slot inventory (factory/user/free/unknown; unknown is **not free**), explicit backup/recovery, state confidence/provenance, destructive-write warning and two-stage confirmation, exact route/slot/message preview, auditing, reject writes during ordinary Scene/Texture editing or continuous performance, and failure recovery without pretending rollback is guaranteed.
+
+Recommended milestones: (1) offline draft preset capture/inventory, (2) one manually assisted safe vendor-specific save, (3) readback/import only where actually supported, (4) broader model adapters and optional multi-pedal programming after independent physical verification. No saving commands should be enabled by this backlog item.
