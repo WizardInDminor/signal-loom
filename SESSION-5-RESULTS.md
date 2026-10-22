@@ -90,7 +90,7 @@ enter the document). Renaming the texture and reloading brings it back as author
 | `ruff check app tests` / `ruff format --check app tests` | clean |
 | `npm run lint` / `npm run typecheck` / `npm run build` | clean |
 | Playwright (production build, fresh DB, one worker) | **47 passed** (1.8 min; 43 existing + 4 new) |
-| GitHub Actions on the final PR head | reported in SESSION-5-PROGRESS.md and the PR once the run on the final commit completes |
+| GitHub Actions (PR #7) | run 38 on `29ead65`: backend ✓, frontend ✓, e2e ✓ — https://github.com/WizardInDminor/signal-loom/actions/runs/39732286095; the rerun on the final docs commit is linked from the PR checks |
 
 New backend tests: `test_instrument_evaluator.py` (9), `test_instrument_eligibility.py` (6),
 `test_instrument_model.py` (6), `test_performance_engine.py` (14), `test_instrument_api.py` (5);

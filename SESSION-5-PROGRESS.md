@@ -98,3 +98,12 @@ P0 commit: `84b35f9` (direction + ledger).
 - Branch pushed; draft PR opened against `main` (title "Session 5: First Playable Whole-Rig
   Instrument"). Next: wait for GitHub Actions on the PR head, fix anything it finds, record the
   final run here.
+
+## CI on the PR head
+
+- Draft PR: https://github.com/WizardInDminor/signal-loom/pull/7 (base `main`, unmerged).
+- GitHub Actions run 38 on head `29ead65`: https://github.com/WizardInDminor/signal-loom/actions/runs/39732286095
+  — **backend ✓ (ruff check, ruff format --check, pytest), frontend ✓ (lint, typecheck, build),
+  e2e ✓ (Playwright on a fresh database)**, conclusion `success`, 3.5 min end to end.
+- This ledger entry is the last commit; its own CI run on the final head is linked from the PR
+  checks and in the handoff.
