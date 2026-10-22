@@ -20,6 +20,7 @@ export function ExportsTab() {
   const [mlInspect, setMlInspect] = useState<MlInspect | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [backupReport, setBackupReport] = useState<string | null>(null);
   const [diffA, setDiffA] = useState<string | null>(null);
   const [diffB, setDiffB] = useState<string | null>(null);
   const [diff, setDiff] = useState<DiffResult | null>(null);
@@ -34,6 +35,7 @@ export function ExportsTab() {
   const withSaved = async (action: () => Promise<void>) => {
     setBusy(true);
     setErr(null);
+    setBackupReport(null);
     try {
       const ok = await ensureSaved();
       if (!ok) {
@@ -77,9 +79,19 @@ export function ExportsTab() {
           <p className="text-neutral-600">Versioned JSON with the rig and every device profile it uses. Re-import it from the Rigs page.</p>
           <div className="flex flex-wrap gap-2 items-center">
             <Button variant="primary" disabled={exportsLocked} onClick={() => withSaved(async () => downloadText(`${safe}.signal-loom.json`, JSON.stringify(await api.rigs.exportProject(rig.id), null, 2), "application/json"))}>Export project (.signal-loom.json)</Button>
-            <Button disabled={exportsLocked} title="Also embeds the PDF manuals attached to or cited by the rig's device profiles (format 3). Manuals are your own files; share such a backup only where you may." onClick={() => withSaved(async () => downloadText(`${safe}.with-documents.signal-loom.json`, JSON.stringify(await api.rigs.exportProject(rig.id, false, true), null, 2), "application/json"))}>Export with manuals (PDFs embedded)</Button>
+            <Button data-testid="complete-backup" disabled={exportsLocked} title="Portable format 3: the entire rig, used device profiles, referenced pedal photos and attached PDF manuals. Download is blocked if any referenced media is missing." onClick={() => withSaved(async () => {
+              const project = await api.rigs.exportProject(rig.id, true, true, true) as { format_version: number; assets: { id: string }[]; documents?: { id: string }[] };
+              if (project.format_version !== 3) throw new Error("Complete backup returned an unexpected project format.");
+              // Compact JSON stays within the server's import size limit; base64 media dominate the file.
+              const json = JSON.stringify(project);
+              if (new Blob([json]).size > 50 * 1024 * 1024) throw new Error("Complete backup exceeds the 50 MiB project-import limit.");
+              downloadText(`${safe}.complete.signal-loom.json`, json, "application/json");
+              setBackupReport(`Complete backup downloaded: ${project.assets.length} photo(s) and ${project.documents?.length ?? 0} PDF manual(s).`);
+            })}>Export complete backup (photos + PDFs)</Button>
           </div>
-          <p className="text-neutral-500">The plain project never contains pictures or manuals, only references. Importing it on another computer keeps the device profiles, their MIDI commands and every scene; documents it cannot find are listed as “not on this computer”.</p>
+          <p className="text-neutral-500">Plain export is small but contains references only. Complete backup embeds photos and PDFs for a portable restore and refuses to download if referenced media is missing. Neither option changes your rig or sends MIDI. Embedded manuals and photographs may be copyrighted; share only where permitted.</p>
+          {backupReport && <p role="status" data-testid="complete-backup-report" className="text-green-800">{backupReport} Keep this file somewhere safe; test the restore before treating it as your only copy.</p>}
+          <p className="text-neutral-500">Re-import from the Rigs page. Existing profiles in the destination library take precedence over imported versions; use a fresh installation for an independent recovery test.</p>
         </div>
       </Panel>
       <Panel title="Native Morningstar formats — evidence levels">

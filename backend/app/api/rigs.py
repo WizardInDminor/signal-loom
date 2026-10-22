@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import copy
+import json
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
@@ -12,6 +13,7 @@ from ..catalog.demo import demo_rig, virtual_instrument_rig
 from ..documents import DocumentError
 from ..domain.geometry import rotated_size
 from ..exports.project import (
+    MAX_BYTES,
     ProjectImportError,
     bundle_assets,
     bundle_documents,
@@ -200,22 +202,53 @@ def duplicate_rig(rig_id: str, request: Request):
 
 
 @router.get("/{rig_id}/export")
-def export_rig(rig_id: str, request: Request, include_images: bool = False, include_documents: bool = False):
-    """Project file. Plain by default (format_version 1, no binary data). With ``include_images=1``
-    the user explicitly opts into bundling their device photographs (format_version 2); with
-    ``include_documents=1`` into bundling the PDF manuals their profiles attach or cite
-    (format_version 3). Manuals are the user's own files: they are never included implicitly."""
+def export_rig(
+    rig_id: str,
+    request: Request,
+    include_images: bool = False,
+    include_documents: bool = False,
+    require_complete: bool = False,
+):
+    """Preserve tolerant legacy exports; opt-in complete backups fail if referenced media is missing."""
+    if require_complete and not (include_images and include_documents):
+        raise HTTPException(status_code=422, detail="Complete backup requires both images and documents.")
     rig = load_rig(request, rig_id)
     profiles = profiles_for(request, rig)
     project = export_project(rig, profiles)
+    image_ids = set(image_asset_ids(rig, profiles))
+    document_ids = {d for p in profiles.values() for d in p.document_ids()}
     if include_images:
         store = asset_store(request)
-        bundle_assets(project, store.get_many(image_asset_ids(rig, profiles)), store.read_bytes)
+        bundle_assets(project, store.get_many(sorted(image_ids)), store.read_bytes)
     if include_documents:
         docs = request.app.state.documents
-        ids = [d for p in profiles.values() for d in p.document_ids()]
-        bundle_documents(project, docs.get_many(ids), docs.read_bytes)
-    return project_dict(project)
+        bundle_documents(project, docs.get_many(sorted(document_ids)), docs.read_bytes)
+    if require_complete:
+        missing_profiles = sorted({i.profile_id for i in rig.instances} - set(profiles))
+        missing_images = sorted(image_ids - {a["id"] for a in project.assets})
+        missing_documents = sorted(document_ids - {d["id"] for d in project.documents})
+        if missing_profiles or missing_images or missing_documents:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "export.incomplete_backup",
+                    "message": "Complete backup blocked: required device profiles, photos or PDF manuals "
+                    "are missing. Restore them or use the plain reference-only export.",
+                    "missing_profiles": missing_profiles,
+                    "missing_images": missing_images,
+                    "missing_documents": missing_documents,
+                },
+            )
+        # Keep a recognizable portable-backup marker even when this rig has no binary media.
+        project.format_version = 3
+    payload = project_dict(project)
+    if require_complete:
+        # Import cannot accept a file over MAX_BYTES; check the emitted (pretty-printed)
+        # representation too, not just a compact encoding.
+        pretty_size = len(json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8"))
+        if pretty_size > MAX_BYTES:
+            raise HTTPException(status_code=413, detail="Complete backup exceeds the 50 MiB project-import limit.")
+    return payload
 
 
 class ImportResult(BaseModel):

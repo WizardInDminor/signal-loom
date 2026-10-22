@@ -83,7 +83,7 @@ Evidence: [SESSION-5-RESULTS](../SESSION-5-RESULTS.md), [PR #7](https://github.c
 | F-Q11 | **OPEN** | `UX-LIBRARY-01`: Device Library search query sometimes shows unfiltered catalog; preserve query/async results, add browser regressions |
 | F-Q12 | **DEFERRED** | `UX-INSTRUMENT-01`: category suggestions and multiple pedal functions for richer whole-rig view; keep assignments user-correctable |
 
-| F-Q13 | **OPEN** | Portable backup UX: one-click project export that bundles **both** pedal photos and PDF manuals, with a visible manifest/completeness check; current "with manuals" button excludes photos despite server supporting both options |
+| F-Q13 | **IN REVIEW** | PR for explicit complete backup with both photos and PDFs, all referenced media present or fail closed, fresh-database restore regression test and export UI; owner still to validate Test Board export/re-import after merge |
 
 ## How to update this register
 
