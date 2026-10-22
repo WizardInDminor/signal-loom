@@ -60,7 +60,7 @@ Evidence: [SESSION-5-RESULTS](../SESSION-5-RESULTS.md), [PR #7](https://github.c
 | **S5-U01** | **SW-PASS** | Created named **Undertow** Texture on actual Test Board rig, musical intent, starting Scene `none`, Bloom base 50%, tempo 72 BPM, triangle LFO 8 beats / 10% depth; two opposing mappings: Volante CC12 40→70 and Collider CC3 95→65. Snapshot at LFO≈−0.85 showed Volante≈52 and Collider≈83 as intended |
 | **S5-U02** | **SW-PASS** | Both real profile definitions updated from owner-attached official manual/guide: Volante Echo Level CC12 and Collider Delay A Mix CC3 showed `documented continuous` in Instrument, but each explicitly displayed **not hardware-verified** |
 | **S5-U03** | **SW-PASS (UI observation)** | Instrument screen showed **PREVIEW — not connected, nothing is transmitted**, `state idle`, `ticks 0`, `handed 0`, `sender queue 0`; both live CC routes **unreachable**. The UI's no-send status matched the intended offline-only workflow; no independent wire trace was available |
-| **S5-U04** | **OPEN** | Verify Undertow survives closing/reopening, project export/import, and preserve a usable backup including profile/manual data as intended. Still not a physical confirmation and does not close hardware task **S5-H06** |
+| **S5-U04** | **PARTIAL** | Owner's 2026-10-22 `Test Board.with-documents.signal-loom.json` inspected: valid format-3 JSON; 11 rig device profiles, 10 Scenes, Undertow and 2 valid embedded, correctly referenced PDFs (Volante 25 pages, Collider 2). **Not a complete photo backup** (`assets: []` although profile images are referenced). Exported Undertow has `lfo.enabled: false` despite earlier UI screenshot showing it enabled; check intended saved state. Actual re-import/reopen restoration **not yet tested**. No physical MIDI evidence |
 
 **Related observed UX issues:** See `UX-ML10X-01` (preset number stepping/reordering), `UX-LIBRARY-01` (intermittent search filtering), `UX-MANUAL-01` and `UX-INSTRUMENT-01` in [Future Features](future-features.md). They are recorded for future work without changing this ongoing test.
 
@@ -82,6 +82,8 @@ Evidence: [SESSION-5-RESULTS](../SESSION-5-RESULTS.md), [PR #7](https://github.c
 | F-Q10 | **OPEN** | `UX-ML10X-01`: direct typed ML10X preset numbers, commit-once move, explicit collision handling, stable assignments and regressions |
 | F-Q11 | **OPEN** | `UX-LIBRARY-01`: Device Library search query sometimes shows unfiltered catalog; preserve query/async results, add browser regressions |
 | F-Q12 | **DEFERRED** | `UX-INSTRUMENT-01`: category suggestions and multiple pedal functions for richer whole-rig view; keep assignments user-correctable |
+
+| F-Q13 | **OPEN** | Portable backup UX: one-click project export that bundles **both** pedal photos and PDF manuals, with a visible manifest/completeness check; current "with manuals" button excludes photos despite server supporting both options |
 
 ## How to update this register
 
