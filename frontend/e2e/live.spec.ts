@@ -176,6 +176,9 @@ test("live: a simulated MC8 stomp is followed honestly — incomplete evidence s
   // Observation is not simulated pedal state: the simulated pedals were never sent anything.
   await expect(page.getByTestId("live-sim-inst_ml10x")).toContainText("untouched");
   await expect(page.getByTestId("live-observed-inst_ml10x")).toContainText("PC 1");
+  // A complete match is time-limited: it must expire without any additional MIDI messages.
+  await expect(page.getByTestId("live-follower")).toContainText("no evidence", { timeout: 10000 });
+  await expect(page.getByTestId("live-follower")).not.toContainText("Heavy verse");
   // Still disarmed, and the scene editor was not touched.
   await expect(page.getByTestId("live-header")).toHaveAttribute("data-armed", "false");
   await expect(page.getByTestId("save-state")).toHaveText("Saved");

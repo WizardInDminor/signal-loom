@@ -128,11 +128,35 @@ class LiveService:
             return []
 
     def graph(self, rig_id: str) -> tuple[Rig, dict[str, DeviceProfile], RouteGraph]:
-        rig, profiles = self._load(rig_id)
-        ctx, _ = wiring_diagnostics(rig, profiles)
-        bindings = self.bindings_repo.get(rig_id)
-        g = build_route_graph(rig, profiles, ctx, bindings, self._enumerate(rig, profiles))
-        return rig, profiles, g
+        with self._lock:
+            rig, profiles = self._load(rig_id)
+            ctx, _ = wiring_diagnostics(rig, profiles)
+            bindings = self.bindings_repo.get(rig_id)
+            inactive: dict[str, str] = {}
+            if self.connected_rig_id == rig_id:
+                # Enumeration means Windows knows the port exists, not that Signal Loom owns it.
+                # Only OPEN output bindings may produce executable routes while connected.
+                for b in bindings.bindings:
+                    if b.direction == "in":
+                        continue
+                    st = self._endpoint_states.get(b.endpoint_id)
+                    if b.endpoint_id in self._released or (st and st.released):
+                        inactive[b.endpoint_id] = "released to another application"
+                    elif st is None or not st.open:
+                        if st and st.ambiguous:
+                            reason = "held closed due to ambiguous port identity"
+                        elif st and st.busy:
+                            reason = "busy in another application"
+                        elif st and st.missing:
+                            reason = "disconnected"
+                        else:
+                            reason = st.error if st and st.error else "not open"
+                        inactive[b.endpoint_id] = reason
+            g = build_route_graph(
+                rig, profiles, ctx, bindings, self._enumerate(rig, profiles),
+                inactive_output_endpoints=inactive,
+            )
+            return rig, profiles, g
 
     # -- status -----------------------------------------------------------------------
     def status(self) -> dict:

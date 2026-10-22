@@ -239,6 +239,53 @@ def test_hot_unplug_disarms_and_reconnect_rebinds_without_rearming(client):
     )
 
 
+def test_released_output_is_excluded_from_routes_until_reacquired(client):
+    """Release closes a port, but must also prevent dry-run routing through its saved binding."""
+    client.post(f"/api/live/rigs/{RIG}/bindings/suggest")
+    client.post(f"/api/live/rigs/{RIG}/connect")
+
+    # The direct BigSky USB path is shorter than the MC8 -> ML10X -> BigSky path.
+    b = client.get(f"/api/live/rigs/{RIG}/bindings").json()
+    b["bindings"].append(
+        {"endpoint_id": "virt:inst_bigsky:out", "instance_id": "inst_bigsky", "port_id": "usb", "direction": "out"}
+    )
+    client.put(f"/api/live/rigs/{RIG}/bindings", json=b).raise_for_status()
+    url = f"/api/live/rigs/{RIG}/scenes/scene_solo/dry-run"
+    def bigsky_pc():
+        return next(
+            m for m in client.post(url).json()["messages"]
+            if m["target_instance_id"] == "inst_bigsky" and m["type"] == "pc"
+        )
+
+    assert bigsky_pc()["endpoint_id"] == "virt:inst_bigsky:out"
+
+    # Releasing direct USB preserves its binding but must select the live MC8 fallback.
+    client.post("/api/live/release", json={"endpoint_id": "virt:inst_bigsky:out"}).raise_for_status()
+    assert bigsky_pc()["endpoint_id"] == "virt:inst_mc8:out"
+    cov = client.get(f"/api/live/rigs/{RIG}/coverage").json()
+    assert any(d["code"] == "live.endpoint_inactive" and "released" in d["message"] for d in cov["diagnostics"])
+    saved = client.get(f"/api/live/rigs/{RIG}/bindings").json()
+    assert any(x["endpoint_id"] == "virt:inst_bigsky:out" for x in saved["bindings"])
+
+    # Release the other output too: none may be used, even though both enumerate.
+    client.post("/api/live/release", json={"endpoint_id": "virt:inst_mc8:out"}).raise_for_status()
+    assert bigsky_pc()["endpoint_id"] is None
+    assert bigsky_pc()["route_status"] == "unreachable"
+    client.post("/api/live/arm", json={"confirm": ARM_PHRASE}).raise_for_status()
+    refused = client.post(
+        f"/api/live/rigs/{RIG}/send",
+        json={"instance_id": "inst_bigsky", "type": "pc", "number": 0},
+    )
+    assert refused.status_code == 409 and refused.json()["detail"]["code"] == "live.route_unavailable"
+    assert not any(x["kind"] == "sent" for x in client.get("/api/live/events").json()["log"])
+
+    # Reacquire makes the shorter physical route eligible again; never automatically arms.
+    client.post("/api/live/disarm").raise_for_status()
+    client.post("/api/live/reacquire", json={"endpoint_id": "virt:inst_bigsky:out"}).raise_for_status()
+    assert bigsky_pc()["endpoint_id"] == "virt:inst_bigsky:out"
+    assert client.get("/api/live/status").json()["armed"] is False
+
+
 def test_follower_reports_possible_ambiguous_or_no_evidence_never_certainty(client):
     client.post(f"/api/live/rigs/{RIG}/bindings/suggest")
     f = client.get(f"/api/live/rigs/{RIG}/follower").json()

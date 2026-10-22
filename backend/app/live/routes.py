@@ -240,7 +240,14 @@ def build_route_graph(
     ctx: WiringContext,
     bindings: LiveBindings,
     endpoints: list[EndpointInfo],
+    inactive_output_endpoints: dict[str, str] | None = None,
 ) -> RouteGraph:
+    """Build potential routes; a connected rig may mark bound outputs as non-transmitting.
+
+    An enumerated port is not necessarily open. Inactive output bindings remain stored,
+    but cannot compete with usable routes or appear as executable coverage.
+    """
+    inactive = inactive_output_endpoints or {}
     diags: list[Diagnostic] = []
     ep_by_id = {e.id: e for e in endpoints}
     ports_of: dict[str, list[PortDef]] = {}
@@ -375,6 +382,20 @@ def build_route_graph(
             )
             continue
         if ep.direction != "out":
+            continue
+        if b.endpoint_id in inactive:
+            diags.append(
+                Diagnostic(
+                    code="live.endpoint_inactive",
+                    severity=Severity.WARNING,
+                    message=(
+                        f"Endpoint '{ep.name}' bound to '{inst.label}' is {inactive[b.endpoint_id]}; "
+                        "its saved binding remains, but it cannot be used for transmission until reopened."
+                    ),
+                    subject_type="instance",
+                    subject_id=inst.id,
+                )
+            )
             continue
         port = next((p for p in ports_of.get(inst.id, []) if p.id == b.port_id), None)
         if port is None:
