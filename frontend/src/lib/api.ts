@@ -1,4 +1,4 @@
-import type { Analysis, AssetRecord, DeviceProfile, DocumentKind, DocumentRecord, DryRun, ExportStatus, Follower, LiveBindings, LiveCoverage, LiveEndpoint, LiveEvents, LiveJob, LivePanels, LiveStatus, MidiCommand, PedalboardSpec, PortDef, ResolvedMessage, Rig, RigSummary, TransportMode } from "./types";
+import type { Analysis, AssetRecord, DeviceProfile, DocumentKind, DocumentRecord, DryRun, ExportStatus, Follower, LiveBindings, LiveCoverage, LiveEndpoint, LiveEvents, LiveJob, LivePanels, LiveStatus, MidiCommand, PedalboardSpec, PerformanceStatus, PortDef, Readiness, ResolvedMessage, Rig, RigSummary, TransportMode } from "./types";
 
 export interface CommandUse { rig_id: string; rig_name: string; scene_id: string; scene_name: string; instance_id: string; instance_label: string; name_at_apply: string; changed: boolean; removed: boolean }
 export interface DocumentMeta extends DocumentRecord { referenced_by: string[]; file_present: boolean }
@@ -73,7 +73,7 @@ export const api = {
   rigs: {
     list: () => request<RigSummary[]>("/api/rigs"),
     get: (id: string) => request<Rig>(`/api/rigs/${id}`),
-    create: (body: { name: string; description?: string; board_width_mm?: number; board_depth_mm?: number; from_demo?: boolean }) =>
+    create: (body: { name: string; description?: string; board_width_mm?: number; board_depth_mm?: number; from_demo?: boolean; template?: "virtual_instrument" | null }) =>
       request<Rig>("/api/rigs", { method: "POST", body: JSON.stringify(body) }),
     put: (rig: Rig) => request<Rig>(`/api/rigs/${rig.id}`, { method: "PUT", body: JSON.stringify(rig) }),
     rename: (id: string, name: string) => request<Rig>(`/api/rigs/${id}`, { method: "PATCH", body: JSON.stringify({ name }) }),
@@ -140,6 +140,15 @@ export const api = {
     follower: (rigId: string) => request<Follower>(`/api/live/rigs/${rigId}/follower`),
     events: (sinceLog = 0, sinceObserved = 0, rigId?: string) => request<LiveEvents>(`/api/live/events?since_log=${sinceLog}&since_observed=${sinceObserved}${rigId ? `&rig_id=${encodeURIComponent(rigId)}` : ""}`),
     inject: (body: { endpoint_id: string; type: "pc" | "cc"; channel: number; number: number; value?: number | null }) => request<{ delivered: boolean; hex: string }>("/api/live/virtual/inject", { method: "POST", body: JSON.stringify(body) }),
+    /** Session 5 performance: readiness is a report; Start is the one explicit transmitting gesture; Stop needs no controller id. */
+    textureReadiness: (rigId: string, textureId: string) => request<Readiness>(`/api/live/rigs/${rigId}/textures/${textureId}/readiness`),
+    startPerformance: (rigId: string, textureId: string, acknowledge: string[] = []) =>
+      request<{ controller_id: string; status: LiveStatus }>(`/api/live/rigs/${rigId}/textures/${textureId}/start`, { method: "POST", body: JSON.stringify({ acknowledge }) }),
+    stopPerformance: () => request<LiveStatus>("/api/live/perform/stop", { method: "POST" }),
+    performanceHeartbeat: (controllerId: string) => request<PerformanceStatus>("/api/live/perform/heartbeat", { method: "POST", body: JSON.stringify({ controller_id: controllerId }) }),
+    performanceParams: (controllerId: string, body: { tempo_bpm?: number; macros?: Record<string, { base?: number; enabled?: boolean; depth?: number; beats_per_cycle?: number }> }) =>
+      request<PerformanceStatus>("/api/live/perform/params", { method: "POST", body: JSON.stringify({ controller_id: controllerId, ...body }) }),
+    performanceStatus: () => request<PerformanceStatus>("/api/live/perform/status"),
   },
   catalog: {
     boards: () => request<PedalboardSpec[]>("/api/catalog/boards"),

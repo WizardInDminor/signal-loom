@@ -479,3 +479,85 @@ simulated USB per device whose profile lists USB MIDI, plus an input for control
 interface), simulated pedals are attached to the receiver networks the route graph derives from the
 bindings, channel-filtered, and keep program/bank/bypass/CC state. Selecting the real transport when
 `python-rtmidi` is missing is refused with the reason; the simulation is never substituted silently.
+
+## The whole-rig instrument: Textures and the performance engine (Session 5)
+
+The planner and the Session 4 live layer are unchanged; Session 5 adds the first *musical* object
+and a bounded way to play it.
+
+```
+backend/app/models/texture.py     Texture · Macro · Mapping · Lfo — authored intent on the rig document
+backend/app/instrument/
+  evaluator.py                    pure math: period, phase, triangle, effective macro, half-up scaling
+  eligibility.py                  which CCs may be swept, and the provenance of that decision
+  diagnostics.py                  texture.* review diagnostics and the analysis.textures report
+backend/app/live/performance.py   PerformanceEngine: Clock, states, lease, budget, tick, Stop
+backend/app/live/sender.py        + open_stream / stream_one / cancel_job / on_disarm hooks
+backend/app/live/service.py       + texture_readiness, start/stop/heartbeat/params, "refuse while performing"
+backend/app/api/live.py           + /rigs/{rig}/textures/{tex}/readiness|start, /perform/stop|heartbeat|params|status
+frontend/src/lib/instrument.ts    evaluator mirror (animation only) and the function-role lens
+frontend/src/store/instrumentStore.ts   controller id, heartbeat, readiness; owned by the rig page
+frontend/src/components/instrument/*    the Instrument tab
+```
+
+**Data.** `Rig.textures` is an additive list (child table `textures`, migration 0006, keyed like
+scenes). A `Texture` has a name, intent, notes, an optional `base_scene_id` (a reference, never a
+recall), `tempo_bpm` (20–300), `function_roles` (instance id → drive / dynamics / pitch / modulation
+/ delay / space / routing / other: an editable lens, not a signal-flow claim) and `macros`. A
+`Macro` has a `base` in [0, 1], a `Lfo` (triangle only, `beats_per_cycle` 0.25–64, `depth` 0–1) and
+`mappings`: `instance_id`, `cc`, `output_min`/`output_max` (0–127 each; min > max is the inverse
+gesture), `enabled`, and the user's `user_override` with its mandatory `override_note`. Older rigs
+load with zero textures; `project_dict` omits an empty `textures` key so a rig without textures
+still opens in the previous app version; duplicate and import keep every id. A mapping whose device
+or a texture whose scene is gone is kept verbatim and reported (`texture.instance_missing`,
+`texture.scene_missing`); nothing is retargeted. Runtime state (phase, lease, counters, last
+commanded value) lives in the engine only.
+
+**Eligibility.** `CcDef.continuous` (None on every existing profile) is the documented statement
+that a CC is a repeatable sweep; among shipped real profiles only BigSky MX CC 100 carries it. A CC
+is eligible when it is documented continuous, synthetic (`provenance.source ==
+"synthetic_fixture"`) or user-declared with a note — and never when it is CC 0/32, CC 120–127, the
+bypass CC, a documented switch (bypass/engage/toggle/bank/mute/scroll/save…), documented as
+discrete, or used by a named engage/bypass/toggle command. The physically verified Sunset CC 10/15
+are bypass switches and are refused.
+
+**Evaluator.** `period = beats × 60 / bpm`; `φ = ((t − t0)/period + φ0) mod 1`; triangle `l(0)=0`
+rising, `l(¼)=1`, `l(½)=0`, `l(¾)=−1`; `e = clamp(b + d·l, 0, 1)` (LFO off → `e = b`); value
+`clamp(floor(min + (max−min)·e + 0.5), 0, 127)`. NaN/∞ and out-of-bounds inputs raise. The TypeScript
+mirror animates; the analysis and readiness reports carry the backend's numbers.
+
+**Engine.** One `PerformanceEngine` per `LiveService`, idle and disarmed on every start. `start`
+needs: rig connected, sender armed, no audition/panel message pending, no performance running, ≥1
+enabled eligible mapping, every enabled mapping resolved to an open output endpoint with a
+supported/unverified CC route and its prerequisites acknowledged (the Session 4 `live.confirm_route`
+strings). Start returns a `controller_id`; heartbeats renew a 5 s lease; params (macro base, LFO
+on/off/depth/division, BPM) need the controller id; Stop needs nothing. A tick every 100 ms
+evaluates every destination, deduplicates unchanged values, hands at most two changed values to
+`LiveSender.stream_one` (20 msg/s aggregate; one per destination per tick = 10/s each) and *defers*
+the rest to the next tick (recomputed from the newest state, never queued; rotating start so no
+destination starves). The sender coalesces per device/CC, so its queue never holds more than one
+message per destination. Stop paths: Stop, lease expiry, any sender disarm (the sender calls the
+engine's hook inside its disarm critical section), disconnect, mode/rig/bindings change, transport
+error, shutdown. `stop()` cancels the performance's queued values, finishes its job (after which
+`stream_one` refuses), waits for the one message in flight and joins the tick thread. While a
+performance runs, scene auditions and panel sends are refused (`409 live.performing`). A tempo or
+division change freezes the current phase as the new origin: no catch-up burst.
+
+**UI.** The Instrument tab (first tab; Board stays the default for existing deep links) reads the
+texture from the rig store and edits it like any document (undo, revision, debounced PUT). Connect
+in virtual mode binds the simulated USB endpoints as part of the click (real ports are bound in
+the Live tab only); arming is the Session 4 phrase; **Start performance** is a separate button. The
+rig page owns the heartbeat so switching workspaces does not expire the lease; leaving the rig page
+does. A second tab sees the performance, cannot start or steer it, and can Stop it. "Asked now" is
+the browser's evaluation, "last commanded" the backend's; neither is pedal state.
+
+**Post-review guard (finding 1) and destination uniqueness (finding 2).** While a performance of a
+rig runs, the service refuses — under its own lock, through the rig PUT/DELETE, the MC8 bank import
+and the catalog's MIDI/jack/command mutations — any change to that rig's device channels, profiles,
+jacks, device set or cables, and any change to the performing texture's macros or mapping fields
+(`409 live.performing_locked`; `backend/app/live/guard.py::rig_mutation_conflicts` is the pure
+classifier). Macro base, LFO, tempo, descriptive fields, other textures, scenes, the MC8 plan and
+geometry still save. Two enabled mappings addressing one device + CC, or two ready destinations
+resolving to one endpoint + channel + CC, are reported (`texture.destination_conflict`, readiness
+problems) and refuse Start; the engine refuses such a destination set as defense in depth, so the
+per-destination budget and deduplication are per physical control.

@@ -17,6 +17,12 @@ Rules, each proven by a test:
   (its bytes are gone) and is logged as sent; everything behind it is cancelled.
 - A slider's CC stream is coalesced: a queued, unsent CC for the same device and controller is
   replaced instead of piling up.
+- **Streaming (Session 5).** The performance engine hands values over one at a time through
+  ``stream_one`` under one long-lived job: the same lock, armed check, route check and coalescing
+  apply, no "queued" log line is written per value, and ``cancel_job`` (a control call) drops what
+  is queued for that job and finishes it so nothing of it can be enqueued afterwards. The sender
+  tells registered ``on_disarm`` hooks about every disarm from inside the critical section, so a
+  running performance learns about it before the next message could possibly begin.
 - Everything is logged with a monotonic sequence so the UI can poll for what happened.
 """
 
@@ -25,7 +31,7 @@ from __future__ import annotations
 import threading
 import time
 from collections import deque
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Literal
@@ -124,6 +130,8 @@ class Queued:
     resolved: Resolved
     delay_ms: int
     cancelled: bool = False
+    # A streamed (performance) value: logged tersely, never with a per-value "queued" entry.
+    quiet: bool = False
 
 
 @dataclass
@@ -134,8 +142,12 @@ class Job:
     sent: int = 0
     failed: int = 0
     cancelled: int = 0
+    coalesced: int = 0
     started_at: str = field(default_factory=utcnow_iso)
     finished_at: str | None = None
+    # A streaming job grows while it runs and is finished explicitly (``cancel_job``), not when its
+    # count is reached.
+    streaming: bool = False
 
     def as_dict(self) -> dict:
         return {
@@ -145,11 +157,17 @@ class Job:
             "sent": self.sent,
             "failed": self.failed,
             "cancelled": self.cancelled,
+            "coalesced": self.coalesced,
             "pending": max(0, self.total - self.sent - self.failed - self.cancelled),
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "done": self.finished_at is not None,
+            "streaming": self.streaming,
         }
+
+    def _maybe_finish(self) -> None:
+        if not self.streaming and self.sent + self.failed + self.cancelled >= self.total and self.finished_at is None:
+            self.finished_at = utcnow_iso()
 
 
 class LiveSender:
@@ -178,6 +196,9 @@ class LiveSender:
         self._ctl_free.set()
         # Route prerequisites / unverified hops the user acknowledged in this connection session.
         self._acknowledged: set[str] = set()
+        # Called (inside the disarm critical section, lock held) with the reason on every disarm.
+        # Hooks must not block or take locks that a sender caller may hold.
+        self._on_disarm: list[Callable[[str], None]] = []
         # last message Signal Loom attempted to send, per device: "last sent", never "device state"
         self.last_sent: dict[str, dict] = {}
         # The rig the sender currently works for; stamped on every log entry so a rig page shows
@@ -252,6 +273,11 @@ class LiveSender:
         with self._lock:
             return sum(1 for q in self._queue if not q.cancelled)
 
+    def pending_discrete(self) -> int:
+        """Queued audition/panel messages (streamed performance values excluded)."""
+        with self._lock:
+            return sum(1 for q in self._queue if not q.cancelled and not q.quiet)
+
     def status(self) -> dict:
         with self._lock:
             return {
@@ -299,6 +325,16 @@ class LiveSender:
                 "disarmed",
                 f"Disarmed ({reason}). {dropped} queued message(s) dropped; already transmitted messages are not undone.",
             )
+        for hook in list(self._on_disarm):
+            try:
+                hook(reason)
+            except Exception as e:  # pragma: no cover - a hook must never break a disarm
+                self._emit("note", f"disarm hook failed: {e}")
+
+    def on_disarm(self, hook: Callable[[str], None]) -> None:
+        """Register a non-blocking callback told the reason of every disarm (performance engine)."""
+        with self._lock:
+            self._on_disarm.append(hook)
 
     def acknowledge(self, items: list[str]) -> None:
         with self._lock:
@@ -404,6 +440,60 @@ class LiveSender:
             self._ensure_worker()
             return job, warnings
 
+    # -- streaming (performance engine) ------------------------------------------------------
+    def open_stream(self, label: str) -> Job:
+        """A long-lived job for a performance. Values are handed over one at a time with
+        ``stream_one``; ``cancel_job`` ends it."""
+        with self._lock:
+            self._job_counter += 1
+            job = Job(id=f"job_{self._job_counter}", label=label, total=0, streaming=True)
+            self._jobs[job.id] = job
+            return job
+
+    def stream_one(self, job_id: str, resolved: Resolved) -> str:
+        """Hand one performance value to the queue. Returns "queued" or "coalesced". Refuses (raises
+        ``LiveRefused``) while disarmed, for an unavailable route, an unacknowledged route, a
+        non-deterministic message, or once the job has been finished — so nothing can be enqueued
+        after ``cancel_job`` returned."""
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None or job.finished_at is not None:
+                raise LiveRefused("live.stream_closed", "This performance has ended; nothing more is queued for it.")
+            self._check_allowed([resolved], confirm_nondeterministic=False)
+            if resolved.coalesce_key:
+                for q in self._queue:
+                    if not q.cancelled and q.job_id == job_id and q.resolved.coalesce_key == resolved.coalesce_key:
+                        q.resolved = resolved  # newest value wins; the queue never grows per destination
+                        job.coalesced += 1
+                        return "coalesced"
+            job.total += 1
+            self._queue.append(Queued(job_id, job.total - 1, job.total, resolved, 0, quiet=True))
+            self._ensure_worker()
+            return "queued"
+
+    def cancel_job(self, job_id: str, reason: str) -> int:
+        """Finish a streaming job: drop what it still has queued (logged), mark it finished so no
+        later ``stream_one`` can add to it. A control call: returns only once no send is in flight."""
+        with self._control():
+            job = self._jobs.get(job_id)
+            if job is None:
+                return 0
+            n = 0
+            kept: deque[Queued] = deque()
+            while self._queue:
+                q = self._queue.popleft()
+                if q.job_id != job_id or q.cancelled:
+                    kept.append(q)
+                    continue
+                q.cancelled = True
+                job.cancelled += 1
+                n += 1
+                self._emit("cancelled", f"{q.resolved.as_dict()['summary']} cancelled ({reason})", job_id, q.resolved)
+            self._queue = kept
+            if job.finished_at is None:
+                job.finished_at = utcnow_iso()
+            return n
+
     def stop(self) -> int:
         """Cancel everything still queued. Returns only once no send is in flight; transmitted
         messages are not undone (and the log says so)."""
@@ -432,8 +522,7 @@ class LiveSender:
                     q.job_id,
                     q.resolved,
                 )
-                if job.sent + job.failed + job.cancelled >= job.total:
-                    job.finished_at = utcnow_iso()
+                job._maybe_finish()
         return n
 
     # -- worker -----------------------------------------------------------------------
@@ -464,13 +553,13 @@ class LiveSender:
         """Dequeue-check-send as one critical section. Returns the delay to honour afterwards."""
         r = item.resolved
         job = self._jobs.get(item.job_id)
-        if not self._armed or self._transport is None:
+        if not self._armed or self._transport is None or (job is not None and job.finished_at is not None):
             item.cancelled = True
             if job:
                 job.cancelled += 1
-                if job.sent + job.failed + job.cancelled >= job.total and job.finished_at is None:
-                    job.finished_at = utcnow_iso()
-            self._emit("cancelled", f"{r.as_dict()['summary']} not sent: disarmed meanwhile", item.job_id, r)
+                job._maybe_finish()
+            why = "disarmed meanwhile" if not self._armed or self._transport is None else "its job already ended"
+            self._emit("cancelled", f"{r.as_dict()['summary']} not sent: {why}", item.job_id, r)
             return 0
         self._in_flight = item
         try:
@@ -479,9 +568,15 @@ class LiveSender:
             if job:
                 job.sent += 1
             self.last_sent[r.target_instance_id] = self._merge_last(self.last_sent.get(r.target_instance_id), r)
-            self._emit(
-                "sent", f"{item.index + 1}/{item.total} {r.as_dict()['summary']} → {r.endpoint_name}", item.job_id, r
-            )
+            if item.quiet:
+                self._emit("sent", f"performance {r.as_dict()['summary']} → {r.endpoint_name}", item.job_id, r)
+            else:
+                self._emit(
+                    "sent",
+                    f"{item.index + 1}/{item.total} {r.as_dict()['summary']} → {r.endpoint_name}",
+                    item.job_id,
+                    r,
+                )
         except (TransportError, ForbiddenMessageError, ValueError) as e:
             if job:
                 job.failed += 1
@@ -491,8 +586,8 @@ class LiveSender:
                 self._disarm_locked(f"transport error: {e}")
         finally:
             self._in_flight = None
-            if job and job.sent + job.failed + job.cancelled >= job.total and job.finished_at is None:
-                job.finished_at = utcnow_iso()
+            if job:
+                job._maybe_finish()
         return item.delay_ms
 
     @staticmethod

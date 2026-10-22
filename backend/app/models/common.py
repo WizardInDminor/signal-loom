@@ -136,7 +136,9 @@ class Diagnostic(StrictModel):
     code: str
     severity: Severity
     message: str
-    subject_type: Literal["rig", "instance", "port", "connection", "scene", "switch", "preset", "message"] = "rig"
+    subject_type: Literal[
+        "rig", "instance", "port", "connection", "scene", "switch", "preset", "message", "texture"
+    ] = "rig"
     subject_id: str | None = None
     related_ids: list[str] = Field(default_factory=list)
 

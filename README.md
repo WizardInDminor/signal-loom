@@ -23,11 +23,13 @@ Future product concepts (proposed, not implemented or scheduled) are tracked in
 [docs/future-features.md](docs/future-features.md), starting with a deliberately isolated
 **Experiment Mode** for capturing serendipitous multi-pedal combinations.
 
-**Next development phase:** [Session 5 — First Playable Whole-Rig Instrument](SESSION-5-CHARTER.md)
-implements the first Texture, cross-device macro, tempo-linked modulation and safe
-performance vertical slice. The companion [Creative Instrument Vision](docs/creative-instrument-vision.md)
-captures the broader long-term musical direction. These are **plans**, not features
-presently implemented on main.
+**Session 5 — the first playable whole-rig instrument** ([charter](SESSION-5-CHARTER.md),
+[direction](SESSION-5-DIRECTION.md), [results](SESSION-5-RESULTS.md)) adds the **Instrument** tab: a
+named **Texture** whose one macro moves documented continuous controls on several pedals through
+independent ranges, with a tempo-related triangle LFO, previewed without any MIDI and performed only
+through an explicit connect → arm → **Start** under a message budget and a browser lease. The
+companion [Creative Instrument Vision](docs/creative-instrument-vision.md) captures the longer
+musical direction (movements, transitions, Experiment Lab); those remain plans.
 
 ## Prerequisites
 
@@ -97,6 +99,36 @@ cd frontend && npm run test:e2e
 ```
 
 GitHub Actions runs the same gates on every push (`.github/workflows/ci.yml`).
+
+## Play the rig as one instrument (Session 5)
+
+Open a rig and pick **Instrument** (the first tab), or create a rig from the library with *Start
+from the synthetic instrument demo*: that makes the **Undertow** rig — two Signal Loom *virtual*
+pedals (synthetic, labelled so everywhere; not a real product) and a Texture whose **Bloom** macro
+moves Pedal A's synthetic CC 21 from 100 down to 30 while Pedal B's CC 22 rises from 15 to 110, with
+a slow triangle over eight beats at 72 BPM.
+
+1. **What am I playing?** — name, musical intent, the Scene the idea starts from (a reference;
+   selecting it sends nothing), the tempo (a reference for modulation; no MIDI Clock is sent), and
+   the large macro with its LFO (cycle in beats, depth, phase readout). Everything here is saved
+   with the rig like a scene: undo, autosave, export, duplicate, import.
+2. **What does it move?** — the rig grouped by function (relabel any device per texture) and the
+   patch list: macro → destination with its range and direction, the exact seven-bit values at
+   macro 0 / ½ / 1, the live preview value, why the control may (or may not) be swept, its MIDI
+   channel and route. Only controls a profile documents as *continuous* are offered as sweeps;
+   anything else needs your explicit declaration with a note and is always marked as your claim.
+   Bank select, channel-mode CCs and bypass/toggle controls are refused outright.
+3. **What is happening?** — PREVIEW → DISARMED → ARMED → PERFORMING. Connect (virtual or real
+   ports), arm with the Session 4 phrase, then press **Start performance**; **Stop** is always one
+   click away and works from any tab. The stream is budgeted (20 messages/s in total, 10 per
+   destination), deduplicated and lease-protected: the controlling tab heartbeats, and the backend
+   stops the stream by itself a few seconds after that tab goes away. Any disarm (a lost port, a
+   bindings change, a disconnect, a restart) stops it too. The counters show planned / handed /
+   deduplicated / deferred, and each destination shows the value asked for now and the last value
+   commanded — never "pedal state". A virtual performance is simulation, not hardware evidence.
+
+When your real rig has no documented or declared continuous control on two different pedals, the
+tab says so plainly and offers the synthetic demo instead of inventing one.
 
 ## Working with the board and the wiring (Session 2)
 

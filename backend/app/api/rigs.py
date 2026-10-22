@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import base64
 import copy
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from ..assets import ImageAssetError
-from ..catalog.demo import demo_rig
+from ..catalog.demo import demo_rig, virtual_instrument_rig
 from ..documents import DocumentError
 from ..domain.geometry import rotated_size
 from ..exports.project import (
@@ -19,6 +20,7 @@ from ..exports.project import (
     project_dict,
 )
 from ..images import image_asset_ids, resolve_image
+from ..live.sender import LiveRefused
 from ..models.common import new_id
 from ..models.rig import PreviewDevice, Rig, RigPreview, RigSummary, utcnow_iso
 from .deps import asset_store, assets_for, load_rig, profile_repo, profiles_for, rig_repo
@@ -32,6 +34,9 @@ class RigCreate(BaseModel):
     board_width_mm: float = Field(default=600, gt=0, le=5000)
     board_depth_mm: float = Field(default=300, gt=0, le=5000)
     from_demo: bool = False
+    # Optional template: "virtual_instrument" creates the Session 5 synthetic Undertow demo (two
+    # simulated pedals with labelled synthetic continuous CCs). Never created implicitly.
+    template: Literal["virtual_instrument"] | None = None
 
 
 class RenameBody(BaseModel):
@@ -80,7 +85,12 @@ def list_rigs(request: Request):
 
 @router.post("", response_model=Rig, status_code=201)
 def create_rig(body: RigCreate, request: Request):
-    if body.from_demo:
+    if body.template == "virtual_instrument":
+        rig = virtual_instrument_rig()
+        rig.id = new_id("rig")
+        rig.name = body.name
+        rig.created_at = rig.updated_at = utcnow_iso()
+    elif body.from_demo:
         rig = demo_rig()
         rig.id = new_id("rig")
         rig.name = body.name
@@ -97,28 +107,41 @@ def get_rig(rig_id: str, request: Request):
     return load_rig(request, rig_id)
 
 
+def _performing_locked(e: LiveRefused) -> HTTPException:
+    return HTTPException(status_code=409, detail={"code": e.code, "message": str(e), **e.detail})
+
+
 @router.put("/{rig_id}", response_model=Rig)
 def put_rig(rig_id: str, rig: Rig, request: Request):
-    """Replace the whole rig document (the UI saves the single underlying model)."""
+    """Replace the whole rig document (the UI saves the single underlying model). While a
+    performance of this rig runs, a save that changes MIDI addressing or the performing texture's
+    destinations is refused (``409 live.performing_locked``); the check and the save share the live
+    service's lock so nothing can slip between Start and its first message."""
     repo = rig_repo(request)
-    existing = repo.get(rig_id)
-    if existing is None:
-        raise HTTPException(status_code=404, detail=f"Rig '{rig_id}' not found")
-    if rig.id != rig_id:
-        raise HTTPException(status_code=400, detail="Rig id in body does not match URL")
-    if rig.revision < existing.revision:
-        # A save that was overtaken by a newer one (or another tab) must not win.
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "stale_revision",
-                "message": f"Rig revision {rig.revision} is older than the stored revision {existing.revision}; reload before editing.",
-                "stored_revision": existing.revision,
-            },
-        )
-    rig.created_at = existing.created_at
-    _validate_references(rig)
-    return repo.save(rig)
+    live = request.app.state.live
+    with live.mutation_guard():
+        existing = repo.get(rig_id)
+        if existing is None:
+            raise HTTPException(status_code=404, detail=f"Rig '{rig_id}' not found")
+        if rig.id != rig_id:
+            raise HTTPException(status_code=400, detail="Rig id in body does not match URL")
+        if rig.revision < existing.revision:
+            # A save that was overtaken by a newer one (or another tab) must not win.
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "stale_revision",
+                    "message": f"Rig revision {rig.revision} is older than the stored revision {existing.revision}; reload before editing.",
+                    "stored_revision": existing.revision,
+                },
+            )
+        rig.created_at = existing.created_at
+        _validate_references(rig)
+        try:
+            live.check_rig_replacement(existing, rig)
+        except LiveRefused as e:
+            raise _performing_locked(e) from e
+        return repo.save(rig)
 
 
 def _validate_references(rig: Rig) -> None:
@@ -131,6 +154,11 @@ def _validate_references(rig: Rig) -> None:
     scene_ids = [s.id for s in rig.scenes]
     if len(set(scene_ids)) != len(scene_ids):
         raise HTTPException(status_code=422, detail="Duplicate scene ids")
+    texture_ids = [t.id for t in rig.textures]
+    if len(set(texture_ids)) != len(texture_ids):
+        raise HTTPException(status_code=422, detail="Duplicate texture ids")
+    # A texture pointing at a device or scene that is gone is kept and reported by the analysis
+    # (``texture.instance_missing`` / ``texture.scene_missing``): never rejected, never retargeted.
     for c in rig.connections:
         if c.source.instance_id not in ids or c.target.instance_id not in ids:
             raise HTTPException(status_code=422, detail=f"Connection {c.id} refers to a device that is not on the rig")
@@ -138,17 +166,25 @@ def _validate_references(rig: Rig) -> None:
 
 @router.patch("/{rig_id}", response_model=Rig)
 def rename_rig(rig_id: str, body: RenameBody, request: Request):
-    rig = load_rig(request, rig_id)
-    rig.name = body.name
-    if body.description is not None:
-        rig.description = body.description
-    return rig_repo(request).save(rig)
+    """Rename / re-describe a rig. A metadata-only UPDATE: it never rewrites the document, so it
+    cannot overwrite a newer device, cable, scene or texture change, and it leaves the revision
+    alone. Allowed while the rig performs (a name is not MIDI addressing)."""
+    load_rig(request, rig_id)  # 404 if unknown
+    repo = rig_repo(request)
+    repo.update_metadata(rig_id, name=body.name, description=body.description)
+    return load_rig(request, rig_id)
 
 
 @router.delete("/{rig_id}", status_code=204)
 def delete_rig(rig_id: str, request: Request):
-    if not rig_repo(request).delete(rig_id):
-        raise HTTPException(status_code=404, detail=f"Rig '{rig_id}' not found")
+    live = request.app.state.live
+    with live.mutation_guard():
+        try:
+            live.check_rig_deletion(rig_id)
+        except LiveRefused as e:
+            raise _performing_locked(e) from e
+        if not rig_repo(request).delete(rig_id):
+            raise HTTPException(status_code=404, detail=f"Rig '{rig_id}' not found")
     return None
 
 

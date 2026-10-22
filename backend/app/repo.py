@@ -23,6 +23,7 @@ from .models.rig import (
     Scene,
     utcnow_iso,
 )
+from .models.texture import Texture
 
 
 def _dump(model: Any) -> str:
@@ -72,6 +73,10 @@ class RigRepository:
             Scene.model_validate(json.loads(r["data"]))
             for r in c.execute("SELECT data FROM scenes WHERE rig_id = ? ORDER BY sort_order", (rig_id,))
         ]
+        textures = [
+            Texture.model_validate(json.loads(r["data"]))
+            for r in c.execute("SELECT data FROM textures WHERE rig_id = ? ORDER BY sort_order", (rig_id,))
+        ]
         return Rig(
             id=row["id"],
             name=row["name"],
@@ -85,10 +90,27 @@ class RigRepository:
             instances=instances,
             connections=connections,
             scenes=scenes,
+            textures=textures,
         )
 
     def exists(self, rig_id: str) -> bool:
         return self.db.conn.execute("SELECT 1 FROM rigs WHERE id = ?", (rig_id,)).fetchone() is not None
+
+    def update_metadata(self, rig_id: str, *, name: str | None = None, description: str | None = None) -> bool:
+        """Change only the rig's name and/or description, in one UPDATE statement. Nothing else of
+        the document is read or written, so a concurrent save of devices, cables, scenes, textures
+        or the revision can never be overwritten by a rename (final pre-merge review)."""
+        sets, params = ["updated_at = ?"], [utcnow_iso()]
+        if name is not None:
+            sets.append("name = ?")
+            params.append(name)
+        if description is not None:
+            sets.append("description = ?")
+            params.append(description)
+        params.append(rig_id)
+        with self.db.tx() as c:
+            cur = c.execute(f"UPDATE rigs SET {', '.join(sets)} WHERE id = ?", params)
+            return cur.rowcount > 0
 
     def save(self, rig: Rig, *, touch: bool = True) -> Rig:
         """Insert or fully update a rig document. Returns the stored rig."""
@@ -156,6 +178,12 @@ class RigRepository:
                 "scenes",
                 rig.id,
                 [(s.id, {"name": s.name}, _dump(s)) for s in rig.scenes],
+            )
+            self._sync_children(
+                c,
+                "textures",
+                rig.id,
+                [(t.id, {"name": t.name}, _dump(t)) for t in rig.textures],
             )
         return rig
 

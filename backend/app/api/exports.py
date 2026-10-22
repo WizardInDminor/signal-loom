@@ -12,7 +12,8 @@ from ..exports.text import (
     wiring_manifest_csv,
     wiring_manifest_markdown,
 )
-from ..models.rig import Mc8Bank
+from ..live.sender import LiveRefused
+from ..models.rig import Mc8Bank, Rig
 from ..morningstar import specs
 from ..morningstar.backup_diff import diff_backups
 from ..morningstar.mc8_export import (
@@ -211,7 +212,7 @@ async def import_mc8_bank(rig_id: str, request: Request, replace: bool = False):
     Nothing is mapped to scenes: the messages become ``extra_messages`` so the round trip to
     the bank-backup export is lossless for PC/CC content and visible in the switch map.
     """
-    rig = load_rig(request, rig_id)
+    load_rig(request, rig_id)  # 404 if unknown, before the file is parsed
     raw = (await request.body()).decode("utf-8", errors="replace")
     result = bank_dump_to_plan(raw)
     if not result["ok"]:
@@ -219,18 +220,28 @@ async def import_mc8_bank(rig_id: str, request: Request, replace: bool = False):
             status_code=422, detail={"message": "Not an importable MC8 bank backup.", "problems": result["problems"]}
         )
     bank = Mc8Bank.model_validate(result["bank"])
-    existing = next((b for b in rig.controllers.mc8.banks if b.number == bank.number), None)
-    if existing is not None and not replace:
-        used = {b.number for b in rig.controllers.mc8.banks}
-        n = bank.number
-        while n in used:
-            n += 1
-        bank.number = n
-    if existing is not None and replace:
-        rig.controllers.mc8.banks = [b for b in rig.controllers.mc8.banks if b.number != bank.number]
-    rig.controllers.mc8.banks.append(bank)
-    rig.revision += 1
-    saved = rig_repo(request).save(rig)
+    live = request.app.state.live
+    # Read-modify-save of the whole document under the configuration write lock (the lock every
+    # other whole-document writer takes), so a concurrent PUT is serialised before or after this.
+    with live.mutation_guard():
+        before = load_rig(request, rig_id)
+        rig = Rig.model_validate(before.model_dump(mode="json"))
+        existing = next((b for b in rig.controllers.mc8.banks if b.number == bank.number), None)
+        if existing is not None and not replace:
+            used = {b.number for b in rig.controllers.mc8.banks}
+            n = bank.number
+            while n in used:
+                n += 1
+            bank.number = n
+        if existing is not None and replace:
+            rig.controllers.mc8.banks = [b for b in rig.controllers.mc8.banks if b.number != bank.number]
+        rig.controllers.mc8.banks.append(bank)
+        rig.revision += 1
+        try:
+            live.check_rig_replacement(before, rig)  # the MC8 plan is not addressing: passes while performing
+        except LiveRefused as e:
+            raise HTTPException(status_code=409, detail={"code": e.code, "message": str(e), **e.detail}) from e
+        saved = rig_repo(request).save(rig)
     return {
         "rig": saved.model_dump(mode="json"),
         "bank_number": bank.number,

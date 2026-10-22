@@ -58,3 +58,10 @@ table th { font-weight: 500; }
   .stage-flow, .stage-pulse, .stage-led-glow { animation: none; }
   .stage-pulse { opacity: 0; }
 }
+
+/* Instrument: the meter and the range cursor follow the evaluated value; static under reduced motion. */
+.inst-meter { transition: height 120ms linear; }
+.inst-cursor { transition: left 120ms linear; }
+@media (prefers-reduced-motion: reduce) {
+  .inst-meter, .inst-cursor { transition: none; }
+}

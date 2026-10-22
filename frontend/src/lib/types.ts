@@ -54,7 +54,8 @@ export interface PortDef {
 }
 export interface SupplyOption { voltage_v: number; current_ma_max: number | null; note?: string | null }
 
-export interface CcDef { cc: number; name: string; value_semantics?: string | null; evidence: Evidence }
+/** `continuous`: documented as a repeatable 0–127 sweep (true), discrete (false) or not stated (null/absent). Only true makes a CC eligible for modulation. */
+export interface CcDef { cc: number; name: string; value_semantics?: string | null; evidence: Evidence; continuous?: boolean | null }
 
 /** A user-supplied PDF attached to a profile, by reference only (bytes live in the local document store). */
 export type DocumentKind = "manual" | "quick_start" | "midi_chart" | "other";
@@ -188,9 +189,37 @@ export interface Mc8Message { type: string; channel: number | null; number: numb
 export interface Mc8Preset { position: string; short_name: string; long_name?: string | null; toggle_name?: string | null; toggle_mode: boolean; scene_id: string | null; action: string; extra_messages: Mc8Message[] }
 export interface Mc8Bank { number: number; name: string; presets: Mc8Preset[] }
 export interface Ml10xPreset { number: number; name: string; mode: "simple" | "advanced"; chain: number[]; bypassed_loops: number[]; advanced_edges: string[][]; notes?: string | null }
+// ---------------------------------------------------------------------------- Textures (Session 5)
+// Mirror of backend/app/models/texture.py: authored musical intent that travels with the rig.
+export type LfoShape = "triangle";
+export type TextureOrigin = "user" | "virtual_fixture";
+export const FUNCTION_ROLES = ["drive", "dynamics", "pitch", "modulation", "delay", "space", "routing", "other"] as const;
+export type FunctionRole = (typeof FUNCTION_ROLES)[number];
+export const TEMPO_MIN_BPM = 20;
+export const TEMPO_MAX_BPM = 300;
+export interface Lfo { enabled: boolean; shape: LfoShape; beats_per_cycle: number; depth: number }
+/** One macro destination: a CC on a placed device scaled into an authored range (min > max = inverse). */
+export interface Mapping {
+  id: string; instance_id: string; cc: number; output_min: number; output_max: number; label?: string | null; enabled: boolean;
+  /** The user's explicit claim that this CC is safe to sweep on this device; needs a note and is always shown with a warning. */
+  user_override: boolean; override_note?: string | null;
+}
+export interface Macro { id: string; name: string; base: number; mappings: Mapping[]; lfo: Lfo }
+export interface Texture {
+  id: string; name: string; intent?: string | null; notes?: string | null; base_scene_id?: string | null; tempo_bpm: number;
+  macros: Macro[]; function_roles: Record<string, string>; origin: TextureOrigin; created_at?: string | null; updated_at?: string | null;
+}
+export type EligibilityBasis = "documented" | "synthetic" | "user_declared";
+export interface Eligibility { eligible: boolean; reason: string; basis: EligibilityBasis | null; warnings: string[]; control_name: string | null; evidence: string | null; channel: number | null; instance_label: string | null; synthetic: boolean; hard_refusal: boolean }
+/** `analysis.textures[texture_id]`: per mapping its eligibility and the backend's values at macro 0 / ½ / 1. */
+/** `conflict`: set when another *enabled* mapping of the same texture addresses the same device and CC (two sources cannot drive one control; Start is refused until repaired). */
+export interface TextureReport { id: string; name: string; base_scene_missing: boolean; mappings: Record<string, Eligibility & { at_0: number; at_half: number; at_1: number; macro_id: string; inverted: boolean; conflict?: string | null }>; eligible_devices: string[] }
+
 export interface Rig {
   id: string; name: string; description?: string | null; created_at: string; updated_at: string; revision: number;
   board: Board; instances: DeviceInstance[]; connections: Connection[]; scenes: Scene[];
+  /** Musical ideas (Session 5); absent/empty on older rigs. */
+  textures: Texture[];
   controllers: {
     mc8: { instance_id: string | null; banks: Mc8Bank[]; firmware_version: string | null };
     ml10x: { instance_id: string | null; firmware_version: string | null; advanced_mode: boolean; loop_assignments: { loop: number; label?: string | null; stereo_pair_with?: number | null }[]; presets: Ml10xPreset[] };
@@ -249,6 +278,7 @@ export interface Analysis {
   mounting: { spec: PedalboardSpec | null; clearance_mm: number | null; clearance_source: string; counts: Record<Surface, number> };
   instances: Record<string, { width_mm: number; height_mm: number; placeholder: boolean; surface: Surface; tall_mm: number | null; ports: PlacedPort[]; effective_ports: PortDef[]; unknowns: string[]; image: ResolvedImage | null }>;
   compiled: { scenes: ScenePlan[]; mc8: { instance_id: string | null; firmware_assumed: string; limits: { banks: number; presets_per_bank: number; messages_per_preset: number; footswitch_positions: string[] }; banks: { number: number; name: string; diagnostics: Diagnostic[]; switches: SwitchPlan[] }[] }; diagnostics: Diagnostic[] };
+  textures: Record<string, TextureReport>;
 }
 export interface ExportStatus { [key: string]: { level: string; available: boolean; note: string } }
 
@@ -287,7 +317,29 @@ export interface LiveStatus {
   /** Route prerequisites / unverified hops acknowledged in this connection session. */
   acknowledged: string[];
   jobs: LiveJob[];
+  /** Session 5: the performance engine. */
+  performance: PerformanceStatus;
 }
+
+// ---------------------------------------------------------------------------- Performance (Session 5)
+export type PerformanceState = "idle" | "performing" | "stopped" | "fault";
+export interface PerformanceMacro { macro_id: string; name: string; base: number; lfo_enabled: boolean; depth: number; beats_per_cycle: number; phase: number; lfo: number; effective: number }
+export interface PerformanceDestination { mapping_id: string; macro_id: string; instance_id: string; label: string; cc: number; channel: number; output_min: number; output_max: number; endpoint_name: string | null; route_status: CoverageStatus; last_commanded: number | null; handed: number }
+export interface PerformanceCounters { ticks: number; evaluations: number; planned: number; handed: number; deduplicated: number; deferred: number; refused: number }
+export interface PerformanceStatus {
+  state: PerformanceState; tick_s: number; max_per_tick: number; budget: { aggregate_per_s: number; per_destination_per_s: number }; lease_s: number;
+  texture_id: string | null; texture_name: string | null; rig_id: string | null; job_id: string | null;
+  started_at: string | null; stopped_at: string | null; stop_reason: string | null; stopped_by: string | null;
+  elapsed_s: number | null; lease_remaining_s: number | null; heartbeats: number; has_controller: boolean; tempo_bpm: number | null;
+  counters: PerformanceCounters; macros: PerformanceMacro[]; destinations: PerformanceDestination[]; note: string;
+}
+export interface ReadinessMapping {
+  mapping_id: string; macro_id: string; macro_name: string; instance_id: string; label: string; cc: number; channel: number | null;
+  output_min: number; output_max: number; inverted: boolean; enabled: boolean; eligibility: Eligibility;
+  route: { status: CoverageStatus; evidence: RouteEvidence | null; reason: string; endpoint_id: string | null; endpoint_name: string | null; open: boolean };
+  needs_ack: string[]; pending_ack: string[]; values: { at_0: number; at_half: number; at_1: number }; ready: boolean; problems: string[];
+}
+export interface Readiness { rig_id: string; texture_id: string; texture_name: string; connected: boolean; armed: boolean; mode: TransportMode; performing: boolean; mappings: ReadinessMapping[]; distinct_devices: string[]; confirmations_required: string[]; can_start: boolean; blockers: string[]; note: string }
 
 export interface HopCapability { status: "supported" | "unsupported" | "unknown"; evidence: RouteEvidence; reason: string; prerequisites: string[] }
 export interface RouteHop { key: string; from: { node: string; label: string; port_id: string | null }; to: { node: string; label: string; port_id: string | null }; medium: string; connection_id: string | null; capabilities: Record<MessageKind, HopCapability>; note: string | null }

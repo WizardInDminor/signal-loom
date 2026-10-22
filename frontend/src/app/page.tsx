@@ -14,6 +14,7 @@ export default function RigLibraryPage() {
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [fromDemo, setFromDemo] = useState(false);
+  const [fromInstrumentDemo, setFromInstrumentDemo] = useState(false);
   const [width, setWidth] = useState(600);
   const [depth, setDepth] = useState(300);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -35,8 +36,8 @@ export default function RigLibraryPage() {
     e.preventDefault();
     if (!name.trim()) return;
     try {
-      const rig = await api.rigs.create({ name: name.trim(), from_demo: fromDemo, board_width_mm: width, board_depth_mm: depth });
-      router.push(`/rigs/${rig.id}`);
+      const rig = await api.rigs.create({ name: name.trim(), from_demo: fromDemo && !fromInstrumentDemo, template: fromInstrumentDemo ? "virtual_instrument" : null, board_width_mm: width, board_depth_mm: depth });
+      router.push(fromInstrumentDemo ? `/rigs/${rig.id}#instrument` : `/rigs/${rig.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -113,10 +114,14 @@ export default function RigLibraryPage() {
                 <input value={name} onChange={(e) => setName(e.target.value)} required placeholder="e.g. Sunday board" />
               </Field>
               <label className="text-xs flex items-center gap-2">
-                <input type="checkbox" checked={fromDemo} onChange={(e) => setFromDemo(e.target.checked)} />
+                <input type="checkbox" checked={fromDemo} onChange={(e) => { setFromDemo(e.target.checked); if (e.target.checked) setFromInstrumentDemo(false); }} />
                 Start from the demo rig (ML10X + MC8 + three scenes)
               </label>
-              {!fromDemo && (
+              <label className="text-xs flex items-center gap-2">
+                <input type="checkbox" checked={fromInstrumentDemo} data-testid="new-rig-instrument-demo" onChange={(e) => { setFromInstrumentDemo(e.target.checked); if (e.target.checked) setFromDemo(false); }} />
+                Start from the synthetic instrument demo (Undertow: two virtual pedals, one macro, one LFO)
+              </label>
+              {!fromDemo && !fromInstrumentDemo && (
                 <div className="grid grid-cols-2 gap-2">
                   <Field label="Board width (mm)">
                     <input type="number" min={100} max={5000} value={width} onChange={(e) => setWidth(Number(e.target.value))} />

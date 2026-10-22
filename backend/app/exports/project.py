@@ -80,10 +80,14 @@ def bundle_documents(project: ProjectFile, documents: dict, read_bytes) -> Proje
 def project_dict(project: ProjectFile) -> dict:
     """The JSON a project file is written as. ``assets`` is always present (as every export since
     format 1 has written it); the newer ``documents`` section is omitted when empty, so a plain
-    export stays readable by versions of the app that predate it."""
+    export stays readable by versions of the app that predate it. Likewise ``rig.textures`` (Session
+    5) is omitted when the rig has none, so an older app still opens the file; a rig *with* textures
+    needs this version or later (an older app refuses the unknown key rather than dropping it)."""
     d = project.model_dump(mode="json")
     if not d.get("documents"):
         d.pop("documents", None)
+    if isinstance(d.get("rig"), dict) and not d["rig"].get("textures"):
+        d["rig"].pop("textures", None)
     return d
 
 

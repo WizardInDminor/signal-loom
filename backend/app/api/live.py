@@ -106,6 +106,26 @@ class EndpointBody(BaseModel):
     endpoint_id: str
 
 
+class StartBody(BaseModel):
+    acknowledge: list[str] = Field(default_factory=list)
+
+
+class ControllerBody(BaseModel):
+    controller_id: str = Field(min_length=1, max_length=64)
+
+
+class MacroParams(BaseModel):
+    base: float | None = Field(default=None, ge=0.0, le=1.0)
+    enabled: bool | None = None
+    depth: float | None = Field(default=None, ge=0.0, le=1.0)
+    beats_per_cycle: float | None = Field(default=None, ge=0.25, le=64.0)
+
+
+class ParamsBody(ControllerBody):
+    tempo_bpm: float | None = Field(default=None, ge=20.0, le=300.0)
+    macros: dict[str, MacroParams] = Field(default_factory=dict)
+
+
 @router.get("/status", dependencies=deps)
 def status(svc: Live):
     return svc.status()
@@ -271,3 +291,49 @@ def inject(body: InjectBody, svc: Live):
         raise _refused(e) from e
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
+
+
+# -- performance (Session 5): explicit Start/Stop, lease, live parameters ------------------------
+@router.get("/rigs/{rig_id}/textures/{texture_id}/readiness", dependencies=deps)
+def texture_readiness(rig_id: str, texture_id: str, svc: Live):
+    try:
+        return svc.texture_readiness(rig_id, texture_id)
+    except LiveRefused as e:
+        raise _refused(e) from e
+
+
+@router.post("/rigs/{rig_id}/textures/{texture_id}/start", dependencies=deps)
+def start_performance(rig_id: str, texture_id: str, body: StartBody, svc: Live):
+    try:
+        return svc.start_performance(rig_id, texture_id, body.acknowledge)
+    except LiveRefused as e:
+        raise _refused(e) from e
+
+
+@router.post("/perform/stop", dependencies=deps)
+def stop_performance(svc: Live):
+    """Anyone local may stop: Stop is never gated on the controller id."""
+    return svc.stop_performance()
+
+
+@router.post("/perform/heartbeat", dependencies=deps)
+def performance_heartbeat(body: ControllerBody, svc: Live):
+    try:
+        return svc.performance_heartbeat(body.controller_id)
+    except LiveRefused as e:
+        raise _refused(e) from e
+
+
+@router.post("/perform/params", dependencies=deps)
+def performance_params(body: ParamsBody, svc: Live):
+    try:
+        return svc.performance_params(
+            body.controller_id, body.tempo_bpm, {k: v.model_dump(exclude_none=True) for k, v in body.macros.items()}
+        )
+    except LiveRefused as e:
+        raise _refused(e) from e
+
+
+@router.get("/perform/status", dependencies=deps)
+def performance_status(svc: Live):
+    return svc.performance.status()

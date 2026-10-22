@@ -9,6 +9,7 @@ from pydantic import Field, model_validator
 
 from .common import Rotation, SignalKind, StrictModel, new_id
 from .profile import DeviceImage, PortDef
+from .texture import Texture
 
 # Where a device is mounted. "top": on the board's upper surface; "underside": under the board,
 # in the same x/y coordinate system seen through the board from above (not mirrored);
@@ -258,6 +259,9 @@ class Rig(StrictModel):
     connections: list[Connection] = Field(default_factory=list)
     scenes: list[Scene] = Field(default_factory=list)
     controllers: Controllers = Field(default_factory=Controllers)
+    # Musical ideas (Session 5). Empty on every rig saved before textures existed; loading never
+    # adds one. A texture references instance/scene ids and is copied/imported with them.
+    textures: list[Texture] = Field(default_factory=list)
     notes: str | None = None
 
     def instance(self, instance_id: str) -> DeviceInstance | None:
@@ -270,6 +274,12 @@ class Rig(StrictModel):
         for s in self.scenes:
             if s.id == scene_id:
                 return s
+        return None
+
+    def texture(self, texture_id: str) -> Texture | None:
+        for t in self.textures:
+            if t.id == texture_id:
+                return t
         return None
 
 
