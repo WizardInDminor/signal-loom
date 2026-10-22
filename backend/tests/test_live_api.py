@@ -251,9 +251,11 @@ def test_released_output_is_excluded_from_routes_until_reacquired(client):
     )
     client.put(f"/api/live/rigs/{RIG}/bindings", json=b).raise_for_status()
     url = f"/api/live/rigs/{RIG}/scenes/scene_solo/dry-run"
+
     def bigsky_pc():
         return next(
-            m for m in client.post(url).json()["messages"]
+            m
+            for m in client.post(url).json()["messages"]
             if m["target_instance_id"] == "inst_bigsky" and m["type"] == "pc"
         )
 

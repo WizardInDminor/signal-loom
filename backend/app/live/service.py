@@ -153,7 +153,11 @@ class LiveService:
                             reason = st.error if st and st.error else "not open"
                         inactive[b.endpoint_id] = reason
             g = build_route_graph(
-                rig, profiles, ctx, bindings, self._enumerate(rig, profiles),
+                rig,
+                profiles,
+                ctx,
+                bindings,
+                self._enumerate(rig, profiles),
                 inactive_output_endpoints=inactive,
             )
             return rig, profiles, g
