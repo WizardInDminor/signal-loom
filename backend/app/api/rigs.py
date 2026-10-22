@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import base64
 import copy
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from ..assets import ImageAssetError
-from ..catalog.demo import demo_rig
+from ..catalog.demo import demo_rig, virtual_instrument_rig
 from ..documents import DocumentError
 from ..domain.geometry import rotated_size
 from ..exports.project import (
@@ -32,6 +33,9 @@ class RigCreate(BaseModel):
     board_width_mm: float = Field(default=600, gt=0, le=5000)
     board_depth_mm: float = Field(default=300, gt=0, le=5000)
     from_demo: bool = False
+    # Optional template: "virtual_instrument" creates the Session 5 synthetic Undertow demo (two
+    # simulated pedals with labelled synthetic continuous CCs). Never created implicitly.
+    template: Literal["virtual_instrument"] | None = None
 
 
 class RenameBody(BaseModel):
@@ -80,7 +84,12 @@ def list_rigs(request: Request):
 
 @router.post("", response_model=Rig, status_code=201)
 def create_rig(body: RigCreate, request: Request):
-    if body.from_demo:
+    if body.template == "virtual_instrument":
+        rig = virtual_instrument_rig()
+        rig.id = new_id("rig")
+        rig.name = body.name
+        rig.created_at = rig.updated_at = utcnow_iso()
+    elif body.from_demo:
         rig = demo_rig()
         rig.id = new_id("rig")
         rig.name = body.name
@@ -131,6 +140,11 @@ def _validate_references(rig: Rig) -> None:
     scene_ids = [s.id for s in rig.scenes]
     if len(set(scene_ids)) != len(scene_ids):
         raise HTTPException(status_code=422, detail="Duplicate scene ids")
+    texture_ids = [t.id for t in rig.textures]
+    if len(set(texture_ids)) != len(texture_ids):
+        raise HTTPException(status_code=422, detail="Duplicate texture ids")
+    # A texture pointing at a device or scene that is gone is kept and reported by the analysis
+    # (``texture.instance_missing`` / ``texture.scene_missing``): never rejected, never retargeted.
     for c in rig.connections:
         if c.source.instance_id not in ids or c.target.instance_id not in ids:
             raise HTTPException(status_code=422, detail=f"Connection {c.id} refers to a device that is not on the rig")

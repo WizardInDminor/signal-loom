@@ -137,6 +137,11 @@ class CcDef(StrictModel):
     name: str
     value_semantics: str | None = None  # e.g. "0-63 bypass, 64-127 engage"
     evidence: Evidence = Evidence.UNKNOWN
+    # Is this a continuously variable, repeatable control (a knob or expression-style sweep over
+    # 0–127 with the same result for the same value)? True = documented so; False = documented as
+    # discrete (a switch, a bank select, a trigger); None = not stated. Only True makes the control
+    # eligible for continuous modulation (Session 5); a profile that says nothing promotes nothing.
+    continuous: bool | None = None
 
 
 class ProgramChangeSpec(StrictModel):

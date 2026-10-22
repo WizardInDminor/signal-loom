@@ -23,6 +23,7 @@ from .models.rig import (
     Scene,
     utcnow_iso,
 )
+from .models.texture import Texture
 
 
 def _dump(model: Any) -> str:
@@ -72,6 +73,10 @@ class RigRepository:
             Scene.model_validate(json.loads(r["data"]))
             for r in c.execute("SELECT data FROM scenes WHERE rig_id = ? ORDER BY sort_order", (rig_id,))
         ]
+        textures = [
+            Texture.model_validate(json.loads(r["data"]))
+            for r in c.execute("SELECT data FROM textures WHERE rig_id = ? ORDER BY sort_order", (rig_id,))
+        ]
         return Rig(
             id=row["id"],
             name=row["name"],
@@ -85,6 +90,7 @@ class RigRepository:
             instances=instances,
             connections=connections,
             scenes=scenes,
+            textures=textures,
         )
 
     def exists(self, rig_id: str) -> bool:
@@ -156,6 +162,12 @@ class RigRepository:
                 "scenes",
                 rig.id,
                 [(s.id, {"name": s.name}, _dump(s)) for s in rig.scenes],
+            )
+            self._sync_children(
+                c,
+                "textures",
+                rig.id,
+                [(t.id, {"name": t.name}, _dump(t)) for t in rig.textures],
             )
         return rig
 

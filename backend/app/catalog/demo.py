@@ -22,9 +22,12 @@ from ..models.rig import (
     Rig,
     Scene,
 )
+from ..models.texture import Lfo, Macro, Mapping, Texture
 
 DEMO_RIG_ID = "rig_demo_signal_loom"
 STEREO_DEMO_RIG_ID = "rig_demo_stereo"
+VIRTUAL_INSTRUMENT_RIG_ID = "rig_demo_virtual_instrument"
+UNDERTOW_TEXTURE_ID = "tex_undertow"
 
 
 def _c(kind: SignalKind, src: str, sp: str, dst: str, dp: str, label: str | None = None, **kw) -> Connection:
@@ -376,4 +379,103 @@ def stereo_demo_rig() -> Rig:
         scenes=scenes,
         controllers=controllers,
         notes="Left path: guitar -> drives -> BigSky In L -> Out L -> Return C Tip -> Output Tip -> Amp L. Right path: BigSky Out R -> Return C Ring -> Output Ring -> Amp R.",
+    )
+
+
+def virtual_instrument_rig() -> Rig:
+    """The Session 5 synthetic fixture: two Signal Loom virtual pedals and the **Undertow** texture.
+
+    One Bloom macro moves Pedal A's synthetic CC 21 from 100 down to 30 while Pedal B's synthetic
+    CC 22 rises from 15 to 110, with a slow triangle over eight beats at 72 BPM. The CC numbers and
+    ranges are test-fixture values, not claims about any real pedal; both devices are labelled
+    synthetic everywhere. The rig is created on demand (``POST /api/rigs {template:
+    "virtual_instrument"}``), never seeded implicitly."""
+    PA, PB, G, AMP = "inst_vpedal_a", "inst_vpedal_b", "inst_guitar", "inst_amp"
+    instances = [
+        DeviceInstance(
+            id=PA,
+            profile_id="signal-loom-virtual-pedal-a",
+            label="Virtual Pedal A (drive)",
+            x_mm=40,
+            y_mm=40,
+            midi_channel=1,
+        ),
+        DeviceInstance(
+            id=PB,
+            profile_id="signal-loom-virtual-pedal-b",
+            label="Virtual Pedal B (delay)",
+            x_mm=220,
+            y_mm=40,
+            midi_channel=2,
+        ),
+        DeviceInstance(id=G, profile_id="generic-guitar", label="Guitar", off_board=True),
+        DeviceInstance(id=AMP, profile_id="generic-amp", label="Amp", off_board=True),
+    ]
+    au = SignalKind.AUDIO
+    connections = [
+        _c(au, G, "out", PA, "in", "Guitar -> Pedal A"),
+        _c(au, PA, "out", PB, "in", "Pedal A -> Pedal B"),
+        _c(au, PB, "out", AMP, "input", "Pedal B -> Amp"),
+    ]
+    scenes = [
+        Scene(
+            id="scene_undertow_start",
+            name="Undertow start",
+            order=0,
+            color="#0ea5e9",
+            device_states=[
+                DeviceSceneState(instance_id=PA, program=ProgramSelection(pc=0), enabled=True),
+                DeviceSceneState(instance_id=PB, program=ProgramSelection(pc=1), enabled=True),
+            ],
+            notes="Starting point the Undertow texture assumes: both virtual pedals engaged on their first presets.",
+        ),
+    ]
+    textures = [
+        Texture(
+            id=UNDERTOW_TEXTURE_ID,
+            name="Undertow",
+            intent="Drive recedes as the delay blooms; a slow tide underneath.",
+            notes="Synthetic demo: CC 21 on Pedal A falls 100→30 while CC 22 on Pedal B rises 15→110. Fixture values only.",
+            base_scene_id="scene_undertow_start",
+            tempo_bpm=72.0,
+            macros=[
+                Macro(
+                    id="macro_bloom",
+                    name="Bloom",
+                    base=0.35,
+                    mappings=[
+                        Mapping(
+                            id="map_bloom_a",
+                            instance_id=PA,
+                            cc=21,
+                            output_min=100,
+                            output_max=30,
+                            label="Drive recedes",
+                        ),
+                        Mapping(
+                            id="map_bloom_b",
+                            instance_id=PB,
+                            cc=22,
+                            output_min=15,
+                            output_max=110,
+                            label="Delay blooms",
+                        ),
+                    ],
+                    lfo=Lfo(enabled=True, shape="triangle", beats_per_cycle=8.0, depth=0.25),
+                )
+            ],
+            function_roles={PA: "drive", PB: "delay"},
+            origin="virtual_fixture",
+        )
+    ]
+    return Rig(
+        id=VIRTUAL_INSTRUMENT_RIG_ID,
+        name="Undertow demo (virtual instrument)",
+        description="Synthetic fixture for the whole-rig instrument: two simulated pedals with labelled synthetic continuous CCs, one Texture, one macro, one tempo-related LFO. Nothing here is a real pedal.",
+        board=Board(name="Synthetic 400 x 200 mm board", width_mm=400, depth_mm=200, grid_mm=5),
+        instances=instances,
+        connections=connections,
+        scenes=scenes,
+        textures=textures,
+        notes="Guitar -> Virtual Pedal A -> Virtual Pedal B -> amp. Every MIDI fact of the two pedals is defined by Signal Loom for the simulation.",
     )

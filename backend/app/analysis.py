@@ -12,6 +12,7 @@ from .domain.paths import trace_preset
 from .domain.power import power_plan
 from .domain.wiring import midi_routes, wiring_diagnostics
 from .images import resolve_image
+from .instrument.diagnostics import texture_review
 from .models.common import DeviceCategory, Diagnostic, Severity
 from .models.profile import DeviceProfile
 from .models.rig import Rig
@@ -85,6 +86,7 @@ def analyze(rig: Rig, profiles: dict[str, DeviceProfile], assets: dict | None = 
         if len(labels) > 1
     ]
     kit, kit_diags = cable_kit(ctx)
+    texture_diags, textures = texture_review(rig, profiles)
     compiled = compile_rig(rig, profiles, ctx)
     mc8_id = rig.controllers.mc8.instance_id
     midi = {"controller_id": mc8_id, "routes": midi_routes(ctx, mc8_id) if mc8_id else {}}
@@ -120,7 +122,7 @@ def analyze(rig: Rig, profiles: dict[str, DeviceProfile], assets: dict | None = 
             # Picture (if any) fitted to this footprint; geometry above never depends on it.
             "image": resolve_image(inst, prof, assets or {}),
         }
-    all_diags = board + wiring + ml10x_diags + midi_diags + kit_diags
+    all_diags = board + wiring + ml10x_diags + midi_diags + kit_diags + texture_diags
     return {
         "rig_id": rig.id,
         "diagnostics": [d.model_dump(mode="json") for d in all_diags],
@@ -147,4 +149,6 @@ def analyze(rig: Rig, profiles: dict[str, DeviceProfile], assets: dict | None = 
         "power": power_plan(ctx, wiring),
         "instances": placed,
         "compiled": compiled,
+        # Session 5: per texture, each mapping's eligibility (and why) and its values at macro 0 / ½ / 1.
+        "textures": textures,
     }

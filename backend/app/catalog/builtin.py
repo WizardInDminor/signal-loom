@@ -754,7 +754,14 @@ def strymon_bigsky_mx() -> DeviceProfile:
                     value_semantics="0 = bypass, 127 = engage (BigSky family; unverified for MX)",
                     evidence=Evidence.THIRD_PARTY,
                 ),
-                CcDef(cc=100, name="Expression", value_semantics="0 heel - 127 toe", evidence=Evidence.DOCUMENTED),
+                CcDef(
+                    cc=100,
+                    name="Expression",
+                    value_semantics="0 heel - 127 toe",
+                    evidence=Evidence.DOCUMENTED,
+                    # Documented as a continuous expression sweep. Not hardware-verified on the owner's board.
+                    continuous=True,
+                ),
             ],
             bypass=BypassSpec(
                 method="cc",
@@ -1190,6 +1197,109 @@ def generic_amp() -> DeviceProfile:
     )
 
 
+SYNTHETIC_SOURCE = "synthetic_fixture"
+
+
+def _virtual_texture_pedal(suffix: str, sweep_cc: int, family: str, tags: list[str]) -> DeviceProfile:
+    """A Signal Loom *synthetic* pedal for the whole-rig instrument demo (Session 5).
+
+    It exists only in the simulation: USB MIDI, a documented-by-construction continuous CC (the
+    synthetic sweep), a synthetic bypass CC that is deliberately *not* eligible for modulation, and
+    a plausible footprint. ``provenance.source == "synthetic_fixture"`` is how every surface knows to
+    label it synthetic. Nothing here describes a Strymon, Meris, Chase Bliss or any other real device."""
+    return DeviceProfile(
+        id=f"signal-loom-virtual-pedal-{suffix.lower()}",
+        manufacturer="Signal Loom",
+        model=f"Virtual Texture Pedal {suffix}",
+        category=DeviceCategory.EFFECT,
+        builtin=True,
+        provenance=Provenance(
+            source=SYNTHETIC_SOURCE,
+            evidence=Evidence.UNKNOWN,
+            attribution="Synthetic test fixture for the virtual instrument demo; not a real product.",
+        ),
+        footprint=Footprint(
+            width=_m(120.0, Evidence.APPROXIMATE, "synthetic fixture"),
+            depth=_m(95.0, Evidence.APPROXIMATE, "synthetic fixture"),
+            height=_m(55.0, Evidence.APPROXIMATE, "synthetic fixture"),
+            includes_jacks=False,
+        ),
+        ports=[
+            _audio("in", "IN", PortDirection.IN, Edge.TOP, 0.15),
+            _audio("out", "OUT", PortDirection.OUT, Edge.TOP, 0.35),
+            PortDef(
+                id="usb",
+                label="USB (simulated)",
+                kind=SignalKind.USB,
+                direction=PortDirection.BIDIRECTIONAL,
+                connector=Connector.USB_C,
+                edge=Edge.TOP,
+                position=0.65,
+                position_evidence=Evidence.APPROXIMATE,
+                plug_clearance_mm=25.0,
+                notes="Synthetic: the virtual transport offers one simulated USB endpoint per such jack.",
+            ),
+            _dc_in(Edge.TOP, 0.9),
+        ],
+        power=PowerSpec(
+            voltage_v=9,
+            polarity=Polarity.CENTER_NEGATIVE,
+            ac_dc="dc",
+            current_ma_min=100,
+            connector=Connector.DC_BARREL_2_1,
+            evidence=Evidence.APPROXIMATE,
+            note="Synthetic fixture.",
+        ),
+        midi=MidiSpec(
+            interfaces=["usb"],
+            default_channel=None,
+            channel_configurable=True,
+            program_change=ProgramChangeSpec(
+                supported=True, min=0, max=7, display_numbering="zero_based", evidence=Evidence.APPROXIMATE
+            ),
+            cc_map=[
+                CcDef(
+                    cc=sweep_cc,
+                    name=f"Synthetic sweep {suffix}",
+                    value_semantics="0-127 continuous (synthetic)",
+                    evidence=Evidence.APPROXIMATE,
+                    continuous=True,
+                ),
+                CcDef(
+                    cc=60,
+                    name="Synthetic bypass",
+                    value_semantics="0 = bypass, 127 = engage (synthetic)",
+                    evidence=Evidence.APPROXIMATE,
+                    continuous=False,
+                ),
+            ],
+            bypass=BypassSpec(
+                method="cc", cc=60, on_value=127, off_value=0, deterministic=True, evidence=Evidence.APPROXIMATE
+            ),
+            evidence=Evidence.APPROXIMATE,
+            note="Synthetic fixture: every MIDI fact here is defined by Signal Loom for the simulation.",
+        ),
+        capabilities=Capabilities(
+            bypass_method="synthetic",
+            patch_selection="pc",
+            params_via_midi=True,
+            is_stereo=False,
+            notes=f"Synthetic {family} stand-in for the virtual instrument demo.",
+        ),
+        declared_unknowns=[],
+        tags=["synthetic", "virtual", *tags],
+        notes="A test fixture that exists only in Signal Loom's simulation. Its CC map is defined, not documented from a manufacturer.",
+    )
+
+
+def virtual_texture_pedal_a() -> DeviceProfile:
+    return _virtual_texture_pedal("A", 21, "drive", ["drive"])
+
+
+def virtual_texture_pedal_b() -> DeviceProfile:
+    return _virtual_texture_pedal("B", 22, "delay", ["delay"])
+
+
 def builtin_profiles() -> list[DeviceProfile]:
     return [
         mc8(),
@@ -1204,4 +1314,6 @@ def builtin_profiles() -> list[DeviceProfile]:
         strymon_zuma_r300(),
         electric_guitar(),
         generic_amp(),
+        virtual_texture_pedal_a(),
+        virtual_texture_pedal_b(),
     ]
