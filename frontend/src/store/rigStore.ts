@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import { api, ApiError, newId } from "@/lib/api";
-import type { Analysis, Connection, DeviceInstance, DeviceProfile, PortDirection, Rig, Scene, SignalKind, Surface } from "@/lib/types";
+import type { Analysis, Connection, DeviceInstance, DeviceProfile, PortDirection, Rig, Scene, SignalKind, Surface, Texture } from "@/lib/types";
 import { surfaceOf } from "@/lib/mounting";
 
 interface RigState {
@@ -60,6 +60,11 @@ interface RigState {
   removeScene: (id: string) => void;
   /** Assign a scene to an MC8 bank/position (creating the bank if needed); position "" clears it. */
   assignSceneToSwitch: (sceneId: string, bank: number, position: string) => void;
+  /** Textures (Session 5): ordinary document edits — revision bump, undo, debounced PUT. Never sends. */
+  addTexture: (name: string) => string;
+  duplicateTexture: (id: string) => string | null;
+  removeTexture: (id: string) => void;
+  updateTexture: (id: string, fn: (t: Texture) => void) => void;
   clearError: () => void;
 }
 
@@ -414,8 +419,57 @@ export const useRigStore = create<RigState>((set, get) => ({
     get().update((r) => {
       r.scenes = r.scenes.filter((s) => s.id !== id);
       for (const b of r.controllers.mc8.banks) for (const p of b.presets) if (p.scene_id === id) p.scene_id = null;
+      // A texture that started from this scene keeps the reference: the analysis reports it, the user repairs it.
     });
     if (get().selectedSceneId === id) set({ selectedSceneId: get().rig?.scenes[0]?.id ?? null });
+  },
+
+  addTexture(name) {
+    const id = newId("tex");
+    const now = new Date().toISOString().replace(/\.\d{3}Z$/, "+00:00");
+    get().update((r) => {
+      const t: Texture = {
+        id, name, intent: null, notes: null, base_scene_id: r.scenes[0]?.id ?? null, tempo_bpm: 90,
+        macros: [{ id: newId("macro"), name: "Bloom", base: 0.5, mappings: [], lfo: { enabled: false, shape: "triangle", beats_per_cycle: 8, depth: 0.25 } }],
+        function_roles: {}, origin: "user", created_at: now, updated_at: now,
+      };
+      r.textures = [...(r.textures ?? []), t];
+    });
+    return id;
+  },
+
+  duplicateTexture(id) {
+    const src = get().rig?.textures?.find((t) => t.id === id);
+    if (!src) return null;
+    const copyId = newId("tex");
+    get().update((r) => {
+      const copy: Texture = structuredClone(src);
+      copy.id = copyId;
+      copy.name = `${src.name} (copy)`;
+      copy.origin = "user";
+      copy.created_at = copy.updated_at = new Date().toISOString().replace(/\.\d{3}Z$/, "+00:00");
+      for (const m of copy.macros) {
+        m.id = newId("macro");
+        for (const d of m.mappings) d.id = newId("map");
+      }
+      r.textures.push(copy);
+    });
+    return copyId;
+  },
+
+  removeTexture(id) {
+    get().update((r) => {
+      r.textures = (r.textures ?? []).filter((t) => t.id !== id);
+    });
+  },
+
+  updateTexture(id, fn) {
+    get().update((r) => {
+      const t = r.textures?.find((x) => x.id === id);
+      if (!t) return;
+      fn(t);
+      t.updated_at = new Date().toISOString().replace(/\.\d{3}Z$/, "+00:00");
+    });
   },
 
   clearError: () => set({ error: null }),

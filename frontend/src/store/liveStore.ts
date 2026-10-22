@@ -144,6 +144,7 @@ export const useLiveStore = create<LiveState>((set, get) => ({
         log: [...s.log, ...events.log].slice(-LOG_LIMIT),
         observed: [...s.observed, ...events.observed].slice(-LOG_LIMIT),
       }));
+
       const activeMatch = get().follower?.status !== "no_evidence" && get().follower !== null;
       // A possible/ambiguous match is only valid in the backend's five-second window.
       // Keep asking for follower evidence until that window expires even if no new MIDI arrives.
