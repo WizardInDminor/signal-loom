@@ -258,3 +258,42 @@ unchanged at 43.
 The Windows hardware validation is underway. The owner reported successful MC8 USB input monitoring, direct ML10X USB PC recall, Cross MIDI Thru through the MC8, ML10X Thru to Volante, forwarding through Volante to Collider, all four MC8 Omniports (PC 0 and PC 1), and one eight-message full-rig audition at 20 ms delay. See [the dated hardware record](docs/live-hardware-validation-2026-10-18.md) and the [updated checklist](docs/live-hardware-validation.md) for routes, bytes, observed results, limitations, and resume steps.
 
 The manually selected MC8 bank/switch assignment is a **planner mapping**, not a live MC8 bank selection; no MC8 bank-change command compiled in the full-rig test. Documented follow-up product issues: Volante MIDI Out `role: "thru"` required a raw JSON edit to expose a physically working path to Collider, the JSON parser error gave no location, and a released (but still bound) ML10X endpoint was still favored in dry-run routing. PC hardware success does **not** verify bypass CC, Clock, SysEx, state capture, automatic unplug/disarm, or a complete scene follower match. The Session 4 PR remains draft pending remaining validation and review.
+
+## Owner-run follow-up — 2026-10-21
+
+The second real-Windows round extended P0b with:
+- Strymon Sunset deterministic CC 10 (A) and CC 15 (B), both 0/bypass and
+  127/engage, checked on the pedal LEDs and by playing guitar.
+- Last-sent PC 1 / CC 10=127 / CC 15=0 captured to `Sunset CC Capture Test`,
+  compiled (PC then CC), sent to hardware, then edited to CC15=127 and resent.
+  Browser refresh preserved the three-command scene via autosave.
+- Four-PC 2,000-ms-delay queue: **Stop** after two sends cancelled two; **Disarm**
+  after one send cancelled three; physically confirmed.
+- Hot unplug while armed idle: automatic disarm; reconnect restored bindings
+  but not armed state. Active-queue unplug: Sunset 1/4 sent, Zelzah 2/4
+  failed on Windows MIDI driver error, remaining 3/4 and 4/4 cancelled,
+  auto-disarm; reconnected endpoints stayed disarmed.
+- Existing MC8 footswitch produced PC 0 ch10, PC 5 ch13, PC5 ch12,
+  PC1 ch1 on computer input. Scene follower reported a **possible** 2/2
+  *subset* match to `MC8 Follower Test`, alongside an unrelated partial
+  1/2 match. This is not exact-footprint matching or hardware state readback.
+- ML10X cross-bank via MC8: CC0=1/PC0 to Bank 2 Program 0 (physical
+  display 'Empty'), then CC0=0/PC0 back to Bank 1 Program 0, confirmed
+  by the unit and guitar signal.
+- Morningstar Editor read-only handoff after Signal Loom port release;
+  signal monitoring resumed after reacquisition.
+- **Clean backend restart while armed idle:** next backend was disarmed;
+  user had to reconnect the rig and reselect **Real MIDI ports**; bindings
+  reopened without auto-arm.
+
+See the [full follow-up hardware record](docs/live-hardware-validation-2026-10-21.md)
+and [revised checklist](docs/live-hardware-validation.md).
+
+**Assessment:** Core P0b PC/CC scene control, capture and repeatability,
+multi-message input/follower positive match, and the main hardware safety
+interlocks have been exercised successfully. Still open: one pedal's own
+direct-USB PC+CC test as originally specified, exhaustive MC8 DIN/Omniport USB
+echo comparison, manufacturer-specific CC testing for the remaining pedals,
+hardware-verification UI for `verified_hops`, and optional hub/noise/isolator
+tests. The restart test used a clean stop, not an abrupt crash in flight.
+The branch remains draft until review and explicit accept/defer decisions.

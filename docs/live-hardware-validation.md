@@ -1,9 +1,10 @@
 # Live MIDI — hardware validation checklist (Session 4, P0b)
 
 A user-run procedure. The autonomous build sandbox performed **no hardware tests**; the owner
-subsequently ran the real transport on Windows on **2026-10-18**. Results and outstanding items are
-recorded in [the dated hardware session record](live-hardware-validation-2026-10-18.md). This
-checklist remains **partially complete**. Every step records three things separately, and the
+subsequently ran the real transport on Windows on **2026-10-18** and **2026-10-21**.
+Results are recorded in the [first session](live-hardware-validation-2026-10-18.md)
+and [second session](live-hardware-validation-2026-10-21.md). Core PC/CC and safety
+tests passed; some checklist items remain **partially complete**. Every step records three things separately, and the
 app's coverage table uses the same words:
 
 | Word | Meaning |
@@ -25,6 +26,24 @@ Rules that hold for the whole session: start disarmed; one message kind at a tim
 the amp on standby; write down how to restore every preset you touch *before* you touch it; never
 send anything to the MC8 or ML10X that writes memory (Signal Loom cannot, but the Morningstar
 editor can — keep it closed while Signal Loom owns the ports).
+
+## Status after 2026-10-21
+
+| Step | State | Evidence and exceptions |
+|---|---|---|
+| 0 | **Partial** | Real MIDI and workstation bindings worked; version/firmware inventory remains |
+| 1 | **Pass for input monitoring** | Multiple PC messages observed independently; complete DIN/Omniport-only echo audit not run |
+| 2 | **Open as specified** | Own-USB-pedal PC+documented CC pair not done; **Sunset Omniport** CC 10/15 both values verified separately |
+| 3 | **Pass for ML10X direct USB PC** | External power, CC0/PC0 and physical recall demonstrated |
+| 4 | **Pass for tested DIN PC routes** | MC8 → ML10X → Volante → Collider; no all-kinds/ports generalization |
+| 5 | **Pass for Omniport PC plus Sunset CC** | Four Omniports PC0/PC1; Sunset A/B CC 0/127; remaining three pedals' bypass CC not tried |
+| 6 | **Pass for full-rig scene** | Eight messages/seven devices (Oct 18); PC+CC scene capture, recall, edit and persistence (Oct 21) |
+| 7 | **Pass for positive follower subset match** | MC8 switch generated four PCs; two matched follower scene (2/2); full echo coverage remains |
+| 8 | **Partial optional** | Morningstar Editor release/reacquire read-only pass; hub/isolator/noise not tried |
+| Safety extensions | **Pass in observed scenarios** | Stop, Disarm, idle hot-unplug, active queued unplug/error, auto-rebind staying disarmed, clean backend restart disarmed |
+
+**Read [2026-10-21 hardware test report](live-hardware-validation-2026-10-21.md) for exact
+messages, physical observations, and remaining acceptance items.**
 
 ## Status after 2026-10-18
 
@@ -88,7 +107,11 @@ port is actually the pedal (not the hub), and whether the pedal needs "MIDI in: 
 
 - [x] ML10X powered from its DC inlet (USB alone does not switch the relays).
 - [x] Bind the ML10X USB endpoint. Dry run a scene with only `ML10X preset n`: bytes `B9 00 00` then `C9 00`, and physical preset recall worked.
-- [x] Arm and audition; observe Bank 1, Program 3 → Program 0. Bank CC 0=0 was sent but its *necessity* was not separately tested; verify with a cross-bank recall later.
+- [x] Arm and audition; observe Bank 1, Program 3 → Program 0.
+  Subsequent **DIN-over-MC8 cross-bank** test 2026-10-21: preset 128
+  (`B9 00 01` then `C9 00`) recalled Bank 2, Program 0 ('Empty'),
+  then CC0=0/PC0 returned to Bank 1, Program 0 with display and audio confirmation.
+  This cross-bank test used MC8 DIN, **not** the ML10X's own USB endpoint.
 - [ ] Keep this result separate from anything about the ML10X **Thru** jack: the Thru is a copy of
   the 5-pin **In**; it is *not documented* to repeat USB traffic (the coverage table says
   "unverified" for pedals behind the Thru when the ML10X is reached over USB).
@@ -128,7 +151,9 @@ CC maps unknown rather than inventing them; preserve user-verified PC test evide
   mode, firmware 1.20+).
 - [x] PC test: all four used Omniports recalled **PC 0 then PC 1** in two scene auditions
   (Sunset ch 12, Zelzah ch 7, Hedra ch 5, MOOD MKII ch 4); physical responses confirmed.
-- [ ] Documented deterministic bypass/engage CC test on each pedal remains open.
+- [x] Sunset Side A CC 10 and Side B CC 15: both `0` bypass and `127`
+  engage physically confirmed by LED and guitar audio on 2026-10-21.
+- [ ] Other Omniport pedal bypass/engage CCs still untested.
   All four Omniports are occupied by MIDI on this rig; none is reserved for expression.
 - [ ] Do not try SysEx: Omniports cannot carry it and have no return path (documented).
 
@@ -147,8 +172,10 @@ CC maps unknown rather than inventing them; preserve user-verified PC test evide
 - [x] With MC8 USB input bound and listening, press several existing MC8 footswitches.
   Multiple PC messages appeared and the follower showed *ambiguous* partial matches to
   the **unrelated** Signal Loom scenes (e.g. 1/2 and 1/4).
-- [ ] Program a scene matching one physical switch's exact messages, then check
-  `possible active scene` (if unambiguous).
+- [x] Program a scene matching two **observed** messages of one physical
+  switch and check `possible active scene`: `MC8 Follower Test` matched 2/2.
+  Note: this was a subset of the four-PC footswitch burst, not an exact
+  four-message scene. The other `ML10X Hardware Test` was a partial 1/2 match.
 - [ ] Determine whether **every** DIN/Omniport-only MC8 message is echoed to USB:
   observed multi-channel traffic is not a complete per-port echo audit.
 
@@ -159,8 +186,10 @@ CC maps unknown rather than inventing them; preserve user-verified PC test evide
   rename duplicate ports "… 2").
 - [ ] Isolator: only after the hub works without it; record whether every device still enumerates.
 - [ ] Noise: note any hum/whine with the computer attached vs detached.
-- [ ] Nixie / Neuro: whether they can open a port while Signal Loom has it is **not promised**; use
-  release/reacquire and record what happens.
+- [x] Morningstar Editor (read-only handoff): disarm/release MC8 ports, let editor read MC8,
+  disconnect/close editor, reacquire ports in Signal Loom, observe messages. No write operation tested.
+- [ ] Nixie / Neuro: whether they can open a port while Signal Loom has it is
+  **not promised**; release/reacquire would need separate testing.
 
 ## Record template
 
