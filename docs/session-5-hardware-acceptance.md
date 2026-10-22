@@ -12,7 +12,7 @@ Set amplifier and monitor levels safely low and keep Stop/Disarm within reach. I
 
 **Do not use Sunset CC10/CC15 as sweep targets.** Only binary bypass/engage was hardware-verified for those. Avoid CC0/32, CC120–127, toggle/bypass, memory-write, reset and speculative raw CC mappings. No MIDI Clock or SysEx experiments in this procedure.
 
-Actual October wiring (recheck first): computer USB → MC8; DIN → ML10X → Volante → Collider; MC8 Omniport 1 Sunset, 2 Zelzah, 3 MOOD MKII, 4 Hedra. The virtual BigSky MX/synthetic pedals used in tests **are not evidence of this owner's current hardware inventory**. Consult the manuals for the physically present Volante, Collider, Hedra, Zelzah or MOOD MKII as possible candidates; **none is pre-approved** for a specific continuous CC by this checklist.
+Actual October wiring (recheck first): computer USB → MC8; DIN → ML10X → Volante → Collider; MC8 Omniport 1 Sunset, 2 Zelzah, and 3/4 Hedra and MOOD MKII (October 18 records Hedra on 3 and MOOD on 4; verify any later rewiring). The virtual BigSky MX/synthetic pedals used in tests **are not evidence of this owner's current hardware inventory**. Consult the manuals for the physically present Volante, Collider, Hedra, Zelzah or MOOD MKII as possible candidates; **none is pre-approved** for a specific continuous CC by this checklist.
 
 ## A. Document two safe targets — S5-H01
 

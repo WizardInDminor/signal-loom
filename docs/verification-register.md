@@ -26,7 +26,7 @@ Evidence: [2026-10-18](live-hardware-validation-2026-10-18.md), [2026-10-21](liv
 | S4-H12 | **DEFERRED** | USB hub/isolator/noise, third-party editor coexistence, optional topology variants |
 | S4-H13 | **OPEN** | Owner-editable per-hop/per-message hardware verification UI; complete OS/driver/firmware inventory |
 
-**Physical topology last tested (not a current-state guarantee):** MC8 USB → ML10X DIN → Volante → Collider, plus Omniports 1 Sunset, 2 Zelzah, 3 MOOD MKII, 4 Hedra. A Meris MIDI I/O was available, but not in the tested signal chain. Verify actual routing/channels before new tests.
+**Physical topology last tested (not a current-state guarantee):** MC8 USB → ML10X DIN → Volante → Collider, plus Omniports 1 Sunset, 2 Zelzah, and 3/4 Hedra and MOOD MKII (the October 18 record lists Hedra on 3 and MOOD on 4; recheck before testing). A Meris MIDI I/O was available, but not in the tested signal chain. Verify actual routing/channels before new tests.
 
 ## Session 5 software baseline — merged, virtual tests only
 
