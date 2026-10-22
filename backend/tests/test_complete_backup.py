@@ -34,15 +34,19 @@ def test_complete_backup_includes_and_restores_both_media(tmp_path):
                     "default_channel": 1,
                     "evidence": "user",
                     "cc_map": [
-                        {"cc": 12, "name": "Sweep", "value_semantics": "0-127", "continuous": True, "evidence": "documented"}
+                        {
+                            "cc": 12,
+                            "name": "Sweep",
+                            "value_semantics": "0-127",
+                            "continuous": True,
+                            "evidence": "documented",
+                        }
                     ],
                 },
             },
         )
         assert created.status_code == 201, created.text
-        image = client.post(
-            "/api/assets/images", files={"file": ("pedal.jpg", PHOTO.read_bytes(), "image/jpeg")}
-        )
+        image = client.post("/api/assets/images", files={"file": ("pedal.jpg", PHOTO.read_bytes(), "image/jpeg")})
         assert image.status_code == 201, image.text
         iid = image.json()["id"]
         profile = client.get(f"/api/catalog/devices/{pid}").json()
