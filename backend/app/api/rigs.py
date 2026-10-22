@@ -20,6 +20,7 @@ from ..exports.project import (
     project_dict,
 )
 from ..images import image_asset_ids, resolve_image
+from ..live.sender import LiveRefused
 from ..models.common import new_id
 from ..models.rig import PreviewDevice, Rig, RigPreview, RigSummary, utcnow_iso
 from .deps import asset_store, assets_for, load_rig, profile_repo, profiles_for, rig_repo
@@ -106,28 +107,41 @@ def get_rig(rig_id: str, request: Request):
     return load_rig(request, rig_id)
 
 
+def _performing_locked(e: LiveRefused) -> HTTPException:
+    return HTTPException(status_code=409, detail={"code": e.code, "message": str(e), **e.detail})
+
+
 @router.put("/{rig_id}", response_model=Rig)
 def put_rig(rig_id: str, rig: Rig, request: Request):
-    """Replace the whole rig document (the UI saves the single underlying model)."""
+    """Replace the whole rig document (the UI saves the single underlying model). While a
+    performance of this rig runs, a save that changes MIDI addressing or the performing texture's
+    destinations is refused (``409 live.performing_locked``); the check and the save share the live
+    service's lock so nothing can slip between Start and its first message."""
     repo = rig_repo(request)
-    existing = repo.get(rig_id)
-    if existing is None:
-        raise HTTPException(status_code=404, detail=f"Rig '{rig_id}' not found")
-    if rig.id != rig_id:
-        raise HTTPException(status_code=400, detail="Rig id in body does not match URL")
-    if rig.revision < existing.revision:
-        # A save that was overtaken by a newer one (or another tab) must not win.
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "stale_revision",
-                "message": f"Rig revision {rig.revision} is older than the stored revision {existing.revision}; reload before editing.",
-                "stored_revision": existing.revision,
-            },
-        )
-    rig.created_at = existing.created_at
-    _validate_references(rig)
-    return repo.save(rig)
+    live = request.app.state.live
+    with live.mutation_guard():
+        existing = repo.get(rig_id)
+        if existing is None:
+            raise HTTPException(status_code=404, detail=f"Rig '{rig_id}' not found")
+        if rig.id != rig_id:
+            raise HTTPException(status_code=400, detail="Rig id in body does not match URL")
+        if rig.revision < existing.revision:
+            # A save that was overtaken by a newer one (or another tab) must not win.
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "stale_revision",
+                    "message": f"Rig revision {rig.revision} is older than the stored revision {existing.revision}; reload before editing.",
+                    "stored_revision": existing.revision,
+                },
+            )
+        rig.created_at = existing.created_at
+        _validate_references(rig)
+        try:
+            live.check_rig_replacement(existing, rig)
+        except LiveRefused as e:
+            raise _performing_locked(e) from e
+        return repo.save(rig)
 
 
 def _validate_references(rig: Rig) -> None:
@@ -161,8 +175,14 @@ def rename_rig(rig_id: str, body: RenameBody, request: Request):
 
 @router.delete("/{rig_id}", status_code=204)
 def delete_rig(rig_id: str, request: Request):
-    if not rig_repo(request).delete(rig_id):
-        raise HTTPException(status_code=404, detail=f"Rig '{rig_id}' not found")
+    live = request.app.state.live
+    with live.mutation_guard():
+        try:
+            live.check_rig_deletion(rig_id)
+        except LiveRefused as e:
+            raise _performing_locked(e) from e
+        if not rig_repo(request).delete(rig_id):
+            raise HTTPException(status_code=404, detail=f"Rig '{rig_id}' not found")
     return None
 
 

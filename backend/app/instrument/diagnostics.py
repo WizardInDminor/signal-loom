@@ -6,7 +6,7 @@ from __future__ import annotations
 from ..models.common import Diagnostic, Severity
 from ..models.profile import DeviceProfile
 from ..models.rig import Rig
-from .eligibility import check_mapping
+from .eligibility import check_mapping, device_level_conflicts
 from .evaluator import mapping_endpoints
 
 
@@ -35,6 +35,8 @@ def texture_review(rig: Rig, profiles: dict[str, DeviceProfile]) -> tuple[list[D
                 )
             )
         devices: set[str] = set()
+        conflicts = device_level_conflicts(tex, rig)
+        reported: set[tuple[str, int]] = set()
         for macro in tex.macros:
             for m in macro.mappings:
                 e = check_mapping(rig, profiles, m)
@@ -43,7 +45,26 @@ def texture_review(rig: Rig, profiles: dict[str, DeviceProfile]) -> tuple[list[D
                     **mapping_endpoints(m),
                     "macro_id": macro.id,
                     "inverted": m.inverted,
+                    "conflict": conflicts.get(m.id),
                 }
+                if m.id in conflicts and (m.instance_id, m.cc) not in reported:
+                    reported.add((m.instance_id, m.cc))
+                    others = [
+                        d.id
+                        for mac in tex.macros
+                        for d in mac.mappings
+                        if (d.instance_id, d.cc) == (m.instance_id, m.cc)
+                    ]
+                    diags.append(
+                        Diagnostic(
+                            code="texture.destination_conflict",
+                            severity=Severity.WARNING,
+                            message=f"Texture '{tex.name}': {conflicts[m.id]}. The texture cannot be performed until this is resolved; nothing is chosen for you.",
+                            subject_type="texture",
+                            subject_id=tex.id,
+                            related_ids=[*others, m.instance_id],
+                        )
+                    )
                 if rig.instance(m.instance_id) is None:
                     diags.append(
                         Diagnostic(

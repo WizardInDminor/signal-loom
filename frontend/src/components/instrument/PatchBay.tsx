@@ -105,15 +105,17 @@ function MappingRow({ texture, macroId, mapping: m, report, preview, locked }: {
   const edit = (fn: (x: Mapping) => void) => updateTexture(texture.id, (t) => { const mm = t.macros.find((x) => x.id === macroId)?.mappings.find((x) => x.id === m.id); if (mm) fn(mm); });
   const remove = () => updateTexture(texture.id, (t) => { const mac = t.macros.find((x) => x.id === macroId); if (mac) mac.mappings = mac.mappings.filter((x) => x.id !== m.id); });
   const tone = !inst ? "bad" : el?.eligible ? (el.basis === "synthetic" ? "warn" : el.basis === "user_declared" ? "warn" : "ok") : "bad";
+  const conflict = el?.conflict ?? null;
   const span = Math.abs(m.output_max - m.output_min);
   const pos = (v: number) => `${(v / 127) * 100}%`;
   return (
-    <li className={`rounded-md border p-2 text-xs flex flex-col gap-1 ${el?.eligible ? "border-line bg-panel" : "border-red-200 bg-red-50/40"} ${m.enabled ? "" : "opacity-60"}`} data-testid={`mapping-${m.id}`} data-eligible={el?.eligible ? "true" : "false"} data-value={preview ?? ""}>
+    <li className={`rounded-md border p-2 text-xs flex flex-col gap-1 ${el?.eligible && !conflict ? "border-line bg-panel" : "border-red-200 bg-red-50/40"} ${m.enabled ? "" : "opacity-60"}`} data-testid={`mapping-${m.id}`} data-eligible={el?.eligible ? "true" : "false"} data-conflict={conflict ? "true" : "false"} data-value={preview ?? ""}>
       <div className="flex flex-wrap items-center gap-2">
         <label className="flex items-center gap-1"><input type="checkbox" aria-label="Mapping enabled" checked={m.enabled} disabled={locked} onChange={(e) => edit((x) => { x.enabled = e.target.checked; })} /><b>{inst?.label ?? <span className="text-red-700">missing device {m.instance_id}</span>}</b></label>
         <span className="text-neutral-500">CC {m.cc}{ccDef ? ` · ${ccDef.name}` : " · not in the documented map"} · ch {el?.channel ?? inst?.midi_channel ?? "?"}</span>
         <Badge tone={tone}>{!inst ? "device missing" : el ? (el.eligible ? (el.basis === "documented" ? "documented continuous" : el.basis === "synthetic" ? "synthetic (simulation only)" : "user-declared") : "not eligible") : "checking…"}</Badge>
         {route && <Badge tone={route.status === "supported" ? "ok" : route.status === "unverified" ? "warn" : "neutral"}>route {route.status}{route.evidence ? ` · ${route.evidence.replace("_", " ")}` : ""}</Badge>}
+        {conflict && <Badge tone="bad">conflicts with another destination</Badge>}
         <span className="ml-auto font-mono text-sm" data-testid={`mapping-value-${m.id}`}>{preview ?? "—"}</span>
         {!locked && <Button variant="ghost" aria-label={`Remove destination CC ${m.cc} on ${inst?.label ?? m.instance_id}`} onClick={remove}>✕</Button>}
       </div>
@@ -133,6 +135,7 @@ function MappingRow({ texture, macroId, mapping: m, report, preview, locked }: {
       </div>
       {el && <p className={`text-[11px] ${el.eligible ? "text-neutral-600" : "text-red-700"}`} data-testid={`mapping-reason-${m.id}`}>{el.reason}</p>}
       {el?.warnings.map((w) => <p key={w} className="text-[11px] text-amber-800">⚠ {w}</p>)}
+      {conflict && <p className="text-[11px] text-red-700" data-testid={`mapping-conflict-${m.id}`}>✕ {conflict}</p>}
       {el && !el.eligible && !el.hard_refusal && inst && !locked && (
         <div className="flex flex-wrap items-end gap-2 border-t border-line pt-1">
           <Field label="Declare this CC safe to sweep (your claim; recorded with the mapping)">

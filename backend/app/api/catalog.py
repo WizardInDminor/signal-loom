@@ -11,6 +11,7 @@ from ..catalog.boards import builtin_boards
 from ..catalog.pedalplayground import parse_pedalplayground
 from ..documents import MAX_DOCUMENT_BYTES, DocumentError, DocumentStore
 from ..domain.commands import commands_from_midi_spec
+from ..live.sender import LiveRefused
 from ..models.board import PedalboardSpec
 from ..models.profile import DeviceProfile, DocumentKind, DocumentRef, MidiCommand, PortDef
 from ..repo import RigRepository
@@ -83,13 +84,27 @@ def _load_editable(request: Request, profile_id: str) -> tuple[DeviceProfile, st
     return profile, src
 
 
-def _save_user_owned(request: Request, profile: DeviceProfile, src: str) -> ProfileOut:
-    """Persist a profile edit. Editing a builtin turns it into the user's own copy (same id)."""
+def _guard_profile(request: Request, profile_id: str, what: str) -> None:
+    """Post-review finding 1: a MIDI/jack/command change to a profile the performing rig uses would
+    change eligibility or addressing under a running stream; refuse until it is stopped."""
+    try:
+        request.app.state.live.check_profile_mutation(profile_id, what)
+    except LiveRefused as e:
+        raise HTTPException(status_code=409, detail={"code": e.code, "message": str(e), **e.detail}) from e
+
+
+def _save_user_owned(request: Request, profile: DeviceProfile, src: str, guard: str | None = None) -> ProfileOut:
+    """Persist a profile edit. Editing a builtin turns it into the user's own copy (same id).
+    ``guard`` names a MIDI/jack/command change that is refused while the performing rig uses the
+    profile (check and save under the live service's lock); document edits pass no guard."""
     if src == "builtin":
         profile.builtin = False
         profile.provenance.source = "user"
         src = "custom"
-    profile_repo(request).save(profile, source=src)
+    with request.app.state.live.mutation_guard():
+        if guard:
+            _guard_profile(request, profile.id, guard)
+        profile_repo(request).save(profile, source=src)
     return _out(profile, src, request)
 
 
@@ -148,7 +163,9 @@ def update_device(profile_id: str, body: ProfileIn, request: Request):
         profile.builtin = False
         profile.provenance.source = "user"
         src = "custom"
-    repo.save(profile, source=src)
+    with request.app.state.live.mutation_guard():
+        _guard_profile(request, profile_id, "replacing this device profile")
+        repo.save(profile, source=src)
     return _out(profile, src, request)
 
 
@@ -255,7 +272,9 @@ def update_ports(profile_id: str, body: PortsBody, request: Request):
         profile.builtin = False
         profile.provenance.source = "user"
         src = "custom"
-    repo.save(profile, source=src)
+    with request.app.state.live.mutation_guard():
+        _guard_profile(request, profile_id, "changing this device's jacks")
+        repo.save(profile, source=src)
     return _out(profile, src, request)
 
 
@@ -264,12 +283,14 @@ def delete_device(profile_id: str, request: Request):
     repo = profile_repo(request)
     if repo.source_of(profile_id) is None:
         raise HTTPException(status_code=404, detail="Profile not found")
-    used = repo.referenced_by(profile_id)
-    if used:
-        raise HTTPException(
-            status_code=409, detail=f"Profile is used by {len(used)} rig(s); remove those devices first"
-        )
-    repo.delete(profile_id)
+    with request.app.state.live.mutation_guard():
+        _guard_profile(request, profile_id, "deleting this device profile")
+        used = repo.referenced_by(profile_id)
+        if used:
+            raise HTTPException(
+                status_code=409, detail=f"Profile is used by {len(used)} rig(s); remove those devices first"
+            )
+        repo.delete(profile_id)
     return None
 
 
@@ -416,7 +437,7 @@ def update_commands(profile_id: str, body: CommandsBody, request: Request):
     flagged for review by the compiler; nothing is rewritten here."""
     profile, src = _load_editable(request, profile_id)
     profile.midi.commands = body.commands
-    return _save_user_owned(request, profile, src)
+    return _save_user_owned(request, profile, src, guard="changing this device's command library")
 
 
 class MidiCapabilityBody(BaseModel):
@@ -448,7 +469,7 @@ def declare_midi_capability(profile_id: str, body: MidiCapabilityBody, request: 
     )
     if body.note:
         profile.midi.note = f"{profile.midi.note} {body.note}"
-    return _save_user_owned(request, profile, src)
+    return _save_user_owned(request, profile, src, guard="declaring this device's MIDI capability")
 
 
 class FromMapResult(BaseModel):
@@ -463,7 +484,7 @@ def commands_from_map(profile_id: str, request: Request):
     profile, src = _load_editable(request, profile_id)
     fresh = commands_from_midi_spec(profile.midi)
     profile.midi.commands = [*profile.midi.commands, *fresh]
-    out = _save_user_owned(request, profile, src)
+    out = _save_user_owned(request, profile, src, guard="adding commands from this device's MIDI map")
     return FromMapResult(profile=out, added=[c.id for c in fresh])
 
 

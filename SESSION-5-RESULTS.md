@@ -196,3 +196,95 @@ No independent reviewer tool was available in the sandbox; this is the author's 
    about five seconds. Unplug USB while performing; confirm disarm and stop.
 5. Record results in a dated `docs/live-hardware-validation-<date>.md`, including any pedal that
    steps rather than sweeps (control quantization), and mark the hops `hardware_verified` there.
+
+## Post-review corrections — 2026-10-22 (PR #7, reviewed head `942016b`)
+
+An independent review of the Session 5 PR accepted the milestone and raised two merge-blocking
+safety findings. Both reproduced on `942016b` before any change (a channel edit saved mid-stream
+returned 200 while the stream kept transmitting on the old channel; a duplicate mapping to Pedal A
+CC 21 started and streamed beside the original). Both are corrected on the same branch, narrowly.
+
+### Finding 1 — rig configuration changes during an active performance
+
+**Rule (server-enforced).** While a performance of rig R runs, any change that would alter R's MIDI
+addressing or the performing texture's destinations is **refused** with `409
+live.performing_locked` until the performance is stopped. The check and the save run under the live
+service's lock — the lock Start's resolution holds — so a save cannot interleave with Start.
+Refusing (rather than stopping the stream) keeps the templates provably valid and never surprises
+the musician with a silent stop caused by another tab.
+
+| Refused while performing | Still allowed while performing |
+|---|---|
+| a device's `midi_channel`, `profile_id`, jack overrides/removals | macro `base`, LFO on/off/depth/division, `tempo_bpm` (the live-params path and its persistence) |
+| adding or removing any device instance | texture name, intent, notes, starting scene, function roles |
+| any cable change | other textures, scenes, the MC8 plan (incl. the MC8 bank import), board, positions, labels, pictures, rig name/notes |
+| the performing texture's macros or any mapping field (device, CC, range, enabled, override), or removing the texture | rig rename (PATCH) |
+| deleting the performing rig | |
+| catalog: replacing a profile, changing its jacks, its command library, declaring MIDI capability, adding commands from the map, deleting it — when the performing rig has a device on that profile | the same edits on profiles the performing rig does not use; document attach/rename/replace/detach |
+
+Code: `backend/app/live/guard.py` (`rig_mutation_conflicts`, a pure diff classifier),
+`LiveService.mutation_guard / check_rig_replacement / check_rig_deletion / check_profile_mutation`,
+and the guards in `api/rigs.py` (PUT, DELETE), `api/exports.py` (MC8 bank import) and
+`api/catalog.py` (six MIDI/jack/command mutations). Bindings changes, mode switches, disconnects,
+unplugs and enumeration failures keep their Session 4 behaviour (disarm → the performance stops).
+Lock order stays service → engine → sender; the tick thread never takes the service lock.
+
+Tests (`tests/test_performance_guard.py`, 5): channel change, cables added/removed, device removed
+and added, instance profile/jack change, every destination field, macro/texture removal, rig delete
+→ all 409 while the stream keeps its resolved channels (asserted on the simulated wire); the
+permitted set saves; catalog edits refused for the performing rig's profiles and allowed for
+others; after Stop the channel edit saves and a new Start resolves channel 7; the MC8 import passes;
+the pure classifier is precise (no false positives on base/LFO/tempo/name/position, none for other
+textures); the guard uses the service lock. Stop, disarm, lease and endpoint-loss tests are
+unchanged and green.
+
+### Finding 2 — multiple mappings targeting one MIDI destination
+
+**Rule.** Two *enabled* mappings of a texture that address the same device and CC (in one macro or
+across macros) are a `texture.destination_conflict` (warning in the analysis, `conflict` text on
+both mapping rows, a problem in readiness for both) and the texture **cannot start** until one is
+disabled, removed or re-addressed. At the address level, readiness also holds back any set of ready
+destinations that resolve to the same endpoint, channel and CC (two instances on one channel behind
+one uplink). Nothing is chosen, re-addressed or reinterpreted; the authored data is kept. The
+engine refuses duplicate device/CC or endpoint/channel/CC destinations at Start as defense in
+depth (`live.destination_conflict`). With uniqueness enforced, the per-destination budget (10/s)
+and the deduplication are per physical control; the 20/s aggregate is unchanged.
+
+Code: `instrument/eligibility.py::device_level_conflicts`, `instrument/diagnostics.py` (report
+field and diagnostic), `LiveService.texture_readiness` (device- and address-level problems),
+`PerformanceEngine.start`; UI: the patch-bay row shows "conflicts with another destination" and
+the reason.
+
+Tests (`tests/test_destination_conflicts.py`, 5): duplicate in one macro and across two macros →
+diagnostic, both rows not ready, Start 409, zero messages, data kept, repaired by disabling one and
+then streaming with one handoff per destination per tick; a disabled duplicate is no conflict;
+two virtual pedals on one channel behind separate uplinks are not a collision while BigSky and
+Sunset on one channel behind the MC8 uplink are (and moving the Sunset back resolves it); the
+engine refuses duplicate destinations and starts distinct ones. Playwright scenario 3 adds a second
+BigSky CC 100 destination, sees both rows flagged, removes one and sees the flag clear.
+
+### Review observation — Start after an audition's last message
+
+Not a defect; a regression test now pins the reason: `test_start_right_after_an_audition_never_
+overlaps_its_in_flight_message` parks an audition's only message inside a blocking driver and
+shows that Start itself (it opens the stream under the sender lock) waits for it, and that the
+first performance value follows the audition byte. The sender was not refactored.
+
+### Verification after the corrections
+
+| Check | Result |
+|---|---|
+| `backend: python -m pytest -q` | **204 passed, 4 skipped** (11 new) |
+| `ruff check` / `ruff format --check` | clean |
+| `npm run lint` / `typecheck` / `build` | clean |
+| Playwright (production build, fresh DB, one worker) | **47 passed** (2.1 min; scenario 3 extended with the conflict repair) |
+| GitHub Actions on the final PR head | linked from the PR checks and recorded in SESSION-5-PROGRESS.md |
+
+### Tradeoffs and remaining notes
+
+- A second tab that edits a locked field while another tab performs sees "Save failed: a
+  performance of … is running"; its later edits keep failing until the performance stops, then the
+  next save goes through (its revision is still ahead). The controlling tab's UI already disables
+  structural edits while performing.
+- The MC8 bank import has no revision check (pre-existing); the guard only classifies addressing.
+- The guard is by API path. Direct edits to the SQLite file are out of scope, as before.

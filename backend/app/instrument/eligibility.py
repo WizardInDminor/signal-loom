@@ -24,7 +24,7 @@ from typing import Literal
 
 from ..models.profile import CcDef, DeviceProfile
 from ..models.rig import DeviceInstance, Rig
-from ..models.texture import Mapping
+from ..models.texture import Mapping, Texture
 
 Basis = Literal["documented", "synthetic", "user_declared"]
 SYNTHETIC_SOURCE = "synthetic_fixture"
@@ -222,4 +222,30 @@ def continuous_controls(inst: DeviceInstance, prof: DeviceProfile | None) -> lis
                 **e.as_dict(),
             }
         )
+    return out
+
+
+def device_level_conflicts(texture: Texture, rig: Rig) -> dict[str, str]:
+    """Finding 2 (post-review): enabled mappings of one texture that address the same device and
+    CC, across all macros. Two modulation sources driving one physical control have no defined
+    combination rule in Session 5, so both are reported (mapping id → reason) and refused for
+    performance; the authored data is kept for the user to repair. Disabled mappings never
+    conflict."""
+    by_key: dict[tuple[str, int], list[tuple[str, str]]] = {}
+    for macro in texture.macros:
+        for m in macro.mappings:
+            if m.enabled:
+                by_key.setdefault((m.instance_id, m.cc), []).append((m.id, macro.name))
+    out: dict[str, str] = {}
+    for (inst_id, cc), members in by_key.items():
+        if len(members) < 2:
+            continue
+        inst = rig.instance(inst_id)
+        label = inst.label if inst else inst_id
+        macros = ", ".join(f"'{name}'" for _, name in members)
+        for mid, _ in members:
+            out[mid] = (
+                f"CC {cc} on '{label}' is addressed by {len(members)} active destinations (macros {macros}); "
+                "two sources cannot drive one control — disable or re-address all but one"
+            )
     return out

@@ -17,7 +17,7 @@ from ..db import Database
 from ..domain.compiler import compile_rig, compile_scene
 from ..domain.geometry import effective_ports
 from ..domain.wiring import wiring_diagnostics
-from ..instrument.eligibility import check_mapping
+from ..instrument.eligibility import check_mapping, device_level_conflicts
 from ..instrument.evaluator import mapping_endpoints
 from ..models.common import DeviceCategory, SignalKind
 from ..models.live import EndpointBinding, LiveBindings, TransportMode
@@ -25,6 +25,7 @@ from ..models.profile import DeviceProfile
 from ..models.rig import Rig, utcnow_iso
 from ..repo import ProfileRepository, RigRepository
 from .bindings import LiveBindingsRepository
+from .guard import rig_mutation_conflicts
 from .monitor import LiveMonitor
 from .performance import Destination, PerformanceEngine
 from .routes import RouteGraph, build_route_graph
@@ -705,6 +706,54 @@ class LiveService:
             job, warnings = self.sender.send_one(r, confirm_nondeterministic, coalesce)
             return {"job": job.as_dict(), "warnings": warnings, "message": r.as_dict()}
 
+    # -- mutation guard (post-review, finding 1) ----------------------------------------------------
+    def performing(self) -> tuple[str, str] | None:
+        """(rig_id, texture_id) of the running performance, or None."""
+        st = self.performance.status()
+        if st["state"] == "performing" and st["rig_id"] and st["texture_id"]:
+            return st["rig_id"], st["texture_id"]
+        return None
+
+    def mutation_guard(self):
+        """Hold the service lock around a check-and-save so a save cannot interleave with Start."""
+        return self._lock
+
+    def _locked(self, what: str, reasons: list[str]) -> LiveRefused:
+        st = self.performance.status()
+        return LiveRefused(
+            "live.performing_locked",
+            f"A performance of '{st['texture_name']}' is running: {what} would leave it streaming to obsolete MIDI "
+            f"addresses or controls. Stop the performance first. Refused: {'; '.join(reasons)}.",
+            {"texture_id": st["texture_id"], "rig_id": st["rig_id"], "reasons": reasons},
+        )
+
+    def check_rig_replacement(self, old: Rig, new: Rig) -> None:
+        """Refuse a rig save that changes MIDI addressing or the performing texture's destinations
+        while a performance of that rig runs. Macro/LFO/tempo and descriptive edits pass."""
+        perf = self.performing()
+        if perf is None or perf[0] != old.id:
+            return
+        reasons = rig_mutation_conflicts(old, new, perf[1])
+        if reasons:
+            raise self._locked("this change", reasons)
+
+    def check_rig_deletion(self, rig_id: str) -> None:
+        perf = self.performing()
+        if perf is not None and perf[0] == rig_id:
+            raise self._locked("deleting the rig", ["the rig is performing"])
+
+    def check_profile_mutation(self, profile_id: str, what: str = "editing this device profile") -> None:
+        """Refuse a MIDI/jack/command change to a profile used by the performing rig."""
+        perf = self.performing()
+        if perf is None:
+            return
+        rig = RigRepository(self.db).get(perf[0])
+        if rig is None:
+            return
+        users = [i.label for i in rig.instances if i.profile_id == profile_id]
+        if users:
+            raise self._locked(what, [f"profile '{profile_id}' is used by {', '.join(users)}"])
+
     # -- performance (Session 5) ---------------------------------------------------------------
     def texture_readiness(self, rig_id: str, texture_id: str) -> dict:
         """Everything that stands between a texture and Start, per destination and overall. Pure
@@ -721,6 +770,7 @@ class LiveService:
             rows: list[dict] = []
             destinations: list[Destination] = []
             pending_ack: list[str] = []
+            conflicts = device_level_conflicts(tex, rig)  # finding 2: same device + CC, enabled, twice
             for macro in tex.macros:
                 for m in macro.mappings:
                     e = check_mapping(rig, profiles, m)
@@ -747,6 +797,8 @@ class LiveService:
                     problems: list[str] = []
                     if not m.enabled:
                         problems.append("disabled in the texture")
+                    if m.id in conflicts:
+                        problems.append(conflicts[m.id])
                     if not e.eligible:
                         problems.append(e.reason)
                     if r is None or r.endpoint_id is None:
@@ -806,6 +858,23 @@ class LiveService:
                                 template=r,
                             )
                         )
+            # Finding 2, address level: two ready destinations that resolve to the same endpoint,
+            # channel and CC reach the same physical control (two instances on one channel behind one
+            # uplink). Both are held back; nothing is chosen or re-addressed.
+            by_address: dict[tuple, list[dict]] = {}
+            for x in rows:
+                if x["ready"] and x["route"]["endpoint_id"]:
+                    by_address.setdefault((x["route"]["endpoint_id"], x["channel"], x["cc"]), []).append(x)
+            for key, group in by_address.items():
+                if len(group) > 1:
+                    names = ", ".join(f"{g['label']} (macro '{g['macro_name']}')" for g in group)
+                    for g in group:
+                        g["ready"] = False
+                        g["problems"].append(
+                            f"CC {key[2]} on channel {key[1]} via '{g['route']['endpoint_name']}' is addressed by more than one "
+                            f"active destination ({names}); disable or re-address all but one"
+                        )
+                    destinations = [d for d in destinations if d.mapping_id not in {g["mapping_id"] for g in group}]
             enabled_rows = [x for x in rows if x["enabled"]]
             blockers: list[str] = []
             if not connected:

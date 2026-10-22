@@ -212,7 +212,8 @@ export interface Texture {
 export type EligibilityBasis = "documented" | "synthetic" | "user_declared";
 export interface Eligibility { eligible: boolean; reason: string; basis: EligibilityBasis | null; warnings: string[]; control_name: string | null; evidence: string | null; channel: number | null; instance_label: string | null; synthetic: boolean; hard_refusal: boolean }
 /** `analysis.textures[texture_id]`: per mapping its eligibility and the backend's values at macro 0 / ½ / 1. */
-export interface TextureReport { id: string; name: string; base_scene_missing: boolean; mappings: Record<string, Eligibility & { at_0: number; at_half: number; at_1: number; macro_id: string; inverted: boolean }>; eligible_devices: string[] }
+/** `conflict`: set when another *enabled* mapping of the same texture addresses the same device and CC (two sources cannot drive one control; Start is refused until repaired). */
+export interface TextureReport { id: string; name: string; base_scene_missing: boolean; mappings: Record<string, Eligibility & { at_0: number; at_half: number; at_1: number; macro_id: string; inverted: boolean; conflict?: string | null }>; eligible_devices: string[] }
 
 export interface Rig {
   id: string; name: string; description?: string | null; created_at: string; updated_at: string; revision: number;

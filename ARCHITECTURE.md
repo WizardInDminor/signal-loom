@@ -550,3 +550,14 @@ the Live tab only); arming is the Session 4 phrase; **Start performance** is a s
 rig page owns the heartbeat so switching workspaces does not expire the lease; leaving the rig page
 does. A second tab sees the performance, cannot start or steer it, and can Stop it. "Asked now" is
 the browser's evaluation, "last commanded" the backend's; neither is pedal state.
+
+**Post-review guard (finding 1) and destination uniqueness (finding 2).** While a performance of a
+rig runs, the service refuses — under its own lock, through the rig PUT/DELETE, the MC8 bank import
+and the catalog's MIDI/jack/command mutations — any change to that rig's device channels, profiles,
+jacks, device set or cables, and any change to the performing texture's macros or mapping fields
+(`409 live.performing_locked`; `backend/app/live/guard.py::rig_mutation_conflicts` is the pure
+classifier). Macro base, LFO, tempo, descriptive fields, other textures, scenes, the MC8 plan and
+geometry still save. Two enabled mappings addressing one device + CC, or two ready destinations
+resolving to one endpoint + channel + CC, are reported (`texture.destination_conflict`, readiness
+problems) and refuse Start; the engine refuses such a destination set as defense in depth, so the
+per-destination budget and deduplication are per physical control.

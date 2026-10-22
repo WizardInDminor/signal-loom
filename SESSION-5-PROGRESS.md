@@ -107,3 +107,14 @@ P0 commit: `84b35f9` (direction + ledger).
   e2e ✓ (Playwright on a fresh database)**, conclusion `success`, 3.5 min end to end.
 - This ledger entry is the last commit; its own CI run on the final head is linked from the PR
   checks and in the handoff.
+
+## Post-review corrections (2026-10-22, after the review of `942016b`)
+
+- Finding 1 (rig mutations while performing): reproduced, then `live/guard.py` + service checks +
+  guards in rigs/exports/catalog APIs (refuse `409 live.performing_locked`; permitted set kept).
+- Finding 2 (duplicate destinations): reproduced, then device-level conflicts in analysis/readiness,
+  address-level conflicts in readiness, engine refusal at Start, UI badge.
+- Review observation: regression test for Start after an in-flight audition byte (no refactor).
+- Backend `pytest -q`: **204 passed, 4 skipped**; Ruff clean; frontend lint/typecheck/build clean.
+- Playwright (production build, fresh DB, one worker): **47 passed (2.1 m)**.
+- CI on the final head: recorded below once the run completes.

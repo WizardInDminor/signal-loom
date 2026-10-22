@@ -445,3 +445,35 @@ def test_a_new_engine_on_a_fresh_process_is_idle_and_disarmed():
     st = e.status()
     assert st["state"] == "idle" and st["has_controller"] is False and s.armed is False
     assert e.stop()["state"] == "idle"  # Stop on nothing is harmless
+
+
+def test_start_right_after_an_audition_never_overlaps_its_in_flight_message():
+    """Review observation: ``pending_discrete`` counts queued messages, not the one in flight. The
+    sender lock serialises everything anyway: Start itself (it opens the stream under the sender
+    lock) waits for the audition's in-flight message, and the first performance value follows it."""
+    t = BlockingTransport()
+    s = armed(t)
+    clock = FakeClock()
+    e = engine(s, clock)
+    s.audition("scene", [template("inst_0", 1, 40)], delay_ms=0)
+    assert t.entered.wait(timeout=5.0)  # the audition's only message is in flight; the queue is empty
+    # Lock-free peeks (the sender lock is held for the whole send): nothing queued, one in flight —
+    # exactly the state ``pending_discrete()`` would report as 0.
+    assert s.in_flight is not None and len(s._queue) == 0
+    tex = texture(1, lfo=False, base=0.5)
+    done = threading.Event()
+
+    def start_in_background():
+        e.start("rig", tex, destinations(tex))
+        e.tick()
+        done.set()
+
+    th = threading.Thread(target=start_in_background, daemon=True)
+    th.start()
+    assert not done.wait(timeout=0.3)  # Start cannot complete while the audition byte sits in the driver
+    assert len(t.sent) == 0 and e.state == "idle"  # lock-free peeks: Start holds the engine lock while it waits
+    t.release.set()
+    assert done.wait(timeout=5.0)
+    settle(s, e.session.job_id, 1)
+    assert [rec.data[1] for rec in t.sent] == [40, 20]  # audition first, then the performance value, never interleaved
+    e.stop()

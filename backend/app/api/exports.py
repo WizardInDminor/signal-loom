@@ -12,6 +12,7 @@ from ..exports.text import (
     wiring_manifest_csv,
     wiring_manifest_markdown,
 )
+from ..live.sender import LiveRefused
 from ..models.rig import Mc8Bank
 from ..morningstar import specs
 from ..morningstar.backup_diff import diff_backups
@@ -230,7 +231,14 @@ async def import_mc8_bank(rig_id: str, request: Request, replace: bool = False):
         rig.controllers.mc8.banks = [b for b in rig.controllers.mc8.banks if b.number != bank.number]
     rig.controllers.mc8.banks.append(bank)
     rig.revision += 1
-    saved = rig_repo(request).save(rig)
+    live = request.app.state.live
+    with live.mutation_guard():
+        before = load_rig(request, rig_id)
+        try:
+            live.check_rig_replacement(before, rig)  # the MC8 plan is not addressing: passes while performing
+        except LiveRefused as e:
+            raise HTTPException(status_code=409, detail={"code": e.code, "message": str(e), **e.detail}) from e
+        saved = rig_repo(request).save(rig)
     return {
         "rig": saved.model_dump(mode="json"),
         "bank_number": bank.number,

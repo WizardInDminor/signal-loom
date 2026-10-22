@@ -241,6 +241,19 @@ class PerformanceEngine:
                 raise LiveRefused(
                     "live.no_destinations", "This texture has no eligible, enabled destination to perform."
                 )
+            # Finding 2, defense in depth: one physical control per destination, so the per-destination
+            # budget and the dedup are per physical address and no two sources drive one control.
+            seen: dict[tuple, str] = {}
+            for d in destinations:
+                for key in ((d.instance_id, d.cc), (d.template.endpoint_id, d.template.channel, d.cc)):
+                    other = seen.get(key)
+                    if other is not None and other != d.mapping_id:
+                        raise LiveRefused(
+                            "live.destination_conflict",
+                            f"Destinations '{other}' and '{d.mapping_id}' address the same control (CC {d.cc} on "
+                            f"{d.label}, channel {d.template.channel}); refusing to start.",
+                        )
+                    seen[key] = d.mapping_id
             now = self.clock.monotonic()
             macros: dict[str, MacroRuntime] = {}
             for m in texture.macros:

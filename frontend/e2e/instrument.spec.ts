@@ -282,6 +282,18 @@ test("instrument: on a real rig unknown CCs are not controllable, bypass CCs are
   await expect(bigsky).toHaveAttribute("data-eligible", "true", { timeout: 10_000 });
   await expect(bigsky).toContainText("documented continuous");
   await expect(bigsky).toContainText("not hardware-verified");
+  // A second active destination on the same control (BigSky CC 100 again) is a conflict: both rows
+  // say so, Start would be refused, and nothing is chosen for the user; removing one repairs it.
+  await page.getByTestId(`mapping-add-${macroId}`).click();
+  await page.getByTestId("mapping-add-form").getByLabel("Destination device").selectOption({ label: "BigSky MX" });
+  await page.getByTestId("mapping-add-form").getByLabel("Destination CC").selectOption("100");
+  await page.getByTestId("mapping-add-confirm").click();
+  const dup = page.getByTestId("patch-bay").locator('li[data-testid^="mapping-map_"]').nth(3);
+  await expect(dup).toHaveAttribute("data-conflict", "true", { timeout: 10_000 });
+  await expect(bigsky).toHaveAttribute("data-conflict", "true");
+  await expect(dup).toContainText("conflicts with another destination");
+  await dup.getByRole("button", { name: /^Remove destination CC 100 on BigSky/ }).click();
+  await expect(bigsky).toHaveAttribute("data-conflict", "false", { timeout: 10_000 });
   // Declaring the Sunset control needs a note, and is then labelled as the user's claim.
   await expect(row.getByRole("button", { name: "Declare with note" })).toBeDisabled();
   await row.getByLabel("Override note").fill("swept by hand on the board, smooth");
