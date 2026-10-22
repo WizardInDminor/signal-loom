@@ -23,6 +23,12 @@ Future product concepts (proposed, not implemented or scheduled) are tracked in
 [docs/future-features.md](docs/future-features.md), starting with a deliberately isolated
 **Experiment Mode** for capturing serendipitous multi-pedal combinations.
 
+**Next development phase:** [Session 5 — First Playable Whole-Rig Instrument](SESSION-5-CHARTER.md)
+implements the first Texture, cross-device macro, tempo-linked modulation and safe
+performance vertical slice. The companion [Creative Instrument Vision](docs/creative-instrument-vision.md)
+captures the broader long-term musical direction. These are **plans**, not features
+presently implemented on main.
+
 ## Prerequisites
 
 | Tool | Version used in Session 1 |
