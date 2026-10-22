@@ -17,6 +17,8 @@ from ..db import Database
 from ..domain.compiler import compile_rig, compile_scene
 from ..domain.geometry import effective_ports
 from ..domain.wiring import wiring_diagnostics
+from ..instrument.eligibility import check_mapping
+from ..instrument.evaluator import mapping_endpoints
 from ..models.common import DeviceCategory, SignalKind
 from ..models.live import EndpointBinding, LiveBindings, TransportMode
 from ..models.profile import DeviceProfile
@@ -24,6 +26,7 @@ from ..models.rig import Rig, utcnow_iso
 from ..repo import ProfileRepository, RigRepository
 from .bindings import LiveBindingsRepository
 from .monitor import LiveMonitor
+from .performance import Destination, PerformanceEngine
 from .routes import RouteGraph, build_route_graph
 from .rtmidi import RtMidiTransport
 from .sender import LiveRefused, LiveSender, Resolved
@@ -59,6 +62,10 @@ class LiveService:
         self.rtmidi = RtMidiTransport()
         self.sender = LiveSender()
         self.monitor = LiveMonitor()
+        # Session 5: the bounded performance engine. Idle on every start; stops on any disarm.
+        self.performance = PerformanceEngine(
+            self.sender, lease_s=max(1.0, float(os.environ.get("SIGNAL_LOOM_PERFORM_LEASE_S", "5.0")))
+        )
         self._lock = threading.RLock()
         self.mode: TransportMode = "virtual"
         self.connected_rig_id: str | None = None
@@ -182,6 +189,7 @@ class LiveService:
                 "watch_interval_s": self.watch_interval_s,
                 "last_check_at": self.last_check_at,
                 "last_check_error": self.last_check_error,
+                "performance": self.performance.status(),
                 **self.sender.status(),
             }
 
@@ -618,6 +626,17 @@ class LiveService:
         if self.connected_rig_id != rig_id:
             raise LiveRefused("live.not_connected", "Connect this rig to a transport first (then arm).")
 
+    def _refuse_while_performing(self) -> None:
+        """One deterministic rule (charter §6): no scene audition or panel send runs beside a
+        performance stream. Stop the performance first; there are no racing streams."""
+        if self.performance.performing:
+            st = self.performance.status()
+            raise LiveRefused(
+                "live.performing",
+                f"A performance of '{st['texture_name']}' is running; stop it before auditioning a scene or sending a panel control.",
+                {"texture_id": st["texture_id"]},
+            )
+
     def audition(
         self,
         rig_id: str,
@@ -628,6 +647,7 @@ class LiveService:
     ) -> dict:
         with self._lock:
             self._require_connected(rig_id)
+            self._refuse_while_performing()
             self.sender.acknowledge(acknowledge or [])
             resolved, plan = self.resolve_scene(rig_id, scene_id)
             delay = delay_ms if delay_ms is not None else self.bindings_repo.get(rig_id).send_delay_ms
@@ -656,6 +676,7 @@ class LiveService:
     ) -> dict:
         with self._lock:
             self._require_connected(rig_id)
+            self._refuse_while_performing()
             self.sender.acknowledge(acknowledge or [])
             rig, profiles, graph = self.graph(rig_id)
             t = graph.targets.get(instance_id)
@@ -683,6 +704,233 @@ class LiveService:
             )
             job, warnings = self.sender.send_one(r, confirm_nondeterministic, coalesce)
             return {"job": job.as_dict(), "warnings": warnings, "message": r.as_dict()}
+
+    # -- performance (Session 5) ---------------------------------------------------------------
+    def texture_readiness(self, rig_id: str, texture_id: str) -> dict:
+        """Everything that stands between a texture and Start, per destination and overall. Pure
+        reporting: nothing is queued, acknowledged or sent."""
+        with self._lock:
+            rig, profiles, graph = self.graph(rig_id)
+            tex = rig.texture(texture_id)
+            if tex is None:
+                raise LiveRefused("live.texture_not_found", f"Texture '{texture_id}' not found.")
+            connected = self.connected_rig_id == rig_id
+            armed = connected and self.sender.armed
+            perf = self.performance.status()
+            acknowledged = self.sender.acknowledged
+            rows: list[dict] = []
+            destinations: list[Destination] = []
+            pending_ack: list[str] = []
+            for macro in tex.macros:
+                for m in macro.mappings:
+                    e = check_mapping(rig, profiles, m)
+                    t = graph.targets.get(m.instance_id)
+                    vals = mapping_endpoints(m)
+                    r: Resolved | None = None
+                    if e.channel is not None and t is not None:
+                        r = self._resolve(
+                            graph,
+                            {
+                                "type": "cc",
+                                "channel": e.channel,
+                                "number": m.cc,
+                                "value": vals["at_half"],
+                                "target_instance_id": m.instance_id,
+                                "target_label": t.label,
+                            },
+                            True,
+                            f"Texture '{tex.name}', macro '{macro.name}' → CC {m.cc} on {t.label} "
+                            f"({m.output_min}→{m.output_max}{', inverse' if m.inverted else ''})",
+                            "performance",
+                        )
+                    ep_state = self._endpoint_states.get(r.endpoint_id) if r and r.endpoint_id else None
+                    problems: list[str] = []
+                    if not m.enabled:
+                        problems.append("disabled in the texture")
+                    if not e.eligible:
+                        problems.append(e.reason)
+                    if r is None or r.endpoint_id is None:
+                        problems.append(
+                            r.route_reason if r else "No live route: the device is not a MIDI target of this rig."
+                        )
+                    elif connected and not (ep_state and ep_state.open):
+                        problems.append(
+                            f"endpoint '{r.endpoint_name}' is not open"
+                            + (f": {ep_state.error}" if ep_state and ep_state.error else "")
+                        )
+                    needs = list(r.needs_ack) if r else []
+                    missing_ack = [i for i in needs if i not in acknowledged]
+                    for i in missing_ack:
+                        if i not in pending_ack:
+                            pending_ack.append(i)
+                    ready = not problems
+                    rows.append(
+                        {
+                            "mapping_id": m.id,
+                            "macro_id": macro.id,
+                            "macro_name": macro.name,
+                            "instance_id": m.instance_id,
+                            "label": e.instance_label or (t.label if t else m.instance_id),
+                            "cc": m.cc,
+                            "channel": e.channel,
+                            "output_min": m.output_min,
+                            "output_max": m.output_max,
+                            "inverted": m.inverted,
+                            "enabled": m.enabled,
+                            "eligibility": e.as_dict(),
+                            "route": {
+                                "status": r.route_status if r else "unreachable",
+                                "evidence": r.route_evidence if r else None,
+                                "reason": r.route_reason if r else "not a live target",
+                                "endpoint_id": r.endpoint_id if r else None,
+                                "endpoint_name": r.endpoint_name if r else None,
+                                "open": bool(ep_state and ep_state.open),
+                            },
+                            "needs_ack": needs,
+                            "pending_ack": missing_ack,
+                            "values": vals,
+                            "ready": ready,
+                            "problems": problems,
+                        }
+                    )
+                    if ready and r is not None:
+                        destinations.append(
+                            Destination(
+                                mapping_id=m.id,
+                                macro_id=macro.id,
+                                instance_id=m.instance_id,
+                                label=t.label if t else m.instance_id,
+                                cc=m.cc,
+                                output_min=m.output_min,
+                                output_max=m.output_max,
+                                template=r,
+                            )
+                        )
+            enabled_rows = [x for x in rows if x["enabled"]]
+            blockers: list[str] = []
+            if not connected:
+                blockers.append("Connect this rig to a transport (virtual or real ports).")
+            if connected and not armed:
+                blockers.append(f"Arm the live layer with the phrase '{self.sender.status()['arm_phrase']}'.")
+            if perf["state"] == "performing":
+                blockers.append(f"A performance of '{perf['texture_name']}' is already running; stop it first.")
+            if self.sender.pending_discrete():
+                blockers.append("A scene audition or panel send is still queued; wait for it or press Stop.")
+            if not enabled_rows:
+                blockers.append("The texture has no enabled destination.")
+            not_ready = [x for x in enabled_rows if not x["ready"]]
+            if not_ready:
+                blockers.append(
+                    f"{len(not_ready)} destination(s) cannot be performed: "
+                    + "; ".join(f"{x['label']} CC {x['cc']}: {x['problems'][0]}" for x in not_ready)
+                )
+            distinct = sorted({d.instance_id for d in destinations})
+            return {
+                "rig_id": rig_id,
+                "texture_id": tex.id,
+                "texture_name": tex.name,
+                "connected": connected,
+                "armed": armed,
+                "mode": self.mode,
+                "performing": perf["state"] == "performing",
+                "mappings": rows,
+                "distinct_devices": distinct,
+                # Structural blockers first; acknowledgements are asked on Start once nothing else is in the way.
+                "confirmations_required": pending_ack,
+                "can_start": not blockers and not pending_ack,
+                "blockers": blockers,
+                "note": "Readiness is a report; nothing was queued or sent. Virtual readiness is not hardware evidence.",
+            }
+
+    def start_performance(self, rig_id: str, texture_id: str, acknowledge: list[str] | None = None) -> dict:
+        """Explicit Start. Every refusal happens before anything is queued."""
+        with self._lock:
+            self._require_connected(rig_id)
+            self.sender.acknowledge(acknowledge or [])
+            ready = self.texture_readiness(rig_id, texture_id)
+            if ready["performing"]:
+                raise LiveRefused("live.already_performing", ready["blockers"][0])
+            if not ready["armed"]:
+                raise LiveRefused(
+                    "live.disarmed", "Signal Loom is disarmed: a performance never starts while disarmed."
+                )
+            if ready["blockers"]:
+                raise LiveRefused(
+                    "live.texture_not_ready",
+                    "This texture cannot be performed yet: " + " ".join(ready["blockers"]),
+                    {"blockers": ready["blockers"]},
+                )
+            if ready["confirmations_required"]:
+                raise LiveRefused(
+                    "live.confirm_route",
+                    "Before performing over these routes, confirm that the hardware prerequisites are set and that you "
+                    "accept the unverified hops. Nothing has been queued.",
+                    {
+                        "items": ready["confirmations_required"],
+                        "messages": [
+                            {
+                                "summary": f"CC {x['cc']} ch {x['channel']} → {x['label']}",
+                                "explanation": "; ".join(x["needs_ack"]),
+                            }
+                            for x in ready["mappings"]
+                            if x["pending_ack"]
+                        ],
+                    },
+                )
+            assert ready["can_start"]
+            rig, profiles, graph = self.graph(rig_id)
+            tex = rig.texture(texture_id)
+            assert tex is not None
+            # Rebuild the Destination list from the same readiness pass (fresh objects for this session).
+            destinations: list[Destination] = []
+            by_id = {x["mapping_id"]: x for x in ready["mappings"]}
+            for macro in tex.macros:
+                for m in macro.mappings:
+                    x = by_id[m.id]
+                    if not x["ready"]:
+                        continue
+                    t = graph.targets.get(m.instance_id)
+                    r = self._resolve(
+                        graph,
+                        {
+                            "type": "cc",
+                            "channel": x["channel"],
+                            "number": m.cc,
+                            "value": x["values"]["at_half"],
+                            "target_instance_id": m.instance_id,
+                            "target_label": x["label"],
+                        },
+                        True,
+                        f"Texture '{tex.name}', macro '{macro.name}' → CC {m.cc} on {x['label']}",
+                        "performance",
+                    )
+                    destinations.append(
+                        Destination(
+                            m.id,
+                            macro.id,
+                            m.instance_id,
+                            t.label if t else m.instance_id,
+                            m.cc,
+                            m.output_min,
+                            m.output_max,
+                            r,
+                        )
+                    )
+            session = self.performance.start(rig_id, tex, destinations)
+            return {"controller_id": session.controller_id, "status": self.status()}
+
+    def stop_performance(self, reason: str = "Stop pressed", by: str = "user") -> dict:
+        # Deliberately outside the service lock: the tick thread never needs it, and Stop must not wait.
+        self.performance.stop(reason, by)
+        return self.status()
+
+    def performance_heartbeat(self, controller_id: str) -> dict:
+        self.performance.heartbeat(controller_id)
+        return self.performance.status()
+
+    def performance_params(self, controller_id: str, tempo_bpm: float | None, macros: dict[str, dict] | None) -> dict:
+        self.performance.set_params(controller_id, tempo_bpm=tempo_bpm, macros=macros)
+        return self.performance.status()
 
     # -- panels and state categories ----------------------------------------------------------
     def panels(self, rig_id: str) -> dict:
@@ -784,6 +1032,7 @@ class LiveService:
 
     def close(self) -> None:
         self._watch_stop.set()
+        self.performance.close()
         with self._lock:
             self.sender.close()
             for t in (self.virtual, self.rtmidi):

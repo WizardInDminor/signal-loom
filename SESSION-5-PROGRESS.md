@@ -31,3 +31,39 @@ compacted or restarted: re-read SESSION-5-CHARTER.md, SESSION-5-DIRECTION.md, th
   any local client while params/heartbeat need the controller id.
 - Next: P1 — models, migration, repo, export/import, validation, synthetic profiles and template,
   static Instrument UI.
+
+| Playwright baseline | 43 passed (52.7 s), production build, scratch DB, `PW_CHROMIUM=/opt/pw-browsers/chromium` | |
+
+P0 commit: `84b35f9` (direction + ledger).
+
+## P1 — persistent Texture model (backend) — commit `b3ac305`
+
+- `models/texture.py` (Texture / Macro / Mapping / Lfo, bounds, override-needs-note), `Rig.textures`,
+  migration `0006_textures.sql`, repo read/write, `project_dict` omits an empty `textures` key,
+  PUT validates unique texture ids, `POST /api/rigs {template: "virtual_instrument"}`.
+- `CcDef.continuous` (None by default); BigSky MX CC 100 marked continuous (documented expression
+  sweep); two synthetic profiles `signal-loom-virtual-pedal-a/b` (`provenance.source =
+  synthetic_fixture`, CC 21/22 continuous, CC 60 synthetic bypass not eligible).
+- `instrument/evaluator.py` (pure math), `instrument/eligibility.py`, `instrument/diagnostics.py`
+  (`texture.scene_missing`, `texture.instance_missing`, `texture.mapping_ineligible`,
+  `texture.mapping_user_declared`; `analysis.textures` report with values at macro 0/½/1).
+- Tests: `test_instrument_evaluator.py` (9), `test_instrument_eligibility.py` (6),
+  `test_instrument_model.py` (6; legacy DB without the table, round trip, restart, export omission,
+  dangling refs, template). `pytest -q`: **174 passed, 4 skipped**; Ruff clean.
+
+## P3 (backend first) — performance engine, sender streaming, service and API
+
+- `live/sender.py`: `open_stream` / `stream_one` (coalesced, quiet, refused once the job ended) /
+  `cancel_job` (control call: waits for in-flight) / `on_disarm` hooks / `pending_discrete`.
+- `live/performance.py`: `PerformanceEngine` with `Clock` abstraction (`RealClock`, `FakeClock`),
+  states idle/performing/stopped/fault, lease (5 s, heartbeat), 100 ms tick, 2 handoffs per tick
+  aggregate and 1 per destination, dedup, deferred (never queued), round-robin, phase freeze on
+  tempo/division change, Stop that joins the thread, disarm hook → stop before the next message.
+- `live/service.py`: `texture_readiness`, `start_performance` (structural blockers → then route
+  acknowledgements → then start), `stop_performance` (no controller needed), heartbeat, params;
+  auditions/panel sends refused with `409 live.performing`; status carries `performance`.
+- `vendors/__init__.py`: a synthetic fixture's reception is `supported / simulation_tested`.
+- `api/live.py`: readiness, start, `/perform/stop|heartbeat|params|status` (loopback-only).
+- Tests: `test_performance_engine.py` (14, fake clock / blocking / failing transports),
+  `test_instrument_api.py` (5). `pytest -q`: **193 passed, 4 skipped**; Ruff clean.
+- Next: frontend (types, API, evaluator mirror, performance store, Instrument tab), then P4 e2e.

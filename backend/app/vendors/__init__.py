@@ -77,9 +77,21 @@ def _evidence_of(profile_evidence: Evidence) -> RouteEvidence:
     return "published" if profile_evidence == Evidence.DOCUMENTED else "unknown"
 
 
+SYNTHETIC_SOURCE = "synthetic_fixture"
+
+
 def _generic_reception(profile: DeviceProfile, port: PortDef) -> Caps:
     """What a profile's own MIDI facts say about receiving PC/CC on this input."""
     midi = profile.midi
+    if profile.provenance.source == SYNTHETIC_SOURCE and midi.interfaces:
+        # A Signal Loom synthetic fixture: its reception is *defined* by the simulation, so the
+        # honest evidence is "simulation_tested", never "published" and never hardware.
+        ok = Capability(
+            "supported",
+            "simulation_tested",
+            f"{profile.display_name} is a synthetic fixture; it receives whatever the simulation delivers on {port.label}.",
+        )
+        return caps(ok, ok)
     ev = _evidence_of(midi.evidence)
     status: CapabilityStatus = "supported" if ev == "published" and midi.interfaces else "unknown"
     reason = (
