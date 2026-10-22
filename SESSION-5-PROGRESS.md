@@ -117,4 +117,4 @@ P0 commit: `84b35f9` (direction + ledger).
 - Review observation: regression test for Start after an in-flight audition byte (no refactor).
 - Backend `pytest -q`: **204 passed, 4 skipped**; Ruff clean; frontend lint/typecheck/build clean.
 - Playwright (production build, fresh DB, one worker): **47 passed (2.1 m)**.
-- CI on the final head: recorded below once the run completes.
+- GitHub Actions run 40 on the corrected head `483861e`: https://github.com/WizardInDminor/signal-loom/actions/runs/39793755824 — backend ✓, frontend ✓, e2e ✓ (`success`). This ledger line is the last commit; its own run is linked from the PR checks.

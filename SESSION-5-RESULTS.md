@@ -278,7 +278,7 @@ first performance value follows the audition byte. The sender was not refactored
 | `ruff check` / `ruff format --check` | clean |
 | `npm run lint` / `typecheck` / `build` | clean |
 | Playwright (production build, fresh DB, one worker) | **47 passed** (2.1 min; scenario 3 extended with the conflict repair) |
-| GitHub Actions on the final PR head | linked from the PR checks and recorded in SESSION-5-PROGRESS.md |
+| GitHub Actions (PR #7, corrected head `483861e`) | run 40: backend ✓, frontend ✓, e2e ✓ — https://github.com/WizardInDminor/signal-loom/actions/runs/39793755824; the rerun on the final docs commit is linked from the PR checks |
 
 ### Tradeoffs and remaining notes
 
