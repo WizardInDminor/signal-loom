@@ -14,6 +14,17 @@ Set amplifier and monitor levels safely low and keep Stop/Disarm within reach. I
 
 Actual October wiring (recheck first): computer USB → MC8; DIN → ML10X → Volante → Collider; MC8 Omniport 1 Sunset, 2 Zelzah, and 3/4 Hedra and MOOD MKII (October 18 records Hedra on 3 and MOOD on 4; verify any later rewiring). The virtual BigSky MX/synthetic pedals used in tests **are not evidence of this owner's current hardware inventory**. Consult the manuals for the physically present Volante, Collider, Hedra, Zelzah or MOOD MKII as possible candidates; **none is pre-approved** for a specific continuous CC by this checklist.
 
+## Manufacturer-documented starting candidates (NOT hardware-verified)
+
+To reduce setup research, two physically present pedals in the existing **MC8 DIN → ML10X → Volante → Collider** chain have manufacturer-published continuous-range CCs:
+
+| Candidate pedal | Documented MIDI control | Published range | Official source |
+|---|---|---|---|
+| **Strymon Volante** | **Echo Level, CC 12** | 0–127 | [Volante User Manual, MIDI Specifications, p. 18](https://www.strymon.net/manuals/Volante_UserManual_RevE.pdf) |
+| **Source Audio Collider** | **Delay (A) Mix, CC 3** | 0–127; 50/50 mix roughly at 95 | [Collider MIDI Implementation Guide, p. 1](https://cdn.shopify.com/s/files/1/0938/1593/0953/files/collider_midi_guide.pdf?v=1752577217) |
+
+These are **candidate targets** for S5-H01, not tested physical behavior and **not automatically marked continuous in Signal Loom's profile**. First verify Volante's MIDI channel and Collider's actual configured MIDI map in Neuro: Collider's default CC mappings may be remapped globally. Confirm both effects are engaged, each receives through the real route, values selected are within a safe *modest* range, and both can be restored. If the profile still treats them as unknown, document the manual evidence and explicitly authorize the precise repeatable controls before any live performance. Avoid tweaking echo feedback into unexpectedly strong regeneration during the initial test.
+
 ## A. Document two safe targets — S5-H01
 
 - [ ] Record actual rig date, git commit/build, computer OS, MIDI interface name/direction, MC8/ML10X and pedal firmware (where known).
