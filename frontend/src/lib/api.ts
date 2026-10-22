@@ -81,10 +81,11 @@ export const api = {
     duplicate: (id: string) => request<Rig>(`/api/rigs/${id}/duplicate`, { method: "POST" }),
     analysis: (id: string) => request<Analysis>(`/api/rigs/${id}/analysis`),
     analyzeDocument: (rig: Rig) => request<Analysis>("/api/rigs/analyze", { method: "POST", body: JSON.stringify(rig) }),
-    exportProject: (id: string, includeImages = false, includeDocuments = false) => {
+    exportProject: (id: string, includeImages = false, includeDocuments = false, requireComplete = false) => {
       const p = new URLSearchParams();
       if (includeImages) p.set("include_images", "1");
       if (includeDocuments) p.set("include_documents", "1");
+      if (requireComplete) p.set("require_complete", "1");
       const qs = p.toString();
       return request<unknown>(`/api/rigs/${id}/export${qs ? `?${qs}` : ""}`);
     },

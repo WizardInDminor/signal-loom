@@ -31,6 +31,17 @@ through an explicit connect → arm → **Start** under a message budget and a b
 companion [Creative Instrument Vision](docs/creative-instrument-vision.md) captures the longer
 musical direction (movements, transitions, Experiment Lab); those remain plans.
 
+
+**Portable full backups:** The Exports tab also offers **Export complete backup (photos + PDFs)**, a
+version-3 `.complete.signal-loom.json` bundle. It explicitly includes both asset categories and
+refuses to download if referenced device profiles, pedal photos, or manuals are missing. The smaller
+plain project export remains available for reference-only transfers. The new complete option does
+not connect, arm, or send MIDI. The importer preserves original IDs for the files and validates
+their bytes. Existing device profiles on a destination machine take precedence: to independently
+verify full restoration of the exported profiles, use a fresh database/installation. Embedded
+photographs and PDFs may be copyrighted—share only where permitted. Use an offline restore test
+before treating one download as the sole recovery copy.
+
 **Hardware and software verification:** [Living Verification Register](docs/verification-register.md) is
 the continuously maintained index of physically verified, virtual-only, outstanding and deferred
 test claims. The [Session 5 hardware acceptance procedure](docs/session-5-hardware-acceptance.md)
