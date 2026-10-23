@@ -24,8 +24,8 @@ existing reader test and stays git-ignored (`backend/tests/fixtures/external/`).
 
 ## 1. Summary for the impatient
 
-1. **The backup stores routing only in a form Signal Loom cannot yet decode or author.** An editor
-   *Device Backup* stores each preset's routing only as `matrixArray` (16 rows × 3 bytes), a copy of
+1. **A native backup contains routing only in an opaque representation.** An editor
+   *Device Backup* stores each preset's routing as `matrixArray` (16 rows × 3 bytes), a copy of
    the device's internal crosspoint/mux image. The device labels its 12 READ source-record slots, which correlate with the matrix rows
    in the observed captures (§5.3), but the column bits are still an undecoded per-source lookup
    (§5.4). Writing *new* routing into a backup file therefore remains **blocked** (`F-Q14`).
@@ -101,7 +101,7 @@ off**; the setting must be part of the instance's declared configuration and of 
 **Saving bypass states from the device:** Menu + Select (2026-06-30 build) or CC#52 writes the live
 loop states into the current preset — these are **memory writes triggered by MIDI**, so Signal Loom
 must never emit CC#52 from an ordinary Scene without a memory-write authorization gate.
-CC#50 changes a global behavior setting (not necessarily preset memory); it needs a separate
+CC#50 changes a global behavior setting (its persistence semantics are not established); it needs a separate
 configuration-change gate and must not be emitted as an unreviewed performance gesture.
 
 **MC-series "ML10X" message type** (what an MC8 sends to drive an ML10X): SysEx-based, needs the
@@ -184,9 +184,9 @@ possible in the editor today, one preset at a time.
   valuable thing to recover); (b) the editor uploads the raw backup through the `DataDump` (`f1=7`) /
   `DataUploadAck` (`f1=8`) message classes that exist in the inbound classifier, carrying segments
   48..63 as they are (then the device itself consumes the matrix). Owner test **T2**
-  (§8) can distinguish these pathways for the tested editor build, without proving future firmware
-  or editor versions behave identically. Until then, Signal Loom must treat a backup's `matrixArray` as opaque bytes that **must travel
-  intact** with its preset.
+  (§8) can characterize the observed pathway for the tested editor build, without proving the
+  possibilities exhaustive or future firmware/editor versions identical. Until then, Signal Loom
+  must treat a backup's `matrixArray` as opaque bytes that **must travel intact** with its preset.
 - Restore anomalies on record (FORUM-USER, 1.2 beta): after restore all loops stayed engaged
   regardless of preset (Persist had switched on); a second user saw every Tip/Ring bypassed after
   reloading a backup. Both are reasons to put "check Loop Bypass Persist, then recall a known preset
@@ -199,7 +199,8 @@ possible in the editor today, one preset at a time.
 | Rename presets, connectors; change MIDI channel / Device ID / Input Split / Persist / trails | No | Feasible by extending the MC8-style proposal layer to ML10X files, hash recomputed; **not built, editor-unvalidated** |
 | Change spillover (`tipT`/`ringT`) | No, but the code table is unverified in JSON | Possible once a non-127 sample confirms the code (test T3) |
 | **Move / copy / swap whole presets** across slots and banks (renumber `presetNumber`, keep everything else) | No | Candidate proposal edit only, not restore-validated. Preserve routing/state fields verbatim; `presetNumber` renumbering, slot-dependent semantics and whole-device restore effects still need owner testing |
-| Change the chain, add/remove loops, change bypass | **Yes** | **Blocked** (`F-Q14`) |
+| Change the chain, add/remove loops | **Yes**, for native backup authorship | **Blocked** (`F-Q14`); direct wire authoring is a separate unvalidated path |
+| Change saved bypass states | Matrix interaction unknown; `bypass` bitmap and record flags not decoded | **Blocked** pending controlled experiments (`S8-E02`) |
 
 ---
 
@@ -423,8 +424,8 @@ verified backup, monitor traffic while toggling one loop in a disposable Simple 
 and what messages/acks occurred. Do not assume `P3=0` is non-persistent merely because an ack was
 absent; compare a fresh device read and post-test backup. Restore the original disposable slot.
 
-**T5 — Full wire dump as decoder evidence (navigation changes live audio, no intentional writes).** Only after T2–T4 and a
-separate scope approval: amp muted, editor closed, run a dump that navigates every slot and records
+**T5 — Full wire dump as decoder evidence (navigation changes live audio, no intentional writes).** Only after
+separate owner approval, a read-only adapter safety review and a verified recovery baseline: amp muted, editor closed, run a dump that navigates every slot and records
 each reply; end by re-selecting the original bank/preset and confirming the display. Deliverable: a local JSON of (records, matrix) per preset to expand §5.4's observed table;
 this alone does not prove a complete decoder or arbitrary-route encoder. Never commit the dump
 (it is the owner's rig).
@@ -446,8 +447,8 @@ this alone does not prove a complete decoder or arbitrary-route encoder. Never c
    the editor without a hardware restore. A subsequent ML10X full-device restore is separately
    gated and cannot be assumed to affect only a spare bank.
 3. **After T2:** if restore turns out to decode the matrix in the editor, prioritise recovering that
-   decoder (reading the editor bundle is legal reverse-engineering for interoperability but
-   must be done by the owner on their own machine, not in this sandbox); if restore uploads raw
+   decoder (subject to applicable licensing and legal considerations, ideally through independent
+   interoperable analysis on the owner's machine); if restore uploads raw
    segments, routing-preserving proposals still require editor and device acceptance testing.
    T5 is one decoder-evidence route, not necessarily the only route to routing authorship.
 4. **Only with a separately approved hardware-risk scope:** a guarded ML10X live reader (connect,
