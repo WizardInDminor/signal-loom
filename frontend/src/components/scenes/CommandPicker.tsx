@@ -112,7 +112,7 @@ export function CommandPicker({ instance, profile, state, onApplyCc, onApplyPc, 
                 {controls.map((d) => {
                   const b = behaviorOf(d);
                   return (
-                    <button key={d.cc} type="button" className={`w-full text-left border rounded px-2 py-1 ${pickedCtl?.cc === d.cc ? "border-accent bg-blue-50" : "border-line hover:bg-neutral-50"}`} onClick={() => pickControl(d)} data-testid={`pick-control-${d.cc}`}>
+                    <button key={d.cc} type="button" className={`w-full text-left border rounded px-2 py-1 ${pickedCtl?.cc === d.cc ? "border-accent bg-blue-50" : "border-line hover:bg-neutral-50"}`} onClick={() => pickControl(d)} data-testid={`control-pick-${d.cc}`}>
                       <div className="flex items-center gap-1 flex-wrap">
                         <code className="bg-neutral-100 rounded px-1 text-[11px]">CC {d.cc}</code>
                         <span className="font-medium">{d.name}</span>

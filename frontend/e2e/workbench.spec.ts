@@ -194,10 +194,10 @@ test("workbench: read the manual beside the editor, enter controls consecutively
   await page.getByRole("button", { name: /^Heavy verse/ }).click();
   await page.getByTestId("add-command-inst_sunset").click();
   const picker = page.getByTestId("command-picker");
-  await expect(picker.getByTestId("pick-control-12")).toContainText("Echo Level");
-  await expect(picker.getByTestId("pick-control-10")).toHaveCount(0);
+  await expect(picker.getByTestId("control-pick-12")).toContainText("Echo Level");
+  await expect(picker.getByTestId("control-pick-10")).toHaveCount(0);
   await expect(picker).toContainText("1 awaiting review are not offered");
-  await picker.getByTestId("pick-control-12").click();
+  await picker.getByTestId("control-pick-12").click();
   await picker.getByLabel("Control value").fill("64");
   await expect(picker.getByTestId("command-preview")).toContainText("CC 12 = 64 on channel 3 → Sunset");
   await expect(picker.getByTestId("picker-control-citation")).toHaveAttribute("href", `/catalog/${profileId}/workbench?doc=${docId}&page=2`);
