@@ -132,7 +132,50 @@ class PowerSpec(StrictModel):
     note: str | None = None
 
 
+DOCUMENT_ID_PATTERN = r"^doc_[0-9a-f]{12}$"
+
+
+class SourceCitation(StrictModel):
+    """Where in an attached document a fact (a control, a command, a procedure) is described.
+    ``page`` is the PDF page index (1-based), which may differ from the number printed on the page.
+    Attaching a citation makes the fact *documented*; it never makes it hardware-verified."""
+
+    document_id: str = Field(pattern=DOCUMENT_ID_PATTERN)
+    page: int | None = Field(default=None, ge=1)
+    note: str | None = None  # e.g. "MIDI implementation chart, row 'Bypass'"
+
+
+# Historical name (Session 3f); the same shape is used for controls and notes since Session 6.
+CommandCitation = SourceCitation
+
+# How a documented CC behaves when it receives values (Session 6). ``continuous`` is the one
+# behaviour that may be swept (Session 5 eligibility); ``discrete`` picks among a few states;
+# ``toggle`` flips state (result depends on prior state); ``trigger`` fires an action on any value;
+# ``unknown`` is stated as not known. Legacy entries carry None and are read through ``continuous``.
+ControlBehavior = Literal["continuous", "discrete", "toggle", "trigger", "unknown"]
+# Whether a documented control is the manufacturer's default assignment or a number the user
+# configured on their pedal (some pedals let CC numbers be remapped). A ``CcDef`` belongs to the
+# *profile*, so this is a statement about every unit placed with that profile: a user whose two
+# units of one model are mapped differently keeps a duplicated profile per unit (as for jacks and
+# pictures that differ per unit, the profile is the unit of configuration).
+ControlMapping = Literal["manufacturer_default", "user_configured"]
+# The user's own, explicit statement about trying the control on hardware of this model. Never set
+# by the app; like ``MidiCommand.verified_on_hardware`` it lives on the profile and therefore
+# applies to every unit using it — the UI says so, and ``hardware_note`` is where the unit and date
+# belong.
+HardwareStatus = Literal["unverified", "verified", "failed"]
+# A control proposed from PDF text (or any other automated source) stays ``proposed`` until a
+# human marks it ``reviewed``. None = a legacy or hand-entered entry, which counts as reviewed.
+ReviewStatus = Literal["proposed", "reviewed"]
+
+_BEHAVIOR_FROM_CONTINUOUS = {True: "continuous", False: "discrete", None: None}
+
+
 class CcDef(StrictModel):
+    """One documented Control Change of a device: the structured MIDI knowledge the compiler, the
+    Session 5 eligibility rule, the Live panels and the Scene picker read. Everything beyond
+    ``cc``/``name`` is optional and defaults to "not stated"; nothing here is inferred."""
+
     cc: int = Field(ge=0, le=127)
     name: str
     value_semantics: str | None = None  # e.g. "0-63 bypass, 64-127 engage"
@@ -141,7 +184,98 @@ class CcDef(StrictModel):
     # 0–127 with the same result for the same value)? True = documented so; False = documented as
     # discrete (a switch, a bank select, a trigger); None = not stated. Only True makes the control
     # eligible for continuous modulation (Session 5); a profile that says nothing promotes nothing.
+    # Kept in agreement with ``behavior`` by ``_behavior_and_continuous_agree``.
     continuous: bool | None = None
+    behavior: ControlBehavior | None = None
+    # Documented valid value range (inclusive). None = the manual states none; the compiler then
+    # assumes 0–127 as it always has.
+    min_value: int | None = Field(default=None, ge=0, le=127)
+    max_value: int | None = Field(default=None, ge=0, le=127)
+    # Where in an attached manual this control is described.
+    citation: SourceCitation | None = None
+    mapping: ControlMapping = "manufacturer_default"
+    # When ``mapping == "user_configured"``: the number the manufacturer's documentation assigns.
+    factory_cc: int | None = Field(default=None, ge=0, le=127)
+    hardware_status: HardwareStatus = "unverified"
+    hardware_note: str | None = None  # e.g. "swept by hand 2026-10-21, smooth over the whole range"
+    review_status: ReviewStatus | None = None
+    notes: str | None = None
+
+    @model_validator(mode="after")
+    def _behavior_and_continuous_agree(self) -> CcDef:
+        # ``behavior`` is the richer statement; ``continuous`` is derived from it so every existing
+        # reader keeps working. A legacy entry that only carries ``continuous`` gets the behaviour it
+        # implies. When both are given and disagree: a client that only knows the flag (an older
+        # editor sending a profile back with ``continuous`` flipped) wins over a behaviour that says
+        # no more than the flag does (continuous / discrete / unknown); a behaviour that says *more*
+        # (toggle, trigger) cannot be continuous, so that contradiction is refused rather than guessed.
+        if self.behavior is not None:
+            want = True if self.behavior == "continuous" else None if self.behavior == "unknown" else False
+            if self.continuous is not None and self.continuous != want:
+                if self.behavior in ("toggle", "trigger"):
+                    raise ValueError(
+                        f"behavior '{self.behavior}' contradicts continuous={self.continuous}; state one of them"
+                    )
+                self.behavior = _BEHAVIOR_FROM_CONTINUOUS[self.continuous]
+            elif self.continuous != want:
+                self.continuous = want
+        elif self.continuous is not None:
+            self.behavior = _BEHAVIOR_FROM_CONTINUOUS[self.continuous]
+        if self.min_value is not None and self.max_value is not None and self.min_value > self.max_value:
+            raise ValueError("min_value cannot be greater than max_value")
+        if self.mapping == "manufacturer_default" and self.factory_cc is not None and self.factory_cc != self.cc:
+            raise ValueError(
+                "a manufacturer-default control cannot carry a different factory number; mark it user_configured"
+            )
+        return self
+
+    @property
+    def reviewed(self) -> bool:
+        return self.review_status != "proposed"
+
+    def in_range(self, value: int) -> bool:
+        lo = self.min_value if self.min_value is not None else 0
+        hi = self.max_value if self.max_value is not None else 127
+        return lo <= value <= hi
+
+
+NoteCategory = Literal[
+    "presets", "modes", "midi_setup", "global_settings", "startup", "firmware", "troubleshooting", "technique", "other"
+]
+NOTE_ID_PATTERN = r"^note_[A-Za-z0-9_-]{1,40}$"
+
+
+class DeviceNote(StrictModel):
+    """A Quick Reference note about a pedal: how to save a preset, enter a mode, set the MIDI
+    channel, a startup shortcut, a firmware procedure, a fix, a discovery. On a profile it describes
+    the model; on a placed ``DeviceInstance`` it describes that one physical unit's configuration.
+    ``steps`` are an optional ordered procedure; ``references`` cite manual pages; ``evidence`` says
+    where the knowledge comes from (a manual, a forum, the user's own experiment)."""
+
+    id: str = Field(pattern=NOTE_ID_PATTERN)
+    title: str = Field(min_length=1, max_length=120)
+    body: str = ""
+    category: NoteCategory = "other"
+    steps: list[str] = Field(default_factory=list)
+    references: list[SourceCitation] = Field(default_factory=list)
+    evidence: Evidence = Evidence.USER
+    source_note: str | None = None  # e.g. "forum post by …", "found by trial 2026-10-20"
+    pinned: bool = False
+    created_at: str | None = None
+    updated_at: str | None = None
+
+    @model_validator(mode="after")
+    def _clean(self) -> DeviceNote:
+        steps = [s.strip() for s in self.steps if s and s.strip()]
+        if steps != self.steps:
+            self.steps = steps
+        return self
+
+
+def unique_note_ids(notes: list[DeviceNote]) -> None:
+    ids = [n.id for n in notes]
+    if len(set(ids)) != len(ids):
+        raise ValueError("note ids must be unique")
 
 
 class ProgramChangeSpec(StrictModel):
@@ -166,7 +300,6 @@ class BypassSpec(StrictModel):
     note: str | None = None
 
 
-DOCUMENT_ID_PATTERN = r"^doc_[0-9a-f]{12}$"
 COMMAND_ID_PATTERN = r"^cmd_[A-Za-z0-9_-]{1,40}$"
 
 DocumentKind = Literal["manual", "quick_start", "midi_chart", "other"]
@@ -192,15 +325,6 @@ class ValueChoice(StrictModel):
 
     value: int = Field(ge=0, le=127)
     label: str = Field(min_length=1, max_length=60)
-
-
-class CommandCitation(StrictModel):
-    """Where in an attached document the command is described. Attaching a citation makes the
-    command *documented*; it never makes it hardware-verified."""
-
-    document_id: str = Field(pattern=DOCUMENT_ID_PATTERN)
-    page: int | None = Field(default=None, ge=1)
-    note: str | None = None  # e.g. "MIDI implementation chart, row 'Bypass'"
 
 
 class MidiCommand(StrictModel):
@@ -407,6 +531,9 @@ class DeviceProfile(StrictModel):
     midi: MidiSpec = Field(default_factory=MidiSpec)
     # User-supplied PDF documents (manuals, quick-start guides, MIDI charts) by reference only.
     documents: list[DocumentRef] = Field(default_factory=list)
+    # Quick Reference notes about the model (Session 6). Notes about one particular unit live on
+    # the placed ``DeviceInstance``. Empty on every profile saved before it existed.
+    quick_reference: list[DeviceNote] = Field(default_factory=list)
     capabilities: Capabilities = Field(default_factory=Capabilities)
     # Free-form attributes the profile author explicitly declares unknown, so the UI can
     # surface them instead of silently showing blanks.
@@ -432,9 +559,12 @@ class DeviceProfile(StrictModel):
         return None
 
     def document_ids(self) -> list[str]:
-        """Every document this profile relies on: attached files and command citations (deduplicated)."""
+        """Every document this profile relies on: attached files, command and control citations and
+        note references (deduplicated)."""
         ids = [d.document_id for d in self.documents]
         ids += [c.citation.document_id for c in self.midi.commands if c.citation]
+        ids += [c.citation.document_id for c in self.midi.cc_map if c.citation]
+        ids += [r.document_id for n in self.quick_reference for r in n.references]
         seen: set[str] = set()
         out: list[str] = []
         for i in ids:
@@ -448,6 +578,7 @@ class DeviceProfile(StrictModel):
         ids = [d.document_id for d in self.documents]
         if len(set(ids)) != len(ids):
             raise ValueError("a document can be attached to a profile only once")
+        unique_note_ids(self.quick_reference)
         return self
 
     def reconcile_declared_unknowns(self) -> None:

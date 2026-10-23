@@ -149,6 +149,17 @@ def check_cc(
             synthetic=synthetic,
             hard_refusal=True,
         )
+    if cc_def is not None and not cc_def.reviewed:
+        return Eligibility(
+            False,
+            f"CC {cc} ({name}) on {prof.display_name} was proposed from a document and has not been reviewed; "
+            "review it in the Knowledge Workbench before it can be swept.",
+            control_name=name,
+            evidence=evidence,
+            channel=ch,
+            instance_label=label,
+            synthetic=synthetic,
+        )
     if cc_def is not None and cc_def.continuous is True:
         if synthetic:
             return Eligibility(
@@ -202,7 +213,16 @@ def check_cc(
 def check_mapping(rig: Rig, profiles: dict[str, DeviceProfile], mapping: Mapping) -> Eligibility:
     inst = rig.instance(mapping.instance_id)
     prof = profiles.get(inst.profile_id) if inst else None
-    return check_cc(inst, prof, mapping.cc, user_override=mapping.user_override, override_note=mapping.override_note)
+    out = check_cc(inst, prof, mapping.cc, user_override=mapping.user_override, override_note=mapping.override_note)
+    cc_def = next((c for c in prof.midi.cc_map if c.cc == mapping.cc), None) if prof else None
+    if out.eligible and cc_def is not None and (cc_def.min_value is not None or cc_def.max_value is not None):
+        lo, hi = sorted((mapping.output_min, mapping.output_max))
+        if not (cc_def.in_range(lo) and cc_def.in_range(hi)):
+            out.warnings.append(
+                f"the range {mapping.output_min}→{mapping.output_max} leaves the documented range "
+                f"{cc_def.min_value if cc_def.min_value is not None else 0}–{cc_def.max_value if cc_def.max_value is not None else 127} of '{cc_def.name}'"
+            )
+    return out
 
 
 def continuous_controls(inst: DeviceInstance, prof: DeviceProfile | None) -> list[dict]:
@@ -219,6 +239,11 @@ def continuous_controls(inst: DeviceInstance, prof: DeviceProfile | None) -> lis
                 "name": c.name,
                 "value_semantics": c.value_semantics,
                 "evidence": c.evidence.value,
+                "behavior": c.behavior,
+                "min_value": c.min_value,
+                "max_value": c.max_value,
+                "review_status": c.review_status,
+                "hardware_status": c.hardware_status,
                 **e.as_dict(),
             }
         )

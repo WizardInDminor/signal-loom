@@ -15,7 +15,9 @@ Session reports: [SESSION-1-RESULTS.md](SESSION-1-RESULTS.md) (foundation),
 [SESSION-2-RESULTS.md](SESSION-2-RESULTS.md) (jack-aware wiring, stereo routing, Morningstar
 tools, evidence levels and the hardware verification procedure) and
 [SESSION-3-RESULTS.md](SESSION-3-RESULTS.md) (the Stage: a scene-first view of the physical rig) and
-[SESSION-4-RESULTS.md](SESSION-4-RESULTS.md) (live rig control). The domain model is described in
+[SESSION-4-RESULTS.md](SESSION-4-RESULTS.md) (live rig control) and
+[docs/midi-knowledge-workbench.md](docs/midi-knowledge-workbench.md) (Session 6: the MIDI Knowledge
+Workbench, design and delivery). The domain model is described in
 [ARCHITECTURE.md](ARCHITECTURE.md); research and licensing findings in
 [docs/research.md](docs/research.md).
 
@@ -316,6 +318,52 @@ remembers which command it came from. **Editing or deleting a command later neve
 scene's bytes**: the row shows *definition changed — review* (or *command removed*), the compiled
 plan carries a warning, and *reapply* is the deliberate act that updates it. Two different values
 for one CC on one pedal in one scene are an error, never a silent choice.
+
+## The MIDI Knowledge Workbench (Session 6)
+
+Open a profile in the **Device library** and press **Knowledge Workbench** (or follow the link from a
+placed pedal's inspector on the Board). The workbench is a two-pane workspace: the **Knowledge
+Editor** on the left, the pedal's own PDFs on the right, with a draggable (and keyboard-operable)
+divider; below 1024 px it becomes **Editor | Reference** segments that keep an open editor and the
+reading position when you switch.
+
+- **Controls** is the pedal's documented CC map as compact rows: number, name, behaviour
+  (*continuous · discrete · toggle · trigger · unknown*), value range, evidence, the manual page it
+  comes from, and your own hardware verification. Press **+ Control**, fill in what the chart says,
+  and **Save & add another**: the next blank row opens with the same source page prefilled, so a
+  MIDI implementation chart can be entered top to bottom while the page stays on screen. *Use the
+  page open on the right* (or the viewer's *Cite p. N in the open control*) writes the citation;
+  clicking a row's `p. 12` turns the viewer to that page. *On your hardware* holds the three facts
+  the app never fills in for you: whether you tried the control on hardware (and on which unit,
+  how, when), whether this number is the manufacturer's default or a remapped assignment (the
+  factory number is kept), and your notes. Both are statements about the *profile*, so they apply to
+  every unit placed with it; the editor lists those units, and a unit that is remapped or was tested
+  on its own gets a duplicated profile, as for jacks and pictures. A list of controls never declares
+  how MIDI reaches the pedal: *Declare MIDI input…* in the bar is the explicit statement, recorded as
+  yours.
+- **Quick Reference** is the practical knowledge about the pedal that is otherwise looked up again
+  and again: how to save a preset, enter and leave a mode, set the MIDI channel, startup shortcuts,
+  firmware procedures, fixes and discoveries. A note has a title, plain text, optional numbered
+  steps, manual page references, provenance (manual / third-party / your own) and a pin. Pinned
+  notes about the model also appear in the Board inspector of every placed unit; the inspector
+  additionally takes notes about **this unit only** (its channel setting, a quirk), kept on the rig.
+- **Reference**: document selection, page navigation (← → work when the page has focus), zoom,
+  *Find* over the PDF's text layer, and an explicit **PDF page N of M · printed page numbers may
+  differ** footer, because a citation is the PDF page index. *Suggest controls from text* reads
+  "CC nn …" patterns from the current page; everything it finds is added as **proposed**, citing the
+  page, and is not offered to Scenes or Textures until you check it and mark it reviewed. No
+  manual attached yet? Upload one in place. A file that is missing on this computer says so and
+  can be uploaded again under the same reference.
+
+What this changes elsewhere: the Scene editor's **+ Command** picker now also lists the reviewed
+documented controls (pick one, type a value inside its documented range, see the exact bytes);
+the Texture destination picker labels each control's behaviour and marks proposals; the compiler
+warns about a scene value outside a documented range or on an unreviewed control, without changing
+any bytes; a toggle or trigger control is refused as a sweep like any other switch. Saved scenes
+and textures never change when you edit a control (the editor shows where a number is used before
+you renumber or remove it). Project files carry the controls, citations and notes as ordinary
+profile and instance JSON, and *Export with manuals* / the complete backup bundles the cited PDFs.
+Nothing in the workbench sends MIDI; *verified on my pedal* is only ever your statement.
 
 ## Live: audition a scene on the rig, safely (Session 4)
 

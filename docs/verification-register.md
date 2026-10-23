@@ -73,6 +73,22 @@ Owner observed the following on the **second isolated Windows restore-test insta
 - The emitted warnings are intentional notifications of profile remapping, not backup corruption. This establishes the owner's requested actual-data regression scenario; the synthetic CI test also covers manuals, CC definitions and instance-based references.
 - Scope of evidence: restoration of PDF binaries is supported by bundle inspection and automated tests, but the owner did not screenshot opening the two PDFs in the new installation. Actual physical MIDI remains outside this offline recovery test.
 
+## Session 6 software baseline — MIDI Knowledge Workbench (virtual tests only)
+
+Evidence: [design and delivery note](midi-knowledge-workbench.md), branch `feature/midi-knowledge-workbench` (draft PR). No hardware was touched; nothing in this session transmits MIDI.
+
+| ID | Status | Verification and limitations |
+|---|---|---|
+| S6-S01 | **SW-PASS** | Structured control knowledge on the documented CC map: behaviour kept in agreement with the legacy `continuous` flag, documented range, source citation (PDF page index), manufacturer-default vs user-configured mapping with factory number, explicit hardware status, review status; legacy profiles load unchanged (`tests/test_knowledge_workbench.py`) |
+| S6-S02 | **SW-PASS** | Quick Reference notes on profiles (model) and placed instances (unit): steps, page references, provenance, pins, stable timestamps; round trip through save, restart, export and import |
+| S6-S03 | **SW-PASS** | Safety: a `proposed` control is never eligible for modulation; toggle/trigger controls are refused as switches; a Texture range outside a documented range and a scene value outside it or on an unreviewed control are warnings only — bytes never change; editing a control never rewrites a saved Scene or Texture (`control-usage` impact report) |
+| S6-S04 | **SW-PASS** | Project files: Session 6 keys omitted when default so older versions still open plain exports; cited PDFs bundled by *Export with manuals* / complete backup; fresh-database import restores controls, citations, notes and files |
+| S6-S05 | **SW-PASS** | Browser journey (`frontend/e2e/workbench.spec.ts`): library → workbench, find the chart, three controls entered consecutively citing pages 2 and 3, hardware claim on one only, note with steps pinned, reload, proposals from page text stay *proposed* and are not offered, Scene picker applies a reviewed control with the exact bytes, export/import; phone layout keeps an open editor and the reading position across Editor/Reference; keyboard-resizable split; in-place upload with a refused non-PDF |
+| S6-S06 | **SW-PASS** | Backend robustness: PDFium calls serialised behind one re-entrant lock after two concurrent page renders segfaulted the process during visual testing; `tests/test_pdf_concurrency.py` overlaps 24 renders, searches and proposal reads from 8 threads and proves single-thread entry with a fake PDFium |
+| S6-S07 | **SW-PASS** | Review follow-ups: hardware status and remapping are profile-level and shown as such with the units sharing the profile; saving controls never infers a MIDI interface (explicit *Declare MIDI input…*, evidence `user`); `test_entering_controls_never_claims_a_midi_interface`, e2e "entering controls never claims a MIDI interface" |
+| S6-H01 | **OPEN** | Owner: open the real Volante and Collider profiles in the workbench beside the attached manufacturer guides, confirm the existing Echo Level CC 12 / Delay A Mix CC 3 entries show *documented continuous · not verified on my pedal*, and record page citations |
+| S6-H02 | **OPEN** | Owner: mark a control *verified on my pedal* only after an owner-observed response; the app never does this (F-Q08 still applies) |
+
 ## Product verification debt / future proof
 
 | ID | Status | Future gate |
@@ -85,7 +101,7 @@ Owner observed the following on the **second isolated Windows restore-test insta
 | F-Q06 | **DEFERRED** | Hardware expression routing via actual controller/Meris MIDI I/O; don't assume a spare MC8 Omniport |
 | F-Q07 | **DEFERRED** | Manufacturer editor write, SysEx, full MIDI Clock, sound-loop playback and program inventory readback |
 
-| F-Q08 | **DEFERRED** | Source-backed manufacturer MIDI-map ingestion, control semantics, user custom maps and per-control physical evidence; never mark documented controls as hardware-verified by default |
+| F-Q08 | **PARTIAL (SW-PASS)** | Session 6: native UI for source-cited control definitions (behaviour, range, page citation, default vs remapped, per-control hardware status, review state) and page-text proposals that require human review; documented controls are never marked hardware-verified by the app. Still open: owner-run physical verification of individual controls (S6-H01/H02) |
 | F-Q09 | **DEFERRED** | Draft pedal presets and guarded vendor-specific hardware save; slot inventory, backup, overwrite approval, verified procedure and observed write evidence |
 
 | F-Q10 | **OPEN** | `UX-ML10X-01`: direct typed ML10X preset numbers, commit-once move, explicit collision handling, stable assignments and regressions |
