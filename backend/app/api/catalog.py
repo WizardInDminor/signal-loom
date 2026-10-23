@@ -581,14 +581,10 @@ def update_controls(profile_id: str, body: ControlsBody, request: Request):
     whose control is no longer continuous lose eligibility, but nothing is rewritten here."""
 
     def mutate(profile: DeviceProfile) -> None:
+        # Only the control list changes. A list of CCs says nothing about *how* MIDI reaches the
+        # pedal (DIN, TRS, USB…): the interface stays as the profile states it — unknown until the
+        # user declares it through ``midi-capability`` — and scenes compile the controls only then.
         profile.midi.cc_map = body.cc_map
-        if body.cc_map and not profile.midi.interfaces:
-            # A control list implies a MIDI input; record the statement as the user's, never as documented.
-            profile.midi.interfaces.append("din_in")
-            from ..models.common import Evidence
-
-            if profile.midi.evidence == Evidence.UNKNOWN:
-                profile.midi.evidence = Evidence.USER
 
     return _modify_profile(request, profile_id, mutate, guard="changing this device's MIDI controls")
 
@@ -628,14 +624,19 @@ def update_quick_reference(profile_id: str, body: QuickReferenceBody, request: R
 
 @router.get("/devices/{profile_id}/control-usage")
 def control_usage(profile_id: str, request: Request):
-    """Where each CC number of this profile is in use across every rig: scene values (hand-typed or
-    applied from a command) and Texture mappings. Keyed by CC number as a string. Shown before a
-    control is renumbered or removed; saved scenes and textures are never rewritten by such an edit."""
+    """Where each CC number of this profile is in use across every rig (``controls``, keyed by CC
+    number as a string: scene values, hand-typed or applied from a command, and Texture mappings),
+    and every placed unit that shares the profile (``units``). Shown before a control is renumbered
+    or removed, and before a profile-level claim is recorded; saved scenes and textures are never
+    rewritten by such an edit."""
     repo = profile_repo(request)
     if repo.get(profile_id) is None:
         raise HTTPException(status_code=404, detail="Profile not found")
     rigs = RigRepository(request.app.state.db)
     usage: dict[str, dict[str, list[dict]]] = {}
+    # Every placed unit that shares this profile: a profile-level fact (a hardware claim, a remapped
+    # number) applies to all of them, so the editor says so before the user records one.
+    units: list[dict] = []
 
     def slot(cc: int) -> dict[str, list[dict]]:
         return usage.setdefault(str(cc), {"scenes": [], "textures": []})
@@ -645,6 +646,10 @@ def control_usage(profile_id: str, request: Request):
         if rig is None:
             continue
         ours = {i.id: i for i in rig.instances if i.profile_id == profile_id}
+        units.extend(
+            {"rig_id": rig.id, "rig_name": rig.name, "instance_id": i.id, "instance_label": i.label}
+            for i in ours.values()
+        )
         for scene in rig.scenes:
             for st in scene.device_states:
                 inst = ours.get(st.instance_id)
@@ -683,4 +688,4 @@ def control_usage(profile_id: str, request: Request):
                             "enabled": m.enabled,
                         }
                     )
-    return usage
+    return {"controls": usage, "units": units}

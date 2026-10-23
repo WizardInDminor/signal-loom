@@ -111,14 +111,16 @@ test("workbench: read the manual beside the editor, enter controls consecutively
   await form2.getByLabel("CC number").fill("15");
   await form2.getByLabel("Control name").fill("Spacing");
   await form2.getByLabel("Behaviour").selectOption("continuous");
-  await form2.getByText("On your pedal").click();
+  await form2.getByText("On your hardware").click();
+  await expect(form2.getByTestId("control-scope")).toContainText("this profile");
+  await expect(form2.getByTestId("control-scope-count")).toHaveText("1"); // the rig's Sunset is the one unit placed with this copy
   await form2.getByLabel("Hardware status").selectOption("verified");
   await form2.getByLabel("Hardware note").fill("swept by hand on the bench");
   await form2.getByTestId("control-save").click();
   await expect(page.getByTestId("control-form")).toHaveCount(0);
   await expect(page.getByTestId("workbench-save-state")).toHaveAttribute("data-state", "saved");
-  await expect(page.getByTestId("control-cc-15")).toContainText("on my pedal");
-  await expect(page.getByTestId("control-cc-12")).not.toContainText("on my pedal"); // a citation is never a hardware claim
+  await expect(page.getByTestId("control-cc-15")).toContainText("verified (your claim)");
+  await expect(page.getByTestId("control-cc-12")).not.toContainText("verified"); // a citation is never a hardware claim
 
   // --- A third control from the viewer side: turn to page 3, "+ Control from p. 3", Enter saves.
   await page.getByTestId("reference-nav").getByRole("button", { name: "Next page" }).click();
@@ -277,6 +279,34 @@ test("workbench: on a phone the Editor and Reference segments keep an open contr
   await page.keyboard.press("ArrowRight");
   expect(Number(await sep.getAttribute("aria-valuenow"))).toBeGreaterThan(before);
   await page.screenshot({ path: "test-results/workbench-1280.png" }).catch(() => undefined);
+});
+
+test("workbench: entering controls never claims a MIDI interface; the user declares it explicitly", async ({ page }) => {
+  const id = `e2e-wb-silent-${Date.now().toString(36)}`;
+  const body = { id, manufacturer: "E2E", model: `Silent ${id}`, category: "effect", provenance: { source: "user", evidence: "user" } };
+  expect((await page.request.post("/api/catalog/devices", { data: body })).ok()).toBeTruthy();
+  createdProfiles.push(id);
+  await openWorkbench(page, id);
+  await expect(page.getByTestId("workbench-midi-basics")).toContainText("no MIDI input declared");
+  await page.getByTestId("control-add").click();
+  const form = page.getByTestId("control-form");
+  await form.getByLabel("CC number").fill("7");
+  await form.getByLabel("Control name").fill("Volume");
+  await form.getByTestId("control-save").click();
+  await expect(page.getByTestId("control-cc-7")).toBeVisible();
+  await expect(page.getByTestId("controls-no-interface")).toContainText("not declared yet");
+  let prof = await (await page.request.get(`/api/catalog/devices/${id}`)).json();
+  expect(prof.midi.interfaces).toEqual([]); // nothing inferred from a list of controls
+  await page.getByTestId("declare-midi-toggle").click();
+  await page.getByLabel("MIDI interface").selectOption("usb");
+  await page.getByLabel("Default MIDI channel").fill("4");
+  await page.getByTestId("declare-midi-save").click();
+  await expect(page.getByTestId("workbench-midi-basics")).toContainText("MIDI usb");
+  await expect(page.getByTestId("controls-no-interface")).toHaveCount(0);
+  prof = await (await page.request.get(`/api/catalog/devices/${id}`)).json();
+  expect(prof.midi.interfaces).toEqual(["usb"]);
+  expect(prof.midi.evidence).toBe("user");
+  expect(prof.midi.default_channel).toBe(4);
 });
 
 test("workbench: a profile without a manual explains itself and takes a PDF in place; a non-PDF is refused", async ({ page }) => {

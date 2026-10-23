@@ -91,6 +91,7 @@ export function Workbench({ initial }: { initial: DeviceProfile }) {
     if (added) setReference((r) => ({ ...r, docId: added.document_id, page: 1 }));
   };
   const onReplace = async (docId: string, file: File) => { setProfile(await api.catalog.replaceDocument(profile.id, docId, file)); };
+  const onDeclareMidi = async (iface: string, channel: number | null) => { await run(() => api.catalog.declareMidi(profile.id, { interfaces: [iface], default_channel: channel })); };
   const onAddProposed = (defs: CcDef[]) => { setView("controls"); return saveControls([...profile.midi.cc_map, ...defs.filter((d) => !profile.midi.cc_map.some((c) => c.cc === d.cc))].sort((a, b) => a.cc - b.cc)); };
 
   const editor = (
@@ -117,7 +118,7 @@ export function Workbench({ initial }: { initial: DeviceProfile }) {
 
   return (
     <div ref={rootRef} className="flex flex-col min-h-0" style={{ height: `calc(100dvh - ${top}px)` }} data-testid="workbench">
-      <IdentityBar profile={profile} saveState={shownSaveState} saveError={saveError} controlsCount={profile.midi.cc_map.length} notesCount={(profile.quick_reference ?? []).length} />
+      <IdentityBar profile={profile} saveState={shownSaveState} saveError={saveError} controlsCount={profile.midi.cc_map.length} notesCount={(profile.quick_reference ?? []).length} onDeclareMidi={onDeclareMidi} />
       <ErrorBanner message={banner} onClose={() => setBanner(null)} />
       <SplitPane left={editor} right={viewer} leftLabel="Editor" rightLabel="Reference" segment={segment} onSegment={setSegment} />
     </div>

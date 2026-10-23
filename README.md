@@ -333,10 +333,14 @@ reading position when you switch.
   and **Save & add another**: the next blank row opens with the same source page prefilled, so a
   MIDI implementation chart can be entered top to bottom while the page stays on screen. *Use the
   page open on the right* (or the viewer's *Cite p. N in the open control*) writes the citation;
-  clicking a row's `p. 12` turns the viewer to that page. *On your pedal* holds the three facts
-  the app never fills in for you: whether you tried the control on your hardware (and how), whether
-  this number is the manufacturer's default or your remapped assignment (the factory number is
-  kept), and your notes.
+  clicking a row's `p. 12` turns the viewer to that page. *On your hardware* holds the three facts
+  the app never fills in for you: whether you tried the control on hardware (and on which unit,
+  how, when), whether this number is the manufacturer's default or a remapped assignment (the
+  factory number is kept), and your notes. Both are statements about the *profile*, so they apply to
+  every unit placed with it; the editor lists those units, and a unit that is remapped or was tested
+  on its own gets a duplicated profile, as for jacks and pictures. A list of controls never declares
+  how MIDI reaches the pedal: *Declare MIDI input…* in the bar is the explicit statement, recorded as
+  yours.
 - **Quick Reference** is the practical knowledge about the pedal that is otherwise looked up again
   and again: how to save a preset, enter and leave a mode, set the MIDI channel, startup shortcuts,
   firmware procedures, fixes and discoveries. A note has a title, plain text, optional numbered

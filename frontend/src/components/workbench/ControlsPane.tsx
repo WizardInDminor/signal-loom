@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
-import type { CcDef, ControlBehavior, ControlUsage, DeviceProfile, DocumentRef, SourceCitation } from "@/lib/types";
+import type { CcDef, ControlBehavior, ControlUsage, ControlUsageReport, DeviceProfile, DocumentRef, ProfileUnit, SourceCitation } from "@/lib/types";
 import { Badge, Button, EvidenceBadge, Field } from "@/components/ui/basics";
 import { BEHAVIORS, BEHAVIOR_TONE, CONTROL_FILTERS, HARDWARE_STATUSES, type ControlFilter, behaviorLabel, behaviorOf, blankControl, citableDocuments, controlProblems, filterControls, isRemapped, isReviewed, nextFreeCc, normalizeControl, rangeText } from "@/lib/knowledge";
 import type { CiteRequest, ReferenceState, Spawn } from "./types";
@@ -29,7 +29,7 @@ export function ControlsPane({ profile, reference, cite, spawn, onSave, onEditin
   // `seq` remounts the form on every new draft (React would otherwise keep the previous draft's state).
   const [editing, setEditing] = useState<{ draft: CcDef; originalCc: number | null; seq: number } | null>(null);
   const seq = useRef(0);
-  const [usage, setUsage] = useState<ControlUsage | null>(null);
+  const [usage, setUsage] = useState<ControlUsageReport | null>(null);
   const [busy, setBusy] = useState(false);
   const addRef = useRef<HTMLButtonElement>(null);
 
@@ -67,7 +67,7 @@ export function ControlsPane({ profile, reference, cite, spawn, onSave, onEditin
     }
   };
   const remove = async (cc: number) => {
-    const u = usage?.[String(cc)];
+    const u = usage?.controls[String(cc)];
     const where = u && (u.scenes.length || u.textures.length)
       ? `\n\nIt is used by ${u.scenes.length} scene value(s) and ${u.textures.length} Texture destination(s). Those keep their saved numbers; scenes will show the CC as undocumented and Textures lose eligibility for it.`
       : "";
@@ -100,8 +100,11 @@ export function ControlsPane({ profile, reference, cite, spawn, onSave, onEditin
       </div>
       <div className="flex-1 min-h-0 overflow-auto px-3 sm:px-4 py-2">
         {editing && editing.originalCc === null && (
-          <ControlForm key={`new-${editing.seq}`} profile={profile} docs={docs} value={editing.draft} isNew busy={busy} reference={reference} cite={cite} usage={null}
+          <ControlForm key={`new-${editing.seq}`} docs={docs} value={editing.draft} isNew busy={busy} reference={reference} cite={cite} usage={null} units={usage?.units ?? []}
             onCancel={() => setEditing(null)} onSave={(d, more) => void commit(d, more)} onDelete={null} onGoToPage={onGoToPage} others={list} />
+        )}
+        {!!list.length && !profile.midi.interfaces.length && (
+          <p className="text-[11px] text-amber-900 bg-amber-50 border border-amber-200 rounded px-2 py-1 mb-1" data-testid="controls-no-interface">The controls are recorded, but how MIDI reaches this pedal (DIN, TRS, USB) is not declared yet, so Scenes and Textures cannot address it. Declare it in the bar above once you know; nothing is assumed from the list of controls.</p>
         )}
         {!list.length && !editing && (
           <div className="rounded-md border border-dashed border-line p-4 text-sm text-neutral-600 flex flex-col gap-2" data-testid="controls-empty">
@@ -113,12 +116,12 @@ export function ControlsPane({ profile, reference, cite, spawn, onSave, onEditin
         <ul className="flex flex-col gap-1" data-testid="controls-list">
           {shown.map((c) => {
             const open = editing?.originalCc === c.cc;
-            const u = usage?.[String(c.cc)];
+            const u = usage?.controls[String(c.cc)];
             const uses = (u?.scenes.length ?? 0) + (u?.textures.length ?? 0);
             return (
               <li key={c.cc} data-testid={`control-cc-${c.cc}`} data-behavior={behaviorOf(c) ?? ""} data-review={c.review_status ?? "reviewed"}>
                 {open && editing ? (
-                  <ControlForm key={`edit-${editing.seq}`} profile={profile} docs={docs} value={editing.draft} isNew={false} busy={busy} reference={reference} cite={cite} usage={u ?? null}
+                  <ControlForm key={`edit-${editing.seq}`} docs={docs} value={editing.draft} isNew={false} busy={busy} reference={reference} cite={cite} usage={u ?? null} units={usage?.units ?? []}
                     onCancel={() => setEditing(null)} onSave={(d, more) => void commit(d, more)} onDelete={() => void remove(c.cc)} onGoToPage={onGoToPage} others={list.filter((x) => x.cc !== c.cc)} />
                 ) : (
                   <ControlRow c={c} docs={docs} uses={uses} disabled={busy} onOpen={() => setEditing({ draft: structuredClone(c), originalCc: c.cc, seq: ++seq.current })} onGoToPage={onGoToPage} />
@@ -127,7 +130,7 @@ export function ControlsPane({ profile, reference, cite, spawn, onSave, onEditin
             );
           })}
         </ul>
-        {!!list.length && <p className="text-[11px] text-neutral-400 mt-3">Entered controls describe what the manual (or you) say the pedal does. They never send MIDI, and “verified on my pedal” is only ever your own statement.</p>}
+        {!!list.length && <p className="text-[11px] text-neutral-400 mt-3">Entered controls describe what the manual (or you) say the pedal does. They never send MIDI, and “verified” is only ever your own statement about this profile.</p>}
       </div>
     </div>
   );
@@ -146,7 +149,7 @@ function ControlRow({ c, docs, uses, disabled, onOpen, onGoToPage }: { c: CcDef;
           <Badge tone={b ? BEHAVIOR_TONE[b] : "bad"}>{behaviorLabel(c)}</Badge>
           {range && <span className="text-neutral-600 font-mono">{range}</span>}
           <EvidenceBadge evidence={c.evidence} />
-          {c.hardware_status === "verified" && <Badge tone="ok">✓ on my pedal</Badge>}
+          {c.hardware_status === "verified" && <Badge tone="ok">✓ verified (your claim)</Badge>}
           {c.hardware_status === "failed" && <Badge tone="bad">no response</Badge>}
           {!isReviewed(c) && <Badge tone="warn">needs review</Badge>}
           {uses > 0 && <span className="text-neutral-400">· used {uses}×</span>}
@@ -166,9 +169,9 @@ function ControlRow({ c, docs, uses, disabled, onOpen, onGoToPage }: { c: CcDef;
   );
 }
 
-function ControlForm({ profile, docs, value, isNew, busy, reference, cite, usage, others, onCancel, onSave, onDelete, onGoToPage }: {
-  profile: DeviceProfile; docs: DocumentRef[]; value: CcDef; isNew: boolean; busy: boolean; reference: ReferenceState; cite: CiteRequest | null;
-  usage: ControlUsage[string] | null; others: CcDef[];
+function ControlForm({ docs, value, isNew, busy, reference, cite, usage, units, others, onCancel, onSave, onDelete, onGoToPage }: {
+  docs: DocumentRef[]; value: CcDef; isNew: boolean; busy: boolean; reference: ReferenceState; cite: CiteRequest | null;
+  usage: ControlUsage[string] | null; units: ProfileUnit[]; others: CcDef[];
   onCancel: () => void; onSave: (c: CcDef, addAnother: boolean) => void; onDelete: (() => void) | null; onGoToPage: (c: SourceCitation) => void;
 }) {
   const [c, setC] = useState<CcDef>(value);
@@ -248,17 +251,22 @@ function ControlForm({ profile, docs, value, isNew, busy, reference, cite, usage
         </div>
       </fieldset>
       <details open={advancedOpen} onToggle={(e) => setAdvancedOpen((e.target as HTMLDetailsElement).open)} className="border border-line rounded bg-panel/60">
-        <summary className="px-2 py-1 cursor-pointer text-neutral-600 select-none">On your pedal <span className="text-neutral-400">— verification, remapping, notes</span></summary>
+        <summary className="px-2 py-1 cursor-pointer text-neutral-600 select-none">On your hardware <span className="text-neutral-400">— verification, remapping, notes</span></summary>
         <div className="p-2 pt-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
-          <Field label="Hardware verification (your statement only)" hint="Signal Loom never sets this; a manual citation is not a hardware test.">
+          <p className="sm:col-span-2 text-[11px] text-neutral-600 bg-neutral-50 border border-line rounded px-2 py-1" data-testid="control-scope">
+            These are statements about <b>this profile</b>, so they apply to every unit placed with it
+            {units.length ? <> — currently <b data-testid="control-scope-count">{units.length}</b>: {[...new Set(units.map((x) => `${x.instance_label} (${x.rig_name})`))].slice(0, 4).join(", ")}{units.length > 4 ? ", …" : ""}</> : " (none placed yet)"}.
+            If only one of your units is remapped or was tested, duplicate the profile for that unit first; the app never records a per-unit claim here.
+          </p>
+          <Field label="Hardware verification (your statement only)" hint="Signal Loom never sets this; a manual citation is not a hardware test. Say which unit and when in the note.">
             <select aria-label="Hardware status" value={c.hardware_status ?? "unverified"} onChange={(e) => set({ hardware_status: e.target.value as CcDef["hardware_status"] })}>
               {HARDWARE_STATUSES.map((h) => <option key={h.value} value={h.value}>{h.label}</option>)}
             </select>
           </Field>
-          <Field label="How / when you tried it"><input aria-label="Hardware note" value={c.hardware_note ?? ""} placeholder="e.g. swept by hand 2026-10-21, smooth 0–127" disabled={(c.hardware_status ?? "unverified") === "unverified"} onChange={(e) => set({ hardware_note: e.target.value || null })} /></Field>
-          <Field label="Mapping" hint={profile.midi.channel_configurable === false ? undefined : "Some pedals let CC numbers be reassigned; record your remap and keep the factory number."}>
+          <Field label="Which unit, how and when"><input aria-label="Hardware note" value={c.hardware_note ?? ""} placeholder="e.g. my blue Volante, swept by hand 2026-10-21, smooth 0–127" disabled={(c.hardware_status ?? "unverified") === "unverified"} onChange={(e) => set({ hardware_note: e.target.value || null })} /></Field>
+          <Field label="Mapping" hint="Some pedals let CC numbers be reassigned; record the remap and keep the factory number. It applies to every unit using this profile.">
             <select aria-label="Mapping" value={c.mapping ?? "manufacturer_default"} onChange={(e) => set({ mapping: e.target.value as CcDef["mapping"], factory_cc: e.target.value === "user_configured" ? (c.factory_cc ?? c.cc) : null })}>
-              <option value="manufacturer_default">manufacturer default</option><option value="user_configured">remapped on my pedal</option>
+              <option value="manufacturer_default">manufacturer default</option><option value="user_configured">remapped (units with this profile)</option>
             </select>
           </Field>
           <Field label="Factory CC (the number in the manual)"><input aria-label="Factory CC" type="number" min={0} max={127} inputMode="numeric" value={c.factory_cc ?? ""} disabled={c.mapping !== "user_configured"} onChange={(e) => set({ factory_cc: e.target.value === "" ? null : Number(e.target.value) })} /></Field>

@@ -27,16 +27,16 @@ export function NotesPane({ notes, docs, reference, cite, spawn, scopeLabel, onS
   const [q, setQ] = useState("");
   const [editing, setEditing] = useState<DeviceNote | null>(null);
   const [busy, setBusy] = useState(false);
-  const formSeq = useRef(0);
-  const open = (n: DeviceNote | null) => { formSeq.current++; setEditing(n); };
+  // A fresh key per opened draft remounts the form (React would otherwise keep the previous draft's state).
+  const [formKey, setFormKey] = useState(0);
+  const open = (n: DeviceNote | null) => { setFormKey((k) => k + 1); setEditing(n); };
   const addRef = useRef<HTMLButtonElement>(null);
   useEffect(() => { onEditing?.(!!editing); }, [editing, onEditing]);
   const lastSpawn = useRef(0);
   useEffect(() => {
     if (spawn && spawn.kind === "note" && spawn.seq !== lastSpawn.current) {
       lastSpawn.current = spawn.seq;
-      formSeq.current++;
-      setEditing(blankNote("other", spawn.citation));
+      open(blankNote("other", spawn.citation));
     }
   }, [spawn]);
   const isNew = !!editing && !notes.some((n) => n.id === editing.id);
@@ -72,7 +72,7 @@ export function NotesPane({ notes, docs, reference, cite, spawn, scopeLabel, onS
         <Button ref={addRef} variant="primary" onClick={() => open(blankNote("other", currentCitation()))} disabled={busy || isNew} data-testid="note-add" title={`Add a note about ${scopeLabel}`}>+ Note</Button>
       </div>
       <div className={compact ? "flex flex-col gap-1" : "flex-1 min-h-0 overflow-auto px-3 sm:px-4 py-2 flex flex-col gap-1"}>
-        {editing && isNew && <NoteForm key={`new-${formSeq.current}`} value={editing} docs={docs} reference={reference} cite={cite} busy={busy} isNew onCancel={() => setEditing(null)} onSave={(n, more) => void commit(n, more)} onDelete={null} onGoToPage={onGoToPage} />}
+        {editing && isNew && <NoteForm key={`new-${formKey}`} value={editing} docs={docs} reference={reference} cite={cite} busy={busy} isNew onCancel={() => setEditing(null)} onSave={(n, more) => void commit(n, more)} onDelete={null} onGoToPage={onGoToPage} />}
         {!notes.length && !editing && (
           <div className="rounded-md border border-dashed border-line p-4 text-sm text-neutral-600 flex flex-col gap-1" data-testid="notes-empty">
             <p className="font-medium text-neutral-800">No notes about {scopeLabel} yet.</p>

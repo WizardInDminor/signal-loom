@@ -153,10 +153,16 @@ CommandCitation = SourceCitation
 # ``toggle`` flips state (result depends on prior state); ``trigger`` fires an action on any value;
 # ``unknown`` is stated as not known. Legacy entries carry None and are read through ``continuous``.
 ControlBehavior = Literal["continuous", "discrete", "toggle", "trigger", "unknown"]
-# Whether a documented control is the manufacturer's default assignment or the number this
-# particular user configured on their pedal (some pedals let CC numbers be remapped).
+# Whether a documented control is the manufacturer's default assignment or a number the user
+# configured on their pedal (some pedals let CC numbers be remapped). A ``CcDef`` belongs to the
+# *profile*, so this is a statement about every unit placed with that profile: a user whose two
+# units of one model are mapped differently keeps a duplicated profile per unit (as for jacks and
+# pictures that differ per unit, the profile is the unit of configuration).
 ControlMapping = Literal["manufacturer_default", "user_configured"]
-# The user's own, explicit statement about trying the control on their hardware. Never set by the app.
+# The user's own, explicit statement about trying the control on hardware of this model. Never set
+# by the app; like ``MidiCommand.verified_on_hardware`` it lives on the profile and therefore
+# applies to every unit using it — the UI says so, and ``hardware_note`` is where the unit and date
+# belong.
 HardwareStatus = Literal["unverified", "verified", "failed"]
 # A control proposed from PDF text (or any other automated source) stays ``proposed`` until a
 # human marks it ``reviewed``. None = a legacy or hand-entered entry, which counts as reviewed.

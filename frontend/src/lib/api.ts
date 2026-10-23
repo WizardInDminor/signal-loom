@@ -1,4 +1,4 @@
-import type { Analysis, AssetRecord, CcDef, ControlProposal, ControlUsage, DeviceNote, DeviceProfile, DocumentKind, DocumentRecord, DryRun, ExportStatus, Follower, LiveBindings, LiveCoverage, LiveEndpoint, LiveEvents, LiveJob, LivePanels, LiveStatus, MidiCommand, PedalboardSpec, PerformanceStatus, PortDef, Readiness, ResolvedMessage, Rig, RigSummary, TransportMode } from "./types";
+import type { Analysis, AssetRecord, CcDef, ControlProposal, ControlUsageReport, DeviceNote, DeviceProfile, DocumentKind, DocumentRecord, DryRun, ExportStatus, Follower, LiveBindings, LiveCoverage, LiveEndpoint, LiveEvents, LiveJob, LivePanels, LiveStatus, MidiCommand, PedalboardSpec, PerformanceStatus, PortDef, Readiness, ResolvedMessage, Rig, RigSummary, TransportMode } from "./types";
 
 export interface CommandUse { rig_id: string; rig_name: string; scene_id: string; scene_name: string; instance_id: string; instance_label: string; name_at_apply: string; changed: boolean; removed: boolean }
 export interface DocumentMeta extends DocumentRecord { referenced_by: string[]; file_present: boolean }
@@ -168,8 +168,8 @@ export const api = {
     updateControls: (id: string, cc_map: CcDef[]) => request<DeviceProfile>(`/api/catalog/devices/${id}/controls`, { method: "PUT", body: JSON.stringify({ cc_map }) }),
     /** Session 6: replace only the profile's model-level Quick Reference notes. */
     updateQuickReference: (id: string, notes: DeviceNote[]) => request<DeviceProfile>(`/api/catalog/devices/${id}/quick-reference`, { method: "PUT", body: JSON.stringify({ notes }) }),
-    /** Where each CC number is used (scene values, texture mappings) across every rig. */
-    controlUsage: (id: string) => request<ControlUsage>(`/api/catalog/devices/${id}/control-usage`),
+    /** Where each CC number is used (scene values, texture mappings) across every rig, and the placed units sharing the profile. */
+    controlUsage: (id: string) => request<ControlUsageReport>(`/api/catalog/devices/${id}/control-usage`),
     declareMidi: (id: string, body: { interfaces: string[]; default_channel?: number | null; note?: string | null }) =>
       request<DeviceProfile>(`/api/catalog/devices/${id}/midi-capability`, { method: "POST", body: JSON.stringify(body) }),
     list: (q?: string, category?: string) => {

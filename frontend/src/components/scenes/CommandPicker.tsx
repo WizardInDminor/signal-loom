@@ -119,7 +119,7 @@ export function CommandPicker({ instance, profile, state, onApplyCc, onApplyPc, 
                         <Badge tone={b ? BEHAVIOR_TONE[b] : "bad"}>{behaviorLabel(d)}</Badge>
                         {rangeText(d) && <span className="text-neutral-500 font-mono text-[11px]">{rangeText(d)}</span>}
                         <EvidenceBadge evidence={d.evidence} />
-                        {d.hardware_status === "verified" && <Badge tone="ok">✓ on my pedal</Badge>}
+                        {d.hardware_status === "verified" && <Badge tone="ok">✓ verified (your claim)</Badge>}
                       </div>
                       {d.value_semantics && <div className="text-neutral-500">{d.value_semantics}</div>}
                     </button>

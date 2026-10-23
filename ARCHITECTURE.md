@@ -268,6 +268,18 @@ rows load unchanged and no SQL migration is needed (profiles and instances are v
   `hardware_status` (`unverified · verified · failed`, with `hardware_note`; never set by the app),
   `review_status` (None/`reviewed`, or `proposed` for anything that came from automated extraction),
   `notes`.
+- **Scope of `hardware_status` and `mapping`: the profile, deliberately.** A `CcDef` is model-level
+  knowledge, so both are statements about every unit placed with that profile — exactly like
+  `MidiCommand.verified_on_hardware` has been since Session 3f, and like jacks and pictures, where a
+  unit that differs gets its own duplicated profile (the profile is the unit of configuration; the
+  per-instance override seams are `port_overrides` and `image`, not MIDI). The editor shows the
+  placed units sharing the profile (`control-usage.units`) before either is recorded and says to
+  duplicate the profile for a unit that is remapped or was tested on its own; `hardware_note` is
+  where the unit and date belong. A per-instance CC override (a remap on one unit only, with its
+  own compiler, eligibility and picker resolution) is a separate seam not built in Session 6.
+- **No connectivity inference.** Saving a control list never adds a MIDI interface: how MIDI reaches
+  the pedal stays unknown until the user declares it (`midi-capability`, evidence `user`), and the
+  workbench says so while scenes cannot yet address the pedal.
 - `DeviceNote` (`id`, `title`, `body`, `category`, ordered `steps`, `references` as citations,
   `evidence`, `source_note`, `pinned`, timestamps) lives in `DeviceProfile.quick_reference` for the
   model and in `DeviceInstance.quick_reference` for one physical unit; the two are different facts
@@ -283,12 +295,15 @@ claim into the derived command and skips proposed controls. API: `PUT …/contro
 duplicate numbers refused, guarded while the performing rig uses the profile), `PUT
 …/quick-reference` (timestamps kept for unchanged notes), `GET …/control-usage` (scene values and
 Texture mappings per CC, for impact review), `GET /api/documents/{id}/pages/{n}/proposals` (regex
-over the page's own text; proposals only, nothing written). Project files are unchanged in format:
+over the page's own text; proposals only, nothing written). `control-usage` returns `{controls,
+units}`. Project files are unchanged in format:
 `project_dict` omits Session 6 keys that hold their defaults (and a behaviour the legacy flag
 already implies), so a plain export of a profile without new knowledge still opens in the previous
 version, exactly as `textures` is handled. PDFium is not thread-safe: all PDFium work in
-`app/documents.py` now runs under one process-wide lock (two concurrent page renders crashed the
-process before).
+`app/documents.py` now runs under one re-entrant process-wide lock (two concurrent page renders
+crashed the process before; `tests/test_pdf_concurrency.py` overlaps renders, text extraction and
+proposals from eight threads and, with a fake PDFium, asserts that never more than one thread is
+inside it).
 
 **UI** (`frontend/src/components/workbench/*`, route `/catalog/[id]/workbench`): `Workbench` owns the
 reading position (`ReferenceState`), so it survives every edit, and routes citations both ways (a

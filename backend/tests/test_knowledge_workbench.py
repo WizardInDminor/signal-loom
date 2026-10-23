@@ -259,14 +259,44 @@ def test_control_usage_lists_scene_values_and_texture_mappings_per_cc(client):
     ]
     rig["revision"] += 1
     assert client.put(f"/api/rigs/{rig['id']}", json=rig).status_code == 200, "rig save"
-    usage = client.get("/api/catalog/devices/strymon-sunset/control-usage").json()
+    report = client.get("/api/catalog/devices/strymon-sunset/control-usage").json()
+    usage = report["controls"]
     assert usage["100"]["scenes"][0]["scene_name"] == scene["name"] and usage["100"]["scenes"][0]["value"] == 64
     assert (
         usage["100"]["textures"][0]["texture_name"] == "Usage test" and usage["100"]["textures"][0]["output_max"] == 90
     )
     # Bypass via the scene's state column is compiled, not stored as a CC value, so CC 10 is not a "use" here.
     assert "10" not in usage or usage["10"]["scenes"] == []
+    # Every placed unit sharing the profile is listed: a profile-level claim applies to all of them.
+    assert {(x["rig_name"], x["instance_label"]) for x in report["units"]} >= {(rig["name"], "Sunset")}
     assert client.get("/api/catalog/devices/nope/control-usage").status_code == 404
+
+
+def test_entering_controls_never_claims_a_midi_interface(db_path):
+    with TestClient(create_app(db_path)) as client:
+        body = {
+            "id": "kw-no-midi",
+            "manufacturer": "Test",
+            "model": "Silent",
+            "provenance": {"source": "user", "evidence": "user"},
+        }
+        assert client.post("/api/catalog/devices", json=body).status_code == 201
+        r = client.put(
+            "/api/catalog/devices/kw-no-midi/controls", json={"cc_map": [control(12, "Level", behavior="continuous")]}
+        )
+        assert r.status_code == 200, r.text
+        midi = r.json()["midi"]
+        assert midi["interfaces"] == [] and midi["evidence"] == "unknown"  # how MIDI reaches the pedal is still unknown
+        # The explicit statement is the only way to declare the input, and it is recorded as the user's.
+        d = client.post(
+            "/api/catalog/devices/kw-no-midi/midi-capability", json={"interfaces": ["usb"], "default_channel": 2}
+        )
+        assert (
+            d.status_code == 200
+            and d.json()["midi"]["interfaces"] == ["usb"]
+            and d.json()["midi"]["evidence"] == "user"
+        )
+        assert len(d.json()["midi"]["cc_map"]) == 1
 
 
 def test_from_documented_map_carries_the_citation_and_skips_proposed_controls():

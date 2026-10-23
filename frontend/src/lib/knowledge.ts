@@ -18,8 +18,8 @@ export const BEHAVIORS: { value: ControlBehavior; label: string; short: string; 
 export const BEHAVIOR_TONE: Record<ControlBehavior, "ok" | "warn" | "neutral" | "bad"> = { continuous: "ok", discrete: "neutral", toggle: "warn", trigger: "warn", unknown: "bad" };
 
 export const HARDWARE_STATUSES: { value: HardwareStatus; label: string }[] = [
-  { value: "unverified", label: "Not tried on my pedal" },
-  { value: "verified", label: "Verified on my pedal" },
+  { value: "unverified", label: "Not tried on hardware" },
+  { value: "verified", label: "Verified on hardware (my claim, this model)" },
   { value: "failed", label: "Tried it — no response / different" },
 ];
 

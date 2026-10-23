@@ -192,8 +192,15 @@ optional with a "not stated" default and legacy rows load unchanged)
   the hardware claim and skips proposed controls.
 - Project files: unchanged format; default-valued Session 6 keys are omitted so older versions still
   open plain exports; cited PDFs travel with *Export with manuals* and the complete backup.
-- Robustness: every PDFium call runs under one lock (two concurrent page renders segfaulted the
-  backend during visual testing; the viewer's page prefetch made that routine).
+- Robustness: every PDFium call runs under one re-entrant lock (two concurrent page renders
+  segfaulted the backend during visual testing; the viewer's page prefetch made that routine).
+  `tests/test_pdf_concurrency.py` overlaps renders, text extraction and proposals from eight threads
+  against the real PDFium and, with a fake PDFium, asserts the lock admits one thread at a time.
+- Review follow-ups (PR #11): `hardware_status` and `mapping` are explicitly profile-level
+  statements (shown with the placed units that share the profile, with the advice to duplicate the
+  profile for a unit that differs); saving controls never infers a MIDI interface — *Declare MIDI
+  input…* in the identity bar is the user's explicit statement; the Add & next form remount uses
+  state rather than a ref read during render.
 
 **Frontend**
 
@@ -244,6 +251,8 @@ no new live code path exists; the workbench talks only to catalog and document r
   still edited in the full profile editor (JSON), not in the workbench.
 - A duplicate CC number in one profile is refused by the controls endpoint; a pedal whose user remap
   collides with another documented number is recorded as one entry with the factory number.
+- Hardware verification and remapping are recorded on the profile (model level). Two units sharing
+  a profile share them by design, and the editor says so; a per-unit CC override is not modelled.
 - Unit-level notes are edited from the Board inspector, not from the workbench (the workbench is
   profile-scoped and has no rig context).
 - Profile saves remain last-write-wins (F-Q03, unchanged); the workbench saves one list per commit

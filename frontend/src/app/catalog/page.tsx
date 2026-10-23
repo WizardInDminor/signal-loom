@@ -208,7 +208,7 @@ export default function CatalogPage() {
                       <span className="font-mono">CC {c.cc}</span><span>{c.name}</span><span className="text-neutral-500">· {behaviorLabel(c)}{rangeText(c) ? ` ${rangeText(c)}` : ""}</span>
                       <EvidenceBadge evidence={c.evidence} />
                       {c.citation?.page && <span className="text-neutral-500">p. {c.citation.page}</span>}
-                      {c.hardware_status === "verified" && <Badge tone="ok">✓ pedal</Badge>}
+                      {c.hardware_status === "verified" && <Badge tone="ok">✓ verified</Badge>}
                       {!isReviewed(c) && <Badge tone="warn">needs review</Badge>}
                     </li>
                   ))}

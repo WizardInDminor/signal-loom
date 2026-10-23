@@ -86,6 +86,9 @@ export interface ControlProposal extends CcDef { snippet: string }
 export interface ControlSceneUse { rig_id: string; rig_name: string; scene_id: string; scene_name: string; instance_id: string; instance_label: string; value: number; command: string | null }
 export interface ControlTextureUse { rig_id: string; rig_name: string; texture_id: string; texture_name: string; macro_name: string; instance_id: string; instance_label: string; output_min: number; output_max: number; enabled: boolean }
 export type ControlUsage = Record<string, { scenes: ControlSceneUse[]; textures: ControlTextureUse[] }>;
+/** A placed unit that shares a profile: profile-level claims (hardware status, remapping) apply to every one of them. */
+export interface ProfileUnit { rig_id: string; rig_name: string; instance_id: string; instance_label: string }
+export interface ControlUsageReport { controls: ControlUsage; units: ProfileUnit[] }
 
 /** A user-supplied PDF attached to a profile, by reference only (bytes live in the local document store). */
 export type DocumentKind = "manual" | "quick_start" | "midi_chart" | "other";
