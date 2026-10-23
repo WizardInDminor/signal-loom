@@ -152,6 +152,27 @@ export (`test_real_mc8_bank_round_trip`). Message types other than PC/CC are lis
 with their third-party type name. Evidence level for import: **fixture-validated** on PC/CC
 content; names are carried verbatim; expression presets and bank messages are not imported.
 
+### 2026-10-23: ML10X integration research
+
+Full write-up in [`research/ml10x-integration-2026-10-23.md`](research/ml10x-integration-2026-10-23.md)
+(firmware status, consolidated CC map, backup file semantics, the three representations of routing,
+the USB SysEx protocol as reverse-engineered by a third party, owner test package). In short:
+
+- The backup JSON carries routing **only** as `matrixArray`; the device's explicit `[from, to, flag]`
+  records are on the wire (read and write) but not in the file. Matrix **rows are now device-labelled**
+  (the read message echoes each slot's source connector: Input Tip, Input Ring, A Tip, A Ring … E Ring,
+  12/12 in every capture); the **columns remain undecoded** (8 known cells, bit not a function of the
+  target). Native routing export stays blocked (`F-Q14`); routing-free backup edits (names, settings,
+  spillover, moving whole presets between slots/banks with the matrix carried verbatim and the hash
+  recomputed) are feasible and editor-unvalidated.
+- A full wire dump of the owner's own device would pair records and matrix for every used preset — the
+  decoder path that needs no editor experiments — but it changes the live preset and is a
+  hardware-risk-gated owner session (`S8-E04`).
+- CC#30–39 polarity resolved from the v1.2 release notes (0 restore, 127 cut, 64 toggle); CC#40–43,
+  50, 51, 52 documented; v1.2.0 remains the "BETA" pre-release but is the maintained line (builds to
+  2026-10-01). Loop Bypass Persist = ON breaks the compiler's "bank + PC = known loop states" claim.
+- Factory default MIDI channel and Device ID: still not found.
+
 ### Session 7: native backup findings (Morningstar Bridge)
 
 Full write-up in `docs/morningstar-bridge.md` §2. In short:
