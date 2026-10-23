@@ -30,6 +30,16 @@ export function Mc8Propose({ report, fileText, bankIndex }: { report: Mc8Report;
   const get = <T,>(path: Path, fallback: T): T => (key(path) in edits ? (edits[key(path)].value as T) : fallback);
   const presets = [...bank.presets, ...bank.exp_presets];
   const current = presets.find((p) => p.position === sel) ?? presets[0];
+  // The backend refuses a native proposal from an input it cannot verify; say so up front instead of
+  // letting the musician edit and then fail at review. Inspection and compare stay available.
+  const refusal =
+    report.native.hash === null
+      ? "its integrity hash is missing, so the file cannot be verified"
+      : report.native.hash_matches === false
+        ? "its integrity hash does not match its data (edited by hand or written by another serializer); Signal Loom never re-hashes an unverifiable file"
+        : report.native.schema_version !== 1
+          ? `its schemaVersion is ${String(report.native.schema_version)}; Signal Loom only writes the fixture-validated schema 1 and never rewrites another version`
+          : null;
   const arr = current.is_exp ? "expPresetArray" : "presetArray";
   const review = async () => {
     setBusy(true);
@@ -98,6 +108,11 @@ export function Mc8Propose({ report, fileText, bankIndex }: { report: Mc8Report;
         Change only what Signal Loom understands (names, flags, PC/CC messages). Everything else in the file — other message types, bytes <code>d3</code>/<code>d4</code>/<code>mi</code>,
         unknown keys — is carried over untouched. Nothing is written until you review the diff; the output is a <b>single-bank</b> file with a fresh integrity hash.
       </p>
+      {refusal && (
+        <p className="text-red-700 border border-red-200 bg-red-50 rounded px-2 py-1" role="alert" data-testid="propose-refused">
+          No proposal can be produced from this file: {refusal}. Inspect and compare still work; export the bank again from the official editor to get a verifiable file.
+        </p>
+      )}
       <Panel title={`Bank ${bank.number}`}>
         <div className="flex flex-wrap gap-3 items-end">
           {nameField("Bank name", ["bankName"], bank.name, 24)}
@@ -127,7 +142,7 @@ export function Mc8Propose({ report, fileText, bankIndex }: { report: Mc8Report;
         </table>
       </Panel>
       <div className="flex flex-wrap items-center gap-2">
-        <Button variant="primary" onClick={review} disabled={busy} data-testid="propose-review">Review {list.length} change{list.length === 1 ? "" : "s"}</Button>
+        <Button variant="primary" onClick={review} disabled={busy || !!refusal} data-testid="propose-review">Review {list.length} change{list.length === 1 ? "" : "s"}</Button>
         <Button onClick={() => { setEdits({}); setResult(null); }} disabled={!list.length}>Discard edits</Button>
         {report.native.dump_type === "allBanks" && <Badge tone="warn">this lifts bank {bank.number} out of the all-banks file into a single-bank file</Badge>}
       </div>

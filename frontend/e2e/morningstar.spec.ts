@@ -152,6 +152,23 @@ test("bridge: a proposed change is reviewed as a diff before the single-bank fil
   await expect(page.getByTestId("propose-error")).toContainText("1-16");
 });
 
+test("bridge: a file whose hash does not match can be inspected but never becomes a proposal", async ({ page }) => {
+  const rig = await demoCopy(page);
+  const dump = await demoBankFile(page, rig.id);
+  dump.hash = dump.hash + 1; // hand-edited or foreign serializer
+  await page.goto("/morningstar");
+  await upload(page, "bridge-file", "stale.json", JSON.stringify(dump));
+  await expect(page.getByTestId("native-summary")).toContainText("hash mismatch");
+  await expect(page.getByTestId("mc8-preset-detail")).toContainText("Clean"); // inspection still works
+  await page.getByTestId("bridge-mode-propose").click();
+  await expect(page.getByTestId("propose-refused")).toContainText("integrity hash does not match");
+  await expect(page.getByTestId("propose-review")).toBeDisabled();
+  // The backend refuses too, whatever the UI does.
+  const res = await page.request.post("/api/morningstar/mc8/propose", { data: { file: JSON.stringify(dump), edits: [] } });
+  expect(res.status()).toBe(422);
+  expect(JSON.stringify(await res.json())).toContain("integrity hash mismatch");
+});
+
 test("bridge: an ML10X backup shows controller, connectors and presets, and keeps routing opaque", async ({ page }) => {
   const presetData = Array.from({ length: 4 }, (_, bank) => ({
     bank,

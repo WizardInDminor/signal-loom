@@ -390,6 +390,59 @@ def test_propose_lifts_one_bank_of_an_all_banks_file_verbatim():
     assert "bank 2 of an all-banks backup" in out["description"]
 
 
+def test_propose_refuses_mismatched_or_missing_hash_but_inspection_still_works():
+    """Review correction 1: never re-hash an unverifiable input into a native proposal."""
+    dump = _damaged_single_bank()
+    dump["hash"] = dump["hash"] + 1  # stale / hand-edited
+    raw = compact_json(dump)
+    for edits in ([], [{"path": ["bankName"], "value": "Live"}]):
+        res = mc8_native.propose(raw, edits)
+        assert not res["ok"] and res["dump"] is None and res["text"] is None
+        assert any("integrity hash mismatch" in p for p in res["problems"]), res["problems"]
+        assert not any("hash does not match" in w for w in res["warnings"])  # not repeated as a warning
+    report = mc8_native.inspect(raw)  # read-only inspection of the questionable input stays available
+    assert report["native"]["ok"] and report["native"]["hash_matches"] is False and report["interpreted"] is not None
+    assert any("hash does not match" in w for w in report["native"]["warnings"])
+    no_hash = _damaged_single_bank()
+    del no_hash["hash"]
+    res = mc8_native.propose(compact_json(no_hash))
+    assert not res["ok"] and any("integrity hash missing" in p for p in res["problems"])
+    assert mc8_native.inspect(compact_json(no_hash))["interpreted"] is not None
+
+
+def test_propose_refuses_unsupported_schema_version_instead_of_rewriting_it():
+    """Review correction 2: a foreign schemaVersion is never rewritten as the validated one."""
+    dump = _single_bank()
+    dump["schemaVersion"] = 2
+    raw = compact_json(_rehash(dump))  # hash valid, so only the schema version blocks
+    for edits in ([], [{"path": ["bankName"], "value": "Live"}]):
+        res = mc8_native.propose(raw, edits)
+        assert not res["ok"] and res["text"] is None
+        assert any("schemaVersion 2" in p and "will not rewrite" in p for p in res["problems"]), res["problems"]
+    report = mc8_native.inspect(raw)
+    assert report["native"]["ok"] and report["interpreted"] is not None and report["native"]["schema_version"] == 2
+    # The validated version still goes through, and the output keeps that version rather than forcing it.
+    ok = mc8_native.propose(compact_json(_single_bank()), [{"path": ["bankName"], "value": "Live"}])
+    assert ok["ok"] and json.loads(ok["text"])["schemaVersion"] == 1
+
+
+def test_byte_identical_flag_compares_actual_output_with_input():
+    """Review correction 3: the flag is a real text comparison, not "no semantic edits"."""
+    compact = compact_json(_damaged_single_bank())
+    exact = mc8_native.propose(compact)
+    assert exact["ok"] and exact["text"] == compact and exact["preserved"]["byte_identical_to_input"] is True
+    pretty = json.dumps(json.loads(compact), indent=2)  # same data and hash, different bytes
+    res = mc8_native.propose(pretty)
+    assert res["ok"] and res["diff"]["total"] == 0 and res["self_check"]["hash_matches"] is True
+    assert res["text"] == compact and res["preserved"]["byte_identical_to_input"] is False
+    assert any("not byte-identical" in w for w in res["warnings"])
+    trailing = compact + "\n"
+    res2 = mc8_native.propose(trailing)
+    assert res2["ok"] and res2["text"] == compact and res2["preserved"]["byte_identical_to_input"] is False
+    edited = mc8_native.propose(compact, [{"path": ["bankName"], "value": "Live"}])
+    assert edited["ok"] and edited["preserved"]["byte_identical_to_input"] is False and edited["text"] != compact
+
+
 def test_propose_refuses_broken_files():
     assert not mc8_native.propose("nope")["ok"]
     bad = _single_bank()
@@ -613,6 +666,10 @@ def test_api_propose_and_matrix_diff(client):
         "/api/morningstar/mc8/propose", json={"file": raw, "edits": [{"path": ["bankName"], "value": "Live"}]}
     ).json()
     assert ok["ok"] and ok["diff"]["total"] == 1 and ok["self_check"]["ok"]
+    stale = json.loads(raw)
+    stale["hash"] = stale["hash"] + 1
+    mismatch = client.post("/api/morningstar/mc8/propose", json={"file": compact_json(stale), "edits": []})
+    assert mismatch.status_code == 422 and "integrity hash mismatch" in json.dumps(mismatch.json())
     refused = client.post(
         "/api/morningstar/mc8/propose",
         json={"file": raw, "edits": [{"path": ["presetArray", 0, "msgArray", 0, "d3"], "value": 1}]},

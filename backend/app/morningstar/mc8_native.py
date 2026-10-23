@@ -894,7 +894,11 @@ def _apply_edit(bank: dict, edit: Any, problems: list[str], warnings: list[str],
 def propose(raw: str, edits: list | None = None, bank_index: int | None = None, *, now: datetime | None = None) -> dict:
     """Apply allow-listed edits to one bank of a native MC8 backup and build a reviewable singleBank file.
 
-    - Without edits on a ``singleBank`` input the output is byte-identical to the input.
+    - Refused outright (inspection stays available) when the input's integrity hash is missing or does
+      not match its data section, or when its schemaVersion is not the fixture-validated one: Signal
+      Loom never re-hashes an unverifiable file and never rewrites a foreign schema version as 1.
+    - Without edits on a compact ``singleBank`` input the output is byte-identical to the input;
+      ``preserved.byte_identical_to_input`` is computed by comparing the output text with the input.
     - An ``allBanks`` input needs ``bank_index`` (0-29); that bank object is lifted verbatim into a
       ``singleBank`` file (the shape the validated writer produces) with a fresh hash and date.
     - Every other key, message of an unsupported type and unknown field is carried over untouched.
@@ -913,6 +917,29 @@ def propose(raw: str, edits: list | None = None, bank_index: int | None = None, 
         "edits_applied": 0,
     }
     if out["problems"]:
+        return out
+    # Modified native export only from an input whose integrity is verified and whose schema is the one
+    # the writer was validated against. These are warnings for inspection but blockers for a proposal.
+    if native["hash"] is None:
+        out["problems"].append(
+            "integrity hash missing: the file cannot be verified, so no native proposal is produced (inspection still works)"
+        )
+    elif native["hash_matches"] is False:
+        out["problems"].append(
+            "integrity hash mismatch: the data section does not match the file's hash (edited by hand or written by "
+            "another serializer); Signal Loom does not re-hash an unverifiable input into a native proposal "
+            "(inspection still works)"
+        )
+    if native["schema_version"] != specs.MC8_EXPORT_SCHEMA_VERSION:
+        out["problems"].append(
+            f"schemaVersion {native['schema_version']!r} is not the fixture-validated "
+            f"{specs.MC8_EXPORT_SCHEMA_VERSION}; Signal Loom will not rewrite it as schema "
+            f"{specs.MC8_EXPORT_SCHEMA_VERSION} (inspection still works)"
+        )
+    if out["problems"]:
+        out["warnings"] = [
+            w for w in out["warnings"] if not w.startswith(("hash does not match", "no integer hash", "schemaVersion"))
+        ]
         return out
     data = copy.deepcopy(native["data"])
     if native["dump_type"] == "allBanks":
@@ -944,8 +971,7 @@ def propose(raw: str, edits: list | None = None, bank_index: int | None = None, 
     dump = json.loads(raw)
     if not unchanged_single:
         new_data = {"bank": bank}
-        dump["schemaVersion"] = specs.MC8_EXPORT_SCHEMA_VERSION
-        dump["dumpType"] = "singleBank"
+        dump["dumpType"] = "singleBank"  # schemaVersion is left as read: only the validated version reaches here
         dump["deviceModel"] = specs.MC8_EXPORT_DEVICE_MODEL
         dump["downloadDate"] = stamp
         dump["hash"] = java_string_hash(compact_json(new_data))
@@ -977,7 +1003,7 @@ def propose(raw: str, edits: list | None = None, bank_index: int | None = None, 
         "third_party_messages": third_party,
         "unknown_type_messages": unknown_types,
         "unknown_keys": len(sink),
-        "byte_identical_to_input": unchanged_single,
+        "byte_identical_to_input": text == raw,  # actual output text vs the input text, not "no edits"
     }
     out["warnings"].append(
         "Fixture-validated shape only: no Signal Loom file has yet been loaded into the Morningstar editor or an MC8. "

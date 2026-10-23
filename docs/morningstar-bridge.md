@@ -18,6 +18,14 @@ of a controller's configuration. Workspace: **Morningstar Bridge** in the top na
 | **Interpreted configuration** | Signal Loom's reading of the fields whose meaning is established. Every message, setting and code carries an evidence level: `sample` (reproduced from real MC8 exports), `documented` (official material via `docs/research.md`), `third_party` (MC8 Pro SDK / the editor bundle's enum as read by a third party), `named` (self-describing key, semantics unverified), `unknown`. A message of an unsupported type is still shown — by its third-party name, with its raw bytes — and counted as *not modelled*. | `interpret_*()`, `inspect()` |
 | **Proposed modification** | Edits to an **allow-list** of known fields (bank name/clear-toggle, preset names/flags/toggle group, PC/CC message `d1 d2 c t a tg`), applied to a copy of the native data. The result is a structural diff against the original plus a self-checked `singleBank` file. Everything else — other message types, `d3`/`d4`/`mi`, unknown keys at any level — rides along verbatim. A slot holding a type Signal Loom cannot model is locked. | `propose()`, `backup_diff.diff_objects()` |
 
+**Proposal gate (review correction, PR #14):** a native proposal is produced only from an input whose
+integrity hash is present and matches its data section, and whose `schemaVersion` is the fixture-validated
+1. Otherwise `propose` refuses with a clear diagnostic (`integrity hash missing`, `integrity hash mismatch`,
+`schemaVersion N … will not rewrite`), produces no file, and leaves inspection and compare available.
+Signal Loom never re-hashes an unverifiable file and never rewrites a foreign schema version.
+`preserved.byte_identical_to_input` is a real comparison of the output text with the input text (a
+pretty-printed or trailing-newline input re-serializes compactly and reports `false`).
+
 The compare view sits between the first two layers: the rig's compiled MC8 bank is rendered through
 the validated writer so both sides are compared in the editor's own vocabulary (`compare_bank_to_plan`).
 Messages the rig cannot express are reported as *controller only*, never as *to be removed*.
@@ -110,6 +118,8 @@ layout is unverified.
 
 ## 4. Limitations (stated in the UI too)
 
+- A file with a missing or mismatched integrity hash, or a schemaVersion other than 1, can be inspected
+  and compared but never turned into a proposal; export it again from the official editor instead.
 - Fixture-validated only: no Signal Loom-written file has yet been loaded into the Morningstar editor
   or restored to an MC8. The proposal panel repeats this and tells the user to restore into an unused
   bank and inspect before saving to the controller.
