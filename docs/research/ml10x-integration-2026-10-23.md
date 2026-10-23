@@ -24,10 +24,10 @@ existing reader test and stays git-ignored (`backend/tests/fixtures/external/`).
 
 ## 1. Summary for the impatient
 
-1. **The backup file does not contain the routing in a form anyone can read or write.** An editor
+1. **The backup stores routing only in a form Signal Loom cannot yet decode or author.** An editor
    *Device Backup* stores each preset's routing only as `matrixArray` (16 rows × 3 bytes), a copy of
-   the device's internal crosspoint/mux image. The rows are now **labelled by the device itself**
-   (§5.3), but the column bits are still a per-source lookup that no public source has decoded
+   the device's internal crosspoint/mux image. The device labels its 12 READ source-record slots, which correlate with the matrix rows
+   in the observed captures (§5.3), but the column bits are still an undecoded per-source lookup
    (§5.4). Writing *new* routing into a backup file therefore remains **blocked** (`F-Q14`).
 2. **The wire protocol carries routing explicitly, and it is written without the matrix.** Over USB
    SysEx the device sends `[from, to, bypass]` records per source connector, and the editor writes a
@@ -35,13 +35,15 @@ existing reader test and stays git-ignored (`backend/tests/fixtures/external/`).
    its matrix. A third party has verified this end to end on one device: Simple and Advanced writes
    acknowledged, full 512-preset dump, byte-exact round trips against the official editor (§6).
    **This is the realistic path to "writing to the pedal"**, and it is a hardware-risk-gated path.
-3. **A wire dump also pairs every preset's records with its matrix.** Reading the owner's own device
-   once would yield, for every used preset, both the explicit routing *and* the matrix bytes, which
-   is exactly the evidence a `matrixArray` decoder needs (§5.5). No editor experiments required.
-4. **Backup files can be edited safely where the matrix is carried verbatim.** Renames, controller
+3. **A wire dump supplies paired examples of records and matrix bytes.** Reading the owner's device
+   would yield the explicit routing and matrix for every stored preset, expanding decoder evidence
+   (§5.5). It would not cover absent source/target combinations or prove how combined routes, modes
+   and non-routing bits are encoded; controlled experiments and round trips remain necessary.
+4. **Routing-preserving backup edits appear technically feasible, pending editor and restore validation.** Renames, controller
    settings, spillover, and **moving or copying whole presets between slots and banks** (the
    `UX-ML10X-01` pain point; the editor gained copy/paste only in 2025 and fixed it for banks 2–4 on
-   2026-10-01) only need the hash recomputed (§4.3). Still editor-unvalidated; restore semantics are §4.4.
+   2026-10-01) can likely be represented with preserved matrix data and a recomputed hash (§4.3).
+   Slot-dependent semantics and editor/device restore acceptance remain unverified (§4.4).
 5. **Firmware v1.2.0 is still the "BETA" pre-release but is the actively maintained line** (builds
    dated 2026-06-30 … 2026-10-01); v1.1.2 (2024-11-20) remains tagged "Latest". The v1.2 CC map
    (30–43, 50–52) is now DOCUMENTED from the release notes, which also settles the CC#30–39
@@ -98,7 +100,9 @@ off**; the setting must be part of the instance's declared configuration and of 
 
 **Saving bypass states from the device:** Menu + Select (2026-06-30 build) or CC#52 writes the live
 loop states into the current preset — these are **memory writes triggered by MIDI**, so Signal Loom
-must never emit CC#52 (or CC#50) from a Scene without the hardware-risk gate.
+must never emit CC#52 from an ordinary Scene without a memory-write authorization gate.
+CC#50 changes a global behavior setting (not necessarily preset memory); it needs a separate
+configuration-change gate and must not be emitted as an unreviewed performance gesture.
 
 **MC-series "ML10X" message type** (what an MC8 sends to drive an ML10X): SysEx-based, needs the
 ML10X's **Device ID** (Omni broadcasts to all IDs), engages selected loops / bypasses the rest, toggles
@@ -174,26 +178,27 @@ possible in the editor today, one preset at a time.
   a **Bank Backup** replaces the current bank; an **All Banks Backup** overwrites the entire
   controller **and its global settings**. Whether the ML10X editor offers a bank-level file at all is
   unknown; the one real file is `dumpType: "full"`.
-- **How the editor pushes a restored preset to the device is not captured.** Two possibilities,
+- **How the editor pushes a restored preset to the device is not captured.** At least two possibilities,
   both consistent with the evidence: (a) the editor decodes `matrixArray` into `connectionArray` and
   sends ordinary preset writes (then the editor bundle contains the decoder — the single most
   valuable thing to recover); (b) the editor uploads the raw backup through the `DataDump` (`f1=7`) /
   `DataUploadAck` (`f1=8`) message classes that exist in the inbound classifier, carrying segments
-  48..63 as they are (then the device itself consumes the matrix). Resolving this is owner test **T2**
-  (§8). Until then, Signal Loom must treat a backup's `matrixArray` as opaque bytes that **must travel
+  48..63 as they are (then the device itself consumes the matrix). Owner test **T2**
+  (§8) can distinguish these pathways for the tested editor build, without proving future firmware
+  or editor versions behave identically. Until then, Signal Loom must treat a backup's `matrixArray` as opaque bytes that **must travel
   intact** with its preset.
 - Restore anomalies on record (FORUM-USER, 1.2 beta): after restore all loops stayed engaged
   regardless of preset (Persist had switched on); a second user saw every Tip/Ring bypassed after
   reloading a backup. Both are reasons to put "check Loop Bypass Persist, then recall a known preset
   and look at the LEDs" into any restore checklist.
 
-### 4.5 Consequence: which backup edits are safe today
+### 4.5 Consequence: candidate backup edits (not yet editor/restore-validated)
 
 | Edit | Needs the matrix decoded? | Signal Loom status |
 |---|---|---|
 | Rename presets, connectors; change MIDI channel / Device ID / Input Split / Persist / trails | No | Feasible by extending the MC8-style proposal layer to ML10X files, hash recomputed; **not built, editor-unvalidated** |
 | Change spillover (`tipT`/`ringT`) | No, but the code table is unverified in JSON | Possible once a non-127 sample confirms the code (test T3) |
-| **Move / copy / swap whole presets** across slots and banks (renumber `presetNumber`, keep everything else) | No | Feasible in the same slice; the only unknown is a device-side meaning of `matrixArray` rows 12–15 (§5.3) or of `bypass` that depends on the slot — both are carried verbatim, so nothing new is invented |
+| **Move / copy / swap whole presets** across slots and banks (renumber `presetNumber`, keep everything else) | No | Candidate proposal edit only, not restore-validated. Preserve routing/state fields verbatim; `presetNumber` renumbering, slot-dependent semantics and whole-device restore effects still need owner testing |
 | Change the chain, add/remove loops, change bypass | **Yes** | **Blocked** (`F-Q14`) |
 
 ---
@@ -246,15 +251,16 @@ write to bank 0 preset 0 — would have overwritten preset 0 ("Base") with prese
 intact in the backup exported the same day and in every later capture, which argues against it
 without settling the order of events.
 
-### 5.3 Matrix rows — now device-labelled
+### 5.3 Matrix rows — source-slot correspondence corroborated
 
 In every READ message the 12 record slots appear in the same order and each record's first byte
 *echoes its source connector*: slot 0 Input Tip, 1 Input Ring, 2 A Tip, 3 A Ring, 4 B Tip, 5 B Ring,
 6 C Tip, 7 C Ring, 8 D Tip, 9 D Ring, 10 E Tip, 11 E Ring (12/12 in all captures). The non-zero
 matrix rows are always exactly the slots whose record has a target (Base: row 0; Clean: rows 0, 2, 3,
-8; Empty #2: rows 0, 2, 3). Session 7's "row hypothesis" is therefore **confirmed by the device's own
-slot numbering** (THIRD-PARTY-CAPTURE + LOCAL-ANALYSIS; still not owner-observed). The
-inspector's label can move from *hypothesis* to *third-party capture, 12/12*.
+8; Empty #2: rows 0, 2, 3). Session 7's row hypothesis is **strongly corroborated** by source-labelled READ records and
+matching non-zero matrix rows (THIRD-PARTY-CAPTURE + LOCAL-ANALYSIS; still not owner-observed).
+The source slots themselves are labelled, but the device has not explicitly described matrix-row
+semantics. The inspector may show *corroborated by third-party capture*, not *device-confirmed*.
 
 Rows 12–15: never a chain source. Row 15 = `[1,0,0]` appeared on preset *Empty #2* only in captures
 made **after** that preset had been saved in Advanced mode and back to Simple, and the later-exported
@@ -262,7 +268,8 @@ JSON has it too. Candidate meaning: a "was Advanced / loaded once" flag. UNVERIF
 
 ### 5.4 Matrix columns — still a per-source lookup
 
-Reading each row as a 21-bit field (`bit = byte*7 + bit`), one bit per routed source:
+Reading each row as a 21-bit field (`bit = byte*7 + bit`), the captured single-edge source
+rows exhibit one set bit each:
 
 | Source → target | Bit | Seen in |
 |---|---|---|
@@ -280,19 +287,20 @@ bit 2 from A Ring. The bit is **not** a function of the target, so this is not a
 image; it reads like a per-source multiplexer select (an input-to-send path and a return-to-send path
 are different hardware). Eight of roughly 12 × 13 cells are known, all consistent with a fixed table
 keyed by (source, target); the bypass flag did not change the matrix in any capture (the probe did
-not re-read after toggling, so this is weak). **Status unchanged: undecoded, no writer.** The hardware
+not re-read after toggling, so this is weak). Combined edges and Advanced-mode configurations may require more than a simple one-bit lookup.
+**Status unchanged: undecoded, no writer.** The hardware
 part number was not found (no teardown or FCC photo surfaced).
 
-### 5.5 The decoder path that does not need the editor
+### 5.5 Additional decoder evidence from an owner device
 
 A wire dump of the owner's device (navigate to each of 512 slots, read the `f1=6 f2=0` reply; the
 third-party CLI does this in ~2 minutes) returns, per preset, **both** the records and the matrix.
 Every used preset adds its (source, target) cells; a rig with a dozen presets over all ten loops
 would likely cover most of the table. This is read-only in the memory sense, but **it changes the
 active preset** (audible routing changes, LEDs), so it is a hardware-risk-gated owner session with
-the amp muted, and it must end by re-selecting the preset that was active. Once a full table exists,
-`matrixArray` can be **generated** from a chain, and native ML10X backup export unblocks with no
-reliance on undocumented editor behaviour.
+the amp muted, and it must end by re-selecting the preset that was active. A 512-slot dump covers only the routes actually stored. Arbitrary source/target combinations,
+parallel/Advanced edges, bypass-state encoding and rows 12–15 still need controlled known-answer
+experiments, matrix comparisons and editor round trips before a reliable backup writer can be enabled.
 
 ### 5.6 Two numberings of the same 14 connectors (THIRD-PARTY-SOURCE)
 
@@ -385,19 +393,23 @@ Each test follows the hardware acceptance package of the operating model §6; th
 record firmware build (device menu or the `.hex` name used), rev-A/B, editor URL (release or beta),
 Loop Bypass Persist state, and keep an untouched Device Backup before anything else.
 
-**T1 — Controlled export pairs (`S7-E03`, unchanged, no device write).** In the editor, export a
-Device Backup; in *one* preset change exactly one loop; export again; load both in *Routing
-experiment*. Each pair adds one (source, target) cell to §5.4. Repeat for as many distinct
-(source → target) hops as convenient.
+**T1 — Controlled export pairs (`S7-E03`, editor save writes a preset).** In the editor, export a
+Device Backup; in one disposable preset change exactly one routing edge (not merely a bypass toggle),
+save, export again and load both files in *Routing experiment*. The difference may identify one
+(source, target) case; control for other metadata changes. Repeat with other known single-edge paths
+as appropriate, preserving the untouched baseline.
 
-**T2 — What does Restore send? (editor only, writes to the device).** Prerequisites: a spare bank or
-a throwaway preset, a MIDI monitor that shows SysEx on the ML10X USB port (MIDI-OX on Windows, or a
-Web MIDI capture). Steps: (1) export Backup A; (2) in the editor rename one preset, save; (3) export
-Backup B; (4) start the monitor; (5) *Controller Backup → Restore* with Backup A; (6) stop the
-monitor and save the log; (7) confirm the preset name reverted on the device. Record: the `f1`/`f2`
-codes and lengths of what the editor sent (one message per preset? 512 messages? segments 48–63
-present?). Pass/fail is informational; the outcome decides §4.4 (a) vs (b). What it does not prove:
-anything about Signal Loom-written files.
+**T2 — What does Restore send? (full-device restore; hardware-risk-gated).** A Device Backup
+is `dumpType: "full"`; **a spare preset or bank does not isolate a restore**, which may replace
+all 512 presets and global settings. Preconditions: an untouched verified full backup; an independently
+checked recovery procedure; a controlled test environment with audio muted; owner approval of the
+full-device restore; firmware/editor versions and Persist state recorded. Capture the editor's Web MIDI
+send calls within its own browser session, or use a verified non-conflicting SysEx monitor (a second
+application may not be able to open the same port). Export Backup A, rename one disposable preset and
+save/export Backup B, then capture *Controller Backup → Restore* using Backup A. Confirm the name and
+settings on the device, record transmitted message classes, segment IDs and counts, and retain both
+backups and logs privately. This distinguishes observed restore pathways only for that editor/build;
+it **does not** validate a Signal Loom-generated file.
 
 **T3 — Pin `bypass`, output-hop flags and spillover codes (editor only).** Create a Simple preset in
 an unused slot with loops A Tip and B Tip, bypass A Tip, set Output Tip spillover to A Tip, save,
@@ -405,16 +417,17 @@ export. Expected in the file: `bypass ≠ 0` and `tipT = 1` if the inferences in
 the same preset with spillover "Nothing" and A Tip engaged to get the zero baseline. Keeps all
 existing presets untouched.
 
-**T4 — Live-apply versus save (device, no intended memory write).** With the monitor running, toggle
-one loop in a Simple preset in the editor **without** saving, then select another preset and come
-back: if the toggle did not persist and the monitor shows a `P3=0` message without an ack, §5.2's
-hypothesis holds. Restore the toggle before leaving.
+**T4 — Live-apply versus save (unverified memory behavior; disposable preset only).** With a
+verified backup, monitor traffic while toggling one loop in a disposable Simple preset in the editor
+**without** pressing Save. Select another preset and return, checking whether the toggle persisted
+and what messages/acks occurred. Do not assume `P3=0` is non-persistent merely because an ack was
+absent; compare a fresh device read and post-test backup. Restore the original disposable slot.
 
-**T5 — Full wire dump for the decoder (device, read-only memory, audible).** Only after T2–T4 and a
+**T5 — Full wire dump as decoder evidence (navigation changes live audio, no intentional writes).** Only after T2–T4 and a
 separate scope approval: amp muted, editor closed, run a dump that navigates every slot and records
-each reply; end by re-selecting the original bank/preset and confirming the display. Deliverable: a
-local JSON of (records, matrix) per preset, from which §5.4's table is completed. Never commit the
-dump (it is the owner's rig).
+each reply; end by re-selecting the original bank/preset and confirming the display. Deliverable: a local JSON of (records, matrix) per preset to expand §5.4's observed table;
+this alone does not prove a complete decoder or arbitrary-route encoder. Never commit the dump
+(it is the owner's rig).
 
 ---
 
@@ -422,19 +435,21 @@ dump (it is the owner's rig).
 
 1. **Now, documentation-level (this PR):** record the findings; keep `F-Q14` blocked; add `S8-E01…E04`
    for T2–T5.
-2. **Next independent software slice (no hardware):** in the Morningstar Bridge, (a) relabel the
-   matrix rows per §5.3 and state the column status per §5.4; (b) extend the ML10X *proposal* layer
+2. **Next independent software slice (no hardware):** in the Morningstar Bridge, (a) label the
+   matrix rows as *corroborated source-slot correspondence* per §5.3, not device-confirmed, and
+   state the column status per §5.4; (b) extend the ML10X *proposal* layer
    to the routing-free edits of §4.5 — names, controller settings, and **move/copy/swap presets across
    slots and banks** with `matrixArray`, `bypass`, `tipT`, `ringT`, `advancedMode` carried verbatim and
    the hash recomputed; refuse any edit that would touch `matrixArray`. Same gates as the MC8 proposal
-   (hash present and matching, `schemaVersion` 1, byte-identical no-edit round trip). This directly
-   serves `UX-ML10X-01`'s "move a preset" need through the editor's own restore path, and the editor
-   remains the thing that writes to hardware. Editor-validation is an owner test in a spare bank.
+   (hash present and matching, `schemaVersion` 1, byte-identical no-edit round trip). This could serve `UX-ML10X-01`'s "move a preset" need once accepted by the editor; the editor
+   remains the only hardware writer in this slice. First validate no-edit and renamed-file loading in
+   the editor without a hardware restore. A subsequent ML10X full-device restore is separately
+   gated and cannot be assumed to affect only a spare bank.
 3. **After T2:** if restore turns out to decode the matrix in the editor, prioritise recovering that
    decoder (reading the editor bundle is legal reverse-engineering for interoperability but
    must be done by the owner on their own machine, not in this sandbox); if restore uploads raw
-   segments, the backup-file route is complete for all routing-free edits and T5 becomes the only path
-   to routing authorship.
+   segments, routing-preserving proposals still require editor and device acceptance testing.
+   T5 is one decoder-evidence route, not necessarily the only route to routing authorship.
 4. **Only with a separately approved hardware-risk scope:** a guarded ML10X live reader (connect,
    navigate, read, never write) using the allow-list of §6, producing the (records, matrix) pairs.
    Writing presets over SysEx stays out of scope until the reader is owner-validated and a backup /
