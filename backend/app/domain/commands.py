@@ -97,6 +97,13 @@ def commands_from_midi_spec(midi: MidiSpec) -> list[MidiCommand]:
     for c in midi.cc_map:
         if bp.method == "cc" and c.cc == bp.cc:
             continue
+        if not c.reviewed:
+            continue  # a control proposed from PDF text is not knowledge until a human reviewed it
+        rng = (
+            f"documented range {c.min_value if c.min_value is not None else 0}–{c.max_value if c.max_value is not None else 127}"
+            if c.min_value is not None or c.max_value is not None
+            else None
+        )
         out.append(
             MidiCommand(
                 id=f"cmd_{_slug(c.name)}-cc{c.cc}",
@@ -105,10 +112,12 @@ def commands_from_midi_spec(midi: MidiSpec) -> list[MidiCommand]:
                 kind="cc",
                 cc=c.cc,
                 value_mode="any",
-                intent="set",
-                deterministic=None,
+                intent="toggle" if c.behavior == "toggle" else "set",
+                deterministic=False if c.behavior == "toggle" else None,
                 evidence=c.evidence,
-                description=c.value_semantics,
+                description=" · ".join(x for x in (c.value_semantics, rng) if x) or None,
+                citation=c.citation.model_copy() if c.citation else None,
+                verified_on_hardware=c.hardware_status == "verified",
             )
         )
     pcs = midi.program_change

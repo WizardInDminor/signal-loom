@@ -6,7 +6,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 
-from ..documents import DocumentError, DocumentStore, download_filename, is_document_id
+from ..documents import DocumentError, DocumentStore, download_filename, is_document_id, propose_controls
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
@@ -115,6 +115,28 @@ def search_document(document_id: str, request: Request, q: str = ""):
         "truncated": len(hits) >= 60,
         "has_text_layer": any(t.strip() for t in texts),
         "page_count": len(texts),
+    }
+
+
+@router.get("/{document_id}/pages/{page}/proposals")
+def page_proposals(document_id: str, page: int, request: Request):
+    """Control definitions *proposed* from one page's own text layer (Session 6). Nothing is added to
+    any profile here: the user reviews each proposal in the Knowledge Workbench, and whatever they
+    accept stays marked ``proposed`` until they mark it reviewed. Scanned pages have no text."""
+    store = document_store(request)
+    rec = _get_or_404(store, document_id)
+    try:
+        texts = store.page_texts(rec)
+    except DocumentError as e:
+        raise HTTPException(status_code=e.status, detail=str(e)) from e
+    if not 1 <= page <= len(texts):
+        raise HTTPException(status_code=404, detail=f"page {page} does not exist (the document has {len(texts)} pages)")
+    text = texts[page - 1]
+    return {
+        "document_id": document_id,
+        "page": page,
+        "has_text_layer": bool(text.strip()),
+        "proposals": propose_controls(text, document_id, page),
     }
 
 

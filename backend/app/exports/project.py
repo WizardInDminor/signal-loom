@@ -86,9 +86,55 @@ def project_dict(project: ProjectFile) -> dict:
     d = project.model_dump(mode="json")
     if not d.get("documents"):
         d.pop("documents", None)
-    if isinstance(d.get("rig"), dict) and not d["rig"].get("textures"):
-        d["rig"].pop("textures", None)
+    if isinstance(d.get("rig"), dict):
+        if not d["rig"].get("textures"):
+            d["rig"].pop("textures", None)
+        for inst in d["rig"].get("instances", []):
+            if isinstance(inst, dict) and not inst.get("quick_reference"):
+                inst.pop("quick_reference", None)
+    for prof in d.get("profiles", []):
+        scrub_profile_knowledge(prof)
     return d
+
+
+# Session 6 control-knowledge keys and the value that means "not stated". A profile that carries
+# nothing beyond the Session 5 shape is written without them, so the previous app version (whose
+# strict models refuse unknown keys) still opens the file; a profile *with* knowledge needs this
+# version or later, exactly as a rig with textures does.
+_CC_KNOWLEDGE_DEFAULTS = {
+    "behavior": None,
+    "min_value": None,
+    "max_value": None,
+    "citation": None,
+    "mapping": "manufacturer_default",
+    "factory_cc": None,
+    "hardware_status": "unverified",
+    "hardware_note": None,
+    "review_status": None,
+    "notes": None,
+}
+
+
+def scrub_profile_knowledge(prof: dict) -> dict:
+    """Drop Session 6 keys that hold their defaults from a profile dump (in place; returns it)."""
+    if not isinstance(prof, dict):
+        return prof
+    if not prof.get("quick_reference"):
+        prof.pop("quick_reference", None)
+    midi = prof.get("midi")
+    if isinstance(midi, dict):
+        for c in midi.get("cc_map", []):
+            if not isinstance(c, dict):
+                continue
+            for key, default in _CC_KNOWLEDGE_DEFAULTS.items():
+                if key in c and c[key] == default:
+                    del c[key]
+            # ``behavior`` is derived from the legacy ``continuous`` flag on load; when it says
+            # nothing more than that flag, the flag alone is written (what the previous version wrote).
+            implied = {True: "continuous", False: "discrete", None: None}.get(c.get("continuous"))
+            if c.get("behavior") == implied:
+                c.pop("behavior", None)
+    return prof
 
 
 def normalize_rig(rig: Rig) -> dict:

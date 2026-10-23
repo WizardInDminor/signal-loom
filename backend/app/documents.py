@@ -373,6 +373,76 @@ class DocumentStore:
         return hits
 
 
+# ---------------------------------------------------------------------- proposals from page text (Session 6)
+# "CC 12", "CC#12", "CC12", "cc 12:", "Controller 12", "Control Change 12". Deliberately simple:
+# every hit is a *proposal* that a human must review and may discard; nothing is written to a
+# profile here.
+_CC_MENTION = re.compile(r"\b(?:CC|Control\s+Change|Controller)\s*#?\s*(\d{1,3})\b", re.IGNORECASE)
+_RANGE = re.compile(r"(?<![\w.])(\d{1,3})\s*(?:-|–|to)\s*(\d{1,3})(?!\w)")
+_NAME_END = re.compile(r"[.;|:=]|\(|\s\d{1,3}\s*(?:-|–|to|=)\s*\w|\s(?:value|values|range|min|max)\b", re.IGNORECASE)
+_BEHAVIOR_HINTS = (
+    ("toggle", re.compile(r"\btoggle", re.IGNORECASE)),
+    ("trigger", re.compile(r"\b(tap|trigger|momentary|any value)\b", re.IGNORECASE)),
+    ("discrete", re.compile(r"\b(on/off|bypass|engage|select|switch)\b|\b0\s*=\s*\w+.*\b127\s*=", re.IGNORECASE)),
+)
+
+
+def propose_controls(text: str, document_id: str, page: int) -> list[dict]:
+    """Candidate CC definitions found in one page of text, shaped like ``CcDef`` JSON plus the
+    matched snippet. Each is ``review_status = "proposed"``, cites the page, and carries
+    ``evidence = documented`` (the text is from the attached document) — never any hardware claim.
+    One proposal per CC number (first occurrence wins); numbers above 127 are dropped. The name is
+    the text that follows the number up to the next sentence/table break; a ``lo-hi`` range in the
+    same span becomes the value range; a few words hint at the behaviour, which stays a hint."""
+    out: list[dict] = []
+    seen: set[int] = set()
+    flat = " ".join(text.split())
+    mentions = list(_CC_MENTION.finditer(flat))
+    for i, m in enumerate(mentions):
+        cc = int(m.group(1))
+        if cc > 127 or cc in seen:
+            continue
+        span_end = mentions[i + 1].start() if i + 1 < len(mentions) else len(flat)
+        span = flat[m.end() : min(span_end, m.end() + 160)]
+        tail = span.lstrip(" :=-–|.\t")
+        stop = _NAME_END.search(tail)
+        name = tail[: stop.start()] if stop else tail
+        name = name.strip(" :=-–|.,")[:60] or f"CC {cc}"
+        rng = None
+        r = _RANGE.search(span)
+        if r is not None:
+            lo, hi = int(r.group(1)), int(r.group(2))
+            if lo <= hi <= 127:
+                rng = (lo, hi)
+        behavior = None
+        for label, rx in _BEHAVIOR_HINTS:
+            if rx.search(span):
+                behavior = label
+                break
+        a, b = max(0, m.start() - 30), min(len(flat), m.end() + min(len(span), 90))
+        seen.add(cc)
+        out.append(
+            {
+                "cc": cc,
+                "name": name,
+                "value_semantics": None,
+                "evidence": "documented",
+                "behavior": behavior,
+                "min_value": rng[0] if rng else None,
+                "max_value": rng[1] if rng else None,
+                "citation": {"document_id": document_id, "page": page, "note": None},
+                "mapping": "manufacturer_default",
+                "factory_cc": None,
+                "hardware_status": "unverified",
+                "hardware_note": None,
+                "review_status": "proposed",
+                "notes": None,
+                "snippet": flat[a:b].strip(),
+            }
+        )
+    return out
+
+
 def default_documents_dir(db_path: Path) -> Path:
     env = os.environ.get("SIGNAL_LOOM_DOCS")
     return Path(env) if env else db_path.parent / "documents"
