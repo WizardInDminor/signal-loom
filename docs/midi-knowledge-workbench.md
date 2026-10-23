@@ -218,9 +218,9 @@ optional with a "not stated" default and legacy rows load unchanged)
 |---|---|
 | Backend `pytest -q` | **225 passed, 4 skipped** (10 new in `tests/test_knowledge_workbench.py`; baseline 215) |
 | `ruff check` / `ruff format --check` | clean |
-| `npm run lint` / `npm run typecheck` / `npm run build` | clean |
-| Playwright, full suite | see §13a |
-| Screenshots | `docs/screenshots/session-6/` (1440 controls + notes, 1280, 390 editor + reference) |
+| `npm run lint` / `npm run typecheck` / `npm run build` | clean (`/catalog/[id]/workbench` builds as a dynamic route) |
+| Playwright, full suite (one worker, dev servers, fresh DB) | **51 passed** (48 existing + 3 new in `e2e/workbench.spec.ts`); the first full run flagged one existing locator in `manuals.spec.ts` that also matched the new documented-control picks, fixed by giving those their own test-id prefix |
+| Screenshots | `docs/screenshots/session-6/` (1440 controls + notes, 1280, 390 editor + reference), captured by the spec on the real pages |
 
 Acceptance journey (charter §8), where each step is proven: 1–2 library → workbench with the manual
 beside the editor (`workbench.spec.ts`, first test); 3 *Find* turns to the chart page; 4–6 three
