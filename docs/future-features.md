@@ -175,10 +175,20 @@ Recommended milestones: (1) offline draft preset capture/inventory, (2) one manu
 
 **Priority:** High polish/usability; keep distinct from MIDI/hardware correctness.
 
+**Addressed (A-01, register F-Q11):** the cause was a response race, not state restoration or
+pagination — every keystroke asked the backend for a list and the page accepted whichever answer
+arrived last; the unfiltered answer (the whole imported catalog) is the slowest to serialize, so it
+regularly landed after the answer for the full word. The library now numbers and aborts its
+requests, applies only the newest answer, debounces typing, keeps the search and the open profile
+in the URL (reload and Back restore them; the Workbench's way back restores the tab's last search),
+and shows explicit *Loading*, *Searching…*, *No devices match* and *Clear* states. A deterministic
+browser regression (`frontend/e2e/library-search.spec.ts`) holds short-query answers back longer
+than long-query answers and checks every acceptance item above.
+
 ### Additional workflow observations (existing requests)
 
 - **UX-MANUAL-01:** Two vendor MIDI guides were uploaded and one relevant continuous CC per pedal was manually inserted in full-profile JSON to prepare the Undertow Texture. Both controls became `documented continuous` without claimed hardware verification. This proves the data model works, but the upload → JSON edit → refresh workflow is too clerical for a creative instrument. **Addressed in Session 6:** the Knowledge Workbench enters controls beside the manual with no JSON; verification **F-Q08** stays partial until controls are physically checked.
-- **UX-INSTRUMENT-01:** Functional grouping still shows Volante, Collider, Zelzah, Hedra and MOOD MKII as `Other` on the existing rig. Per-Texture roles are editable, but classification/onboarding could suggest meaningful multi-role categories without misrepresenting audio topology. Keep this a future interface refinement; don't block the offline Texture test. Existing macro-undo coalescing remains **F-Q02**.
+- **UX-INSTRUMENT-01:** Functional grouping still shows Volante, Collider, Zelzah, Hedra and MOOD MKII as `Other` on the existing rig. Per-Texture roles are editable, but classification/onboarding could suggest meaningful multi-role categories without misrepresenting audio topology. Keep this a future interface refinement; don't block the offline Texture test. Existing macro-undo coalescing remains **F-Q02**. **Addressed in part by Instrument Studio (A-02):** the five pedals above now get a *Suggested: …* chip with its basis (Volante, Collider, MOOD → Delay; Zelzah → Modulation; Hedra → Pitch & harmony, or a documented control name such as “Echo Level”) and *Use* / *Keep Other* store the decision per texture; multi-role pedals remain one role per texture (F-Q12).
 
 **Scope discipline:** These are future implementation inputs, not authority to add new live MIDI commands or hardware preset writes. Preserve the user's present Texture, manufacturer-sourced CC entries, attached manuals and physical evidence flags during a future polish pass.
 
