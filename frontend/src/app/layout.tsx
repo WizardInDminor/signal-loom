@@ -19,10 +19,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <Link href="/" className="font-semibold tracking-tight text-lg whitespace-nowrap">
             Signal Loom
           </Link>
-          <nav className="flex gap-3 sm:gap-4 text-sm whitespace-nowrap" aria-label="Main">
-            <Link href="/" className="hover:underline">Rigs</Link>
-            <Link href="/catalog" className="hover:underline">Device library</Link>
-            <Link href="/morningstar" className="hover:underline">Morningstar Bridge</Link>
+          {/* Three links no longer fit beside the brand at 390 px with nowrap (nav right edge landed at 391 px),
+              so the nav wraps onto a second row on phones; each label stays on one line and nothing is hidden. */}
+          <nav className="flex flex-wrap gap-x-3 gap-y-0.5 sm:gap-4 text-sm min-w-0" aria-label="Main">
+            <Link href="/" className="hover:underline whitespace-nowrap">Rigs</Link>
+            <Link href="/catalog" className="hover:underline whitespace-nowrap">Device library</Link>
+            <Link href="/morningstar" className="hover:underline whitespace-nowrap">Morningstar Bridge</Link>
           </nav>
           <span className="ml-auto text-xs text-neutral-500 hidden md:inline">Design the rig. Weave the signal.</span>
         </header>
