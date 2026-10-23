@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { api } from "@/lib/api";
+import { api, type ApiError } from "@/lib/api";
 import type { AssetRecord, DeviceProfile } from "@/lib/types";
 import { CATEGORIES } from "@/lib/types";
 import { Badge, Button, ErrorBanner, EvidenceBadge, Field, Panel } from "@/components/ui/basics";
@@ -11,6 +11,7 @@ import { DeviceImageSection } from "@/components/images/DeviceImageSection";
 import { ConfigureJacksButton, JackMapper } from "@/components/images/JackMapper";
 import { DocumentsSection } from "@/components/library/DocumentsSection";
 import { MidiCommandsSection } from "@/components/library/MidiCommandsSection";
+import { useCatalogSearch } from "@/components/library/useCatalogSearch";
 import { enclosureFill } from "@/lib/boardLayout";
 import { behaviorLabel, isReviewed, rangeText } from "@/lib/knowledge";
 import type { PortDef, SignalKind, PortDirection, Edge } from "@/lib/types";
@@ -52,10 +53,10 @@ function DocumentsOnThisComputer() {
   );
 }
 
+/** Where the library remembers its last search for a way back that names a device but no query. */
+const REMEMBERED_SEARCH = "signal-loom.library.search";
+
 export default function CatalogPage() {
-  const [items, setItems] = useState<DeviceProfile[]>([]);
-  const [q, setQ] = useState("");
-  const [category, setCategory] = useState("");
   const [selPort, setSelPort] = useState<string | null>(null);
   const [sel, setSel] = useState<DeviceProfile | null>(null);
   const [draft, setDraft] = useState<DeviceProfile | null>(null);
@@ -63,15 +64,43 @@ export default function CatalogPage() {
   const [report, setReport] = useState<string | null>(null);
   const [assets, setAssets] = useState<(AssetRecord & { referenced: boolean })[] | null>(null);
   const [mapping, setMapping] = useState(false);
-  const refresh = () => api.catalog.list(q, category || undefined).then(setItems).catch((e) => setError(e.message));
+  const { filters, setFilters, items, shown, pending, refresh } = useCatalogSearch(setError);
+  const { q, category } = filters;
+  const searchRef = useRef<HTMLInputElement>(null);
+  const restored = useRef(false);
   const refreshAssets = () => api.assets.list().then(setAssets).catch(() => setAssets(null));
-  useEffect(() => { void refresh(); }, [q, category]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { void refreshAssets(); }, [sel?.image?.asset_id]);
   useEffect(() => {
-    // `/catalog?device=<id>` (the Workbench's way back) opens that profile directly.
-    const id = new URLSearchParams(window.location.search).get("device");
+    // `/catalog?q=…&category=…&device=<id>`: the search and the open profile live in the URL, so a
+    // reload or the browser's Back brings both back. The Workbench's way back names only the
+    // device; for that link (a device, no query) the last search of this tab is restored.
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get("device");
+    let next = { q: params.get("q") ?? "", category: params.get("category") ?? "" };
+    if (id && !params.has("q") && !params.has("category")) {
+      try { next = { ...next, ...JSON.parse(window.sessionStorage.getItem(REMEMBERED_SEARCH) ?? "{}") }; } catch { /* nothing remembered */ }
+    }
+    if (!(CATEGORIES as readonly string[]).includes(next.category)) next.category = "";
+    if (next.q || next.category) setFilters(next);
+    restored.current = true;
     if (id) api.catalog.get(id).then((p) => { setSel(p); setDraft(null); }).catch(() => undefined);
-  }, []);
+  }, [setFilters]);
+  useEffect(() => {
+    if (!restored.current) return;
+    const params = new URLSearchParams();
+    if (q) params.set("q", q);
+    if (category) params.set("category", category);
+    if (sel) params.set("device", sel.id);
+    const qs = params.toString();
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${qs ? `?${qs}` : ""}`);
+    try { window.sessionStorage.setItem(REMEMBERED_SEARCH, JSON.stringify({ q, category })); } catch { /* storage unavailable */ }
+  }, [q, category, sel]);
+  const clearSearch = () => { setFilters({ q: "" }); searchRef.current?.focus(); };
+  const filtering = Boolean(shown && (shown.q || shown.category));
+  const countText = items === null ? "Loading the library…"
+    : !filtering ? `${items.length} device${items.length === 1 ? "" : "s"}`
+    : items.length === 0 ? "" // the empty state below says it
+    : `${items.length} match${items.length === 1 ? "" : "es"}${shown!.q ? ` for “${shown!.q}”` : ""}${shown!.category ? ` in ${shown!.category}` : ""}`;
   const unused = assets?.filter((a) => !a.referenced) ?? [];
   const duplicate = (p: DeviceProfile) => {
     const copy = structuredClone(p);
@@ -95,7 +124,8 @@ export default function CatalogPage() {
     if (!draft) return;
     try {
       const p = { ...draft, id: draft.id || `${draft.manufacturer}-${draft.model}`.toLowerCase().replace(/[^a-z0-9]+/g, "-") };
-      const exists = items.some((i) => i.id === p.id);
+      // Ask the server, not the visible list: a filter may be hiding the profile being edited.
+      const exists = await api.catalog.get(p.id).then(() => true, (err: ApiError) => { if (err.status === 404) return false; throw err; });
       const saved = exists ? await api.catalog.update(p) : await api.catalog.create(p);
       setDraft(null); setSel(saved); void refresh();
     } catch (e) { setError((e as Error).message); }
@@ -107,19 +137,31 @@ export default function CatalogPage() {
       <div className="flex flex-col gap-3 min-w-0">
         <ErrorBanner message={error} onClose={() => setError(null)} />
         <Panel title="Device library" actions={<Button variant="primary" onClick={() => { setDraft(blankProfile()); setSel(null); }}>+ Custom device</Button>}>
-          <div className="flex gap-1 mb-2">
-            <input aria-label="Search devices" placeholder="Search…" className="flex-1" value={q} onChange={(e) => setQ(e.target.value)} />
-            <select aria-label="Category" value={category} onChange={(e) => setCategory(e.target.value)}><option value="">all</option>{CATEGORIES.map((c) => <option key={c}>{c}</option>)}</select>
+          <div className="flex gap-1 mb-1">
+            <div className="relative flex-1 min-w-0">
+              <input ref={searchRef} type="search" aria-label="Search devices" placeholder="Search…" className="w-full pr-7" value={q} onChange={(e) => setFilters({ q: e.target.value })} onKeyDown={(e) => { if (e.key === "Escape" && q) { e.preventDefault(); clearSearch(); } }} />
+              {q && <button type="button" data-testid="library-clear" aria-label="Clear search" title="Clear search (Esc)" className="absolute right-1 top-1/2 -translate-y-1/2 rounded px-1 text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100" onClick={clearSearch}>✕</button>}
+            </div>
+            <select aria-label="Category" value={category} onChange={(e) => setFilters({ category: e.target.value })}><option value="">all</option>{CATEGORIES.map((c) => <option key={c}>{c}</option>)}</select>
           </div>
-          <ul className="flex flex-col divide-y divide-line max-h-[60vh] overflow-auto">
-            {items.map((p) => (
+          <div className="flex items-center justify-between gap-2 text-[11px] text-neutral-500 mb-1 min-h-4" aria-live="polite">
+            <span data-testid="library-count">{countText}</span>
+            {pending && items !== null && <span data-testid="library-pending" className="text-accent">Searching…</span>}
+          </div>
+          <ul data-testid="library-list" data-query={shown?.q ?? ""} data-category={shown?.category ?? ""} aria-busy={pending} className={`flex flex-col divide-y divide-line max-h-[60vh] overflow-auto transition-opacity motion-reduce:transition-none ${pending && items !== null ? "opacity-60" : ""}`}>
+            {(items ?? []).map((p) => (
               <li key={p.id}>
-                <button type="button" className={`w-full text-left text-sm py-1 ${sel?.id === p.id ? "text-accent font-medium" : ""}`} onClick={() => { setSel(p); setDraft(null); }}>
+                <button type="button" className={`w-full text-left text-sm py-1 ${sel?.id === p.id ? "text-accent font-medium" : ""}`} aria-current={sel?.id === p.id ? "true" : undefined} onClick={() => { setSel(p); setDraft(null); }}>
                   {p.manufacturer} {p.model} <span className="text-[10px] text-neutral-400">{p.source}</span>
                 </button>
               </li>
             ))}
           </ul>
+          {items !== null && items.length === 0 && shown && (
+            <p className="text-xs text-neutral-600 py-2" data-testid="library-empty">
+              {filtering ? <>No devices match{shown.q ? <> “{shown.q}”</> : null}{shown.category ? <> in {shown.category}</> : null}. <button type="button" className="underline" onClick={() => { setFilters({ q: "", category: "" }); searchRef.current?.focus(); }}>Show the whole library</button></> : "The library is empty."}
+            </p>
+          )}
         </Panel>
         <Panel title="Pictures on this computer">
           <div className="text-xs flex flex-col gap-1" data-testid="asset-cleanup">
