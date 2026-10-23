@@ -226,7 +226,16 @@ with `aria-pressed`. Reduced motion: no cord drift, no cursor transition, 4 Hz n
   safety assertion is unchanged: refused unknown CC, refused bypass with no override offered,
   conflict detection and repair, declaration with a note, zero sends, scenes untouched, connect →
   arm → Start → bounded virtual stream → Stop, second tab, lease, reload starts nothing.
-- Full Playwright suite on this branch: **54 passed**; `npm run lint`, `npm run typecheck` clean.
+- `e2e/instrument-studio.spec.ts` third test (review checkpoint): the finder applies the backend's
+  hard refusals in the backend's order before offering anything — a switch-like *name* (“Engage”)
+  with no stated behaviour, a control marked continuous whose *semantics* say “bypass”, a control
+  marked continuous that a named command with intent engage/bypass/toggle uses, bank select and
+  channel-mode numbers, the pedal's bypass CC when its bypass method is CC — each shows the reason
+  and no Map button, and the same control added by number is refused by the backend with no
+  declaration offered; a *proposed* control named “Echo Level” produces **no** role suggestion
+  until it is reviewed, after which the chip names it as “the documented control”.
+- Full Playwright suite on this branch: **54 passed** before the checkpoint; the three instrument
+  specs re-run after it (7 passed); `npm run lint`, `npm run typecheck` clean.
 - Screenshots: `docs/screenshots/session-7/instrument-studio-{1440,1440-finder,1440-suggestion,1280,390,390-finder}.png`.
 
 ## 13. Known limitations
@@ -236,9 +245,11 @@ with `aria-pressed`. Reduced motion: no cord drift, no cursor transition, 4 Hz n
 - Suggestions come from a short curated model-name table and from documented control names; a
   pedal with neither stays *Other* with no chip. The table is a list of musical-function hints,
   deliberately not a capability database.
-- The finder offers what the client can tell from the profile; the backend's verdict on the card
-  remains authoritative and may differ for a control the client could not classify (it then shows
-  the backend's reason exactly as before).
+- The finder offers what the client can tell from the profile, mirroring `_hard_refusal` rule for
+  rule (bank select, channel mode, bypass CC, documented non-continuous, switch words in name or
+  semantics, engage/bypass/toggle commands) and then the review state; the backend's verdict on the
+  card remains authoritative and is shown exactly as before. Role suggestions read only reviewed
+  controls and say “documented” only for documented evidence.
 - Cords are measured from the DOM; they are decorative, hidden on phones, and never carry
   information the rail and the sentence do not also show.
 - The offline *Not yet controllable* notice in section 3 still appears for a texture with no

@@ -225,3 +225,70 @@ test("instrument studio: on a phone with reduced motion the patch stacks without
   expect(await sentOrQueued(phone, rigId)).toBe(0);
   await context.close();
 });
+
+test("instrument studio: the finder applies the backend's hard refusals before offering a sweep, and role suggestions ignore proposed controls", async ({ page }) => {
+  // A pedal the model-name hints do not know, with knowledge shaped to probe every refusal rule.
+  const sunset = await (await page.request.get("/api/catalog/devices/strymon-sunset")).json();
+  const id = `e2e-mystery-${Date.now().toString(36)}`;
+  const copy = { ...sunset, id, manufacturer: "E2E", model: "Mystery Box", builtin: false, tags: [], capabilities: {}, provenance: { ...sunset.provenance, source: "user", evidence: "user" } };
+  copy.midi = { ...copy.midi, cc_map: [], commands: [], bypass: { evidence: "unknown" } };
+  delete copy.unknown_attributes; delete copy.source; delete copy.document_files;
+  expect((await page.request.post("/api/catalog/devices", { data: copy })).ok()).toBeTruthy();
+  createdProfiles.push(id);
+  const cc_map: Record<string, unknown>[] = [
+    { cc: 40, name: "Engage", evidence: "documented", hardware_status: "unverified", mapping: "manufacturer_default" }, // switch-like name, behaviour not stated
+    { cc: 41, name: "Level", evidence: "documented", behavior: "continuous", continuous: true, hardware_status: "unverified", mapping: "manufacturer_default" }, // continuous, but a bypass command uses it
+    { cc: 42, name: "Mix amount", value_semantics: "0 = bypass, 127 = full wet", evidence: "documented", behavior: "continuous", continuous: true, hardware_status: "unverified", mapping: "manufacturer_default" }, // continuous, switch words in its semantics
+    { cc: 43, name: "Echo Level", evidence: "documented", behavior: "continuous", continuous: true, review_status: "proposed", hardware_status: "unverified", mapping: "manufacturer_default" }, // proposed: not knowledge yet
+  ];
+  expect((await page.request.put(`/api/catalog/devices/${id}/controls`, { data: { cc_map } })).ok()).toBeTruthy();
+  const commands = [{ id: "cmd_e2e000000001", name: "Bypass pedal", tags: [], favorite: false, kind: "cc", cc: 41, value_mode: "fixed", value: 0, choices: [], intent: "bypass", deterministic: true, evidence: "documented", verified_on_hardware: false }];
+  expect((await page.request.put(`/api/catalog/devices/${id}/commands`, { data: { commands } })).ok()).toBeTruthy();
+  const { rigId, instId } = await rigWith(page, id);
+  await page.goto(`/rigs/${rigId}#instrument`);
+  await expect(page.getByTestId("instrument-tab")).toBeVisible({ timeout: 15_000 });
+  page.once("dialog", (d) => d.accept("Probe"));
+  await page.getByTestId("texture-new").click();
+  await expect(page.getByTestId("texture-name")).toHaveValue("Probe");
+  await expect(page.getByTestId("save-state")).toHaveText("Saved", { timeout: 10_000 });
+  const macroId = (await (await page.request.get(`/api/rigs/${rigId}`)).json()).textures[0].macros[0].id as string;
+
+  // No suggestion: the only control whose name says "echo" is a proposal nobody has reviewed.
+  await expect(page.getByTestId("function-group-other")).toContainText("Volante");
+  await expect(page.getByTestId(`role-suggestion-${instId}`)).toHaveCount(0);
+
+  await page.getByTestId(`mapping-add-${macroId}`).click();
+  const control = (cc: number) => page.getByTestId(`finder-control-${instId}-${cc}`);
+  await expect(control(40)).toHaveAttribute("data-offer", "refused");
+  await expect(control(40)).toContainText("switch");
+  await expect(control(41)).toHaveAttribute("data-offer", "refused");
+  await expect(control(41)).toContainText("Bypass pedal");
+  await expect(control(41)).toContainText("bypass");
+  await expect(control(42)).toHaveAttribute("data-offer", "refused");
+  await expect(control(42)).toContainText("even if it is marked continuous");
+  await expect(control(43)).toHaveAttribute("data-offer", "refused");
+  await expect(control(43)).toContainText("review");
+  for (const cc of [40, 41, 42, 43]) await expect(page.getByTestId(`finder-map-${instId}-${cc}`)).toHaveCount(0);
+  // The backend agrees when the same control goes in by number: refused outright, no declaration offered.
+  await page.getByTestId("finder-advanced-toggle").click();
+  const form = page.getByTestId("mapping-add-form");
+  await form.getByLabel("Destination device").selectOption({ label: "Volante" });
+  await form.getByLabel("Custom CC number").fill("42");
+  await page.getByTestId("mapping-add-confirm").click();
+  const row = cards(page).first();
+  await expect(row).toHaveAttribute("data-eligible", "false", { timeout: 10_000 });
+  await expect(row).toContainText("switch-like");
+  await expect(row.getByRole("button", { name: "Declare with note" })).toHaveCount(0);
+
+  // Once the proposal is reviewed in the Workbench, the suggestion appears and names it as documented.
+  cc_map[3] = { ...cc_map[3], review_status: null };
+  expect((await page.request.put(`/api/catalog/devices/${id}/controls`, { data: { cc_map } })).ok()).toBeTruthy();
+  await page.reload();
+  await expect(page.getByTestId("instrument-tab")).toBeVisible({ timeout: 15_000 });
+  const suggestion = page.getByTestId(`role-suggestion-${instId}`);
+  await expect(suggestion).toContainText("Suggested: Delay");
+  await expect(suggestion).toContainText("the documented control “Echo Level”");
+  await page.getByTestId(`mapping-add-${macroId}`).click();
+  await expect(control(43)).toHaveAttribute("data-offer", "sweep");
+  expect(await sentOrQueued(page, rigId)).toBe(0);
+});

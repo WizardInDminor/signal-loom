@@ -123,9 +123,11 @@ export function suggestRole(profile: DeviceProfile | undefined): RoleSuggestion 
   if (!profile) return null;
   const model = `${profile.manufacturer} ${profile.model}`.toLowerCase();
   for (const [re, role, what] of MODEL_FUNCTION_HINTS) if (re.test(model)) return { role, basis: `the model name “${profile.model}” (${what})` };
+  // Only reviewed controls can speak for the pedal; a proposal read from a page is not knowledge yet.
   for (const c of profile.midi.cc_map) {
+    if (!isReviewed(c)) continue;
     const text = `${c.name} ${c.value_semantics ?? ""}`.toLowerCase();
-    for (const [re, role] of ROLE_HINTS) if (role !== "routing" && re.test(text)) return { role, basis: `the documented control “${c.name}”` };
+    for (const [re, role] of ROLE_HINTS) if (role !== "routing" && re.test(text)) return { role, basis: c.evidence === "documented" ? `the documented control “${c.name}”` : `the control “${c.name}” in its profile (${c.evidence} evidence)` };
   }
   return null;
 }
@@ -143,14 +145,18 @@ const SWITCH_WORDS = /\b(bypass|engage|toggle|bank|mute|unmute|scroll|preset\s*(
  * verdict after mapping is still the backend's.
  */
 export function classifyControl(profile: DeviceProfile, c: CcDef): ControlOffer {
+  // Hard refusals first, in the backend's order (`_hard_refusal`); they hold whatever anyone declares.
   if (c.cc === 0 || c.cc === 32) return { kind: "refused", label: "bank select", reason: "Bank Select changes which preset a Program Change recalls; never swept." };
   if (c.cc >= 120) return { kind: "refused", label: "channel mode", reason: "CC 120–127 are channel-mode messages, not controls." };
-  if (profile.midi.bypass.cc === c.cc) return { kind: "refused", label: "bypass switch", reason: "This is the pedal's bypass switch: a state, not a sweep." };
-  if (!isReviewed(c)) return { kind: "refused", label: "needs review", reason: "Proposed from a manual page; review it in the Knowledge Workbench before mapping." };
+  const bp = profile.midi.bypass;
+  if (bp.method === "cc" && bp.cc === c.cc) return { kind: "refused", label: "bypass switch", reason: "This is the pedal's bypass switch: a state, not a sweep." };
   const b = behaviorOf(c);
-  if (b === "continuous") return { kind: "sweep", label: "sweep" };
   if (b === "discrete" || b === "toggle" || b === "trigger") return { kind: "refused", label: b === "discrete" ? "picks a state" : b, reason: `Documented as a ${b === "discrete" ? "discrete control" : b}: it does not sweep, so a macro cannot move it smoothly.` };
-  if (SWITCH_WORDS.test(`${c.name} ${c.value_semantics ?? ""}`)) return { kind: "refused", label: "switch", reason: "Its documented name describes a switch or an action, not a sweep." };
+  if (SWITCH_WORDS.test(`${c.name} ${c.value_semantics ?? ""}`)) return { kind: "refused", label: "switch", reason: "Its documented name or semantics describe a switch or an action, not a sweep — even if it is marked continuous." };
+  const cmd = (profile.midi.commands ?? []).find((x) => x.kind === "cc" && x.cc === c.cc && (x.intent === "engage" || x.intent === "bypass" || x.intent === "toggle"));
+  if (cmd) return { kind: "refused", label: "state switch", reason: `Used by the command “${cmd.name}” (${cmd.intent}): a state switch is never swept.` };
+  if (!isReviewed(c)) return { kind: "refused", label: "needs review", reason: "Proposed from a manual page; review it in the Knowledge Workbench before mapping." };
+  if (b === "continuous") return { kind: "sweep", label: "sweep" };
   return { kind: "declare", label: "not stated" };
 }
 
