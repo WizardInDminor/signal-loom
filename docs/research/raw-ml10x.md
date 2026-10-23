@@ -1,5 +1,10 @@
 # Raw reconnaissance notes: Morningstar ML10X
 
+> **Superseded in part (2026-10-23).** Routing representation, backup/restore semantics, the v1.2 CC
+> map (CC#30–39 polarity is now documented: 0 restore, 127 cut, 64 toggle) and firmware status are
+> updated in [`ml10x-integration-2026-10-23.md`](ml10x-integration-2026-10-23.md). This page is kept
+> as the 2026-10-15 record.
+
 Collected 2026-10-15 by a research agent. **Network caveat:** every Morningstar host was
 unreachable; evidence is (1) search-engine excerpts of official pages — "DOCUMENTED (excerpt)",
 (2) git clones readable anonymously: the official `Morningstar-Engineering/ML10X` repo (README
