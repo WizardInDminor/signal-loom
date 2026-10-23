@@ -345,6 +345,9 @@ def interpret_message(m: Any, slot: int, context: str, sink: list[dict], path: s
     elif not isinstance(mi, str):
         anomalies.append(f"mi={mi!r} is not a string")
     out["anomalies"] = anomalies
+    if status == "empty" and not anomalies and not unknown:
+        # A clean empty slot carries no information; keep the report small (an all-banks file has 12,480 slots).
+        return {"slot": slot, "status": "empty", "summary": "—", "anomalies": [], "unknown_keys": []}
     return out
 
 
