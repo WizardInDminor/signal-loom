@@ -7,6 +7,7 @@ import type { DeviceInstance, DeviceProfile, FunctionRole, Mapping, Texture, Tex
 import { FUNCTION_ROLES } from "@/lib/types";
 import { type MacroPreview, ROLE_LABEL, isMidiDevice, isSynthetic, mappingEndpoints, roleOf } from "@/lib/instrument";
 import { newId } from "@/lib/api";
+import { behaviorLabel, isReviewed } from "@/lib/knowledge";
 import { Badge, Button, Field } from "@/components/ui/basics";
 
 /**
@@ -165,7 +166,7 @@ function AddMapping({ devices, profiles, onAdd, onCancel }: { devices: DeviceIns
       </Field>
       <Field label="Control (CC)" hint="Only controls documented as continuous are offered as sweeps; others need your explicit declaration.">
         <select aria-label="Destination CC" value={String(cc)} onChange={(e) => setCc(Number(e.target.value))}>
-          {options.map((c) => <option key={c.cc} value={String(c.cc)}>{`CC ${c.cc} · ${c.name}`}{c.continuous === true ? " · continuous" : c.continuous === false ? " · discrete (refused)" : " · not stated"}</option>)}
+          {options.map((c) => <option key={c.cc} value={String(c.cc)}>{`CC ${c.cc} · ${c.name}`}{!isReviewed(c) ? " · needs review (not offered)" : c.continuous === true ? " · continuous" : c.continuous === false ? ` · ${behaviorLabel(c)} (refused)` : " · not stated"}</option>)}
           <option value="-1">Other CC number…</option>
         </select>
       </Field>

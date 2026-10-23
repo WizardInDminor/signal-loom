@@ -1,4 +1,4 @@
-import type { Analysis, AssetRecord, DeviceProfile, DocumentKind, DocumentRecord, DryRun, ExportStatus, Follower, LiveBindings, LiveCoverage, LiveEndpoint, LiveEvents, LiveJob, LivePanels, LiveStatus, MidiCommand, PedalboardSpec, PerformanceStatus, PortDef, Readiness, ResolvedMessage, Rig, RigSummary, TransportMode } from "./types";
+import type { Analysis, AssetRecord, CcDef, ControlProposal, ControlUsage, DeviceNote, DeviceProfile, DocumentKind, DocumentRecord, DryRun, ExportStatus, Follower, LiveBindings, LiveCoverage, LiveEndpoint, LiveEvents, LiveJob, LivePanels, LiveStatus, MidiCommand, PedalboardSpec, PerformanceStatus, PortDef, Readiness, ResolvedMessage, Rig, RigSummary, TransportMode } from "./types";
 
 export interface CommandUse { rig_id: string; rig_name: string; scene_id: string; scene_name: string; instance_id: string; instance_label: string; name_at_apply: string; changed: boolean; removed: boolean }
 export interface DocumentMeta extends DocumentRecord { referenced_by: string[]; file_present: boolean }
@@ -114,6 +114,8 @@ export const api = {
     search: (id: string, q: string) => request<DocumentSearch>(`/api/documents/${encodeURIComponent(id)}/search?q=${encodeURIComponent(q)}`),
     remove: (id: string, force = false) => request<void>(`/api/documents/${encodeURIComponent(id)}${force ? "?force=1" : ""}`, { method: "DELETE" }),
     removeUnreferenced: () => request<{ removed: string[]; count: number }>("/api/documents/unreferenced", { method: "DELETE" }),
+    /** Controls proposed from one page's text layer; nothing is written anywhere by this call. */
+    proposals: (id: string, page: number) => request<{ document_id: string; page: number; has_text_layer: boolean; proposals: ControlProposal[] }>(`/api/documents/${encodeURIComponent(id)}/pages/${page}/proposals`),
   },
   /** Live MIDI control (Session 4). The backend owns every port; these calls never send unless armed. */
   live: {
@@ -162,6 +164,12 @@ export const api = {
     updateCommands: (id: string, commands: MidiCommand[]) => request<DeviceProfile>(`/api/catalog/devices/${id}/commands`, { method: "PUT", body: JSON.stringify({ commands }) }),
     commandsFromMap: (id: string) => request<{ profile: DeviceProfile; added: string[] }>(`/api/catalog/devices/${id}/commands/from-map`, { method: "POST" }),
     commandUsage: (id: string) => request<Record<string, CommandUse[]>>(`/api/catalog/devices/${id}/command-usage`),
+    /** Session 6: replace only the documented CC map (structured control knowledge). */
+    updateControls: (id: string, cc_map: CcDef[]) => request<DeviceProfile>(`/api/catalog/devices/${id}/controls`, { method: "PUT", body: JSON.stringify({ cc_map }) }),
+    /** Session 6: replace only the profile's model-level Quick Reference notes. */
+    updateQuickReference: (id: string, notes: DeviceNote[]) => request<DeviceProfile>(`/api/catalog/devices/${id}/quick-reference`, { method: "PUT", body: JSON.stringify({ notes }) }),
+    /** Where each CC number is used (scene values, texture mappings) across every rig. */
+    controlUsage: (id: string) => request<ControlUsage>(`/api/catalog/devices/${id}/control-usage`),
     declareMidi: (id: string, body: { interfaces: string[]; default_channel?: number | null; note?: string | null }) =>
       request<DeviceProfile>(`/api/catalog/devices/${id}/midi-capability`, { method: "POST", body: JSON.stringify(body) }),
     list: (q?: string, category?: string) => {
