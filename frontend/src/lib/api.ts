@@ -21,7 +21,9 @@ async function request<T>(path: string, init?: RequestInit, attempt = 0): Promis
   const idempotent = !init?.method || init.method === "GET";
   try {
     res = await fetch(path, { headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) }, ...init });
-  } catch {
+  } catch (e) {
+    // A request its caller abandoned (AbortController) is not a connection problem: hand it back as is.
+    if (init?.signal?.aborted) throw e;
     // A dropped connection on a read is retried once; writes are never repeated blindly.
     if (idempotent && attempt === 0) { await new Promise((r) => setTimeout(r, 200)); return request<T>(path, init, 1); }
     throw new ApiError(0, "Cannot reach the Signal Loom backend. Is it running on port 8000?");
@@ -172,12 +174,12 @@ export const api = {
     controlUsage: (id: string) => request<ControlUsageReport>(`/api/catalog/devices/${id}/control-usage`),
     declareMidi: (id: string, body: { interfaces: string[]; default_channel?: number | null; note?: string | null }) =>
       request<DeviceProfile>(`/api/catalog/devices/${id}/midi-capability`, { method: "POST", body: JSON.stringify(body) }),
-    list: (q?: string, category?: string) => {
+    list: (q?: string, category?: string, signal?: AbortSignal) => {
       const p = new URLSearchParams();
       if (q) p.set("q", q);
       if (category) p.set("category", category);
       const qs = p.toString();
-      return request<DeviceProfile[]>(`/api/catalog/devices${qs ? `?${qs}` : ""}`);
+      return request<DeviceProfile[]>(`/api/catalog/devices${qs ? `?${qs}` : ""}`, signal ? { signal } : undefined);
     },
     get: (id: string) => request<DeviceProfile>(`/api/catalog/devices/${id}`),
     create: (p: DeviceProfile) => request<DeviceProfile>("/api/catalog/devices", { method: "POST", body: JSON.stringify(profileBody(p)) }),
