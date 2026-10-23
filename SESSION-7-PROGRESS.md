@@ -110,3 +110,23 @@ cases, one API 422 case, one browser case. Docs: handoff §2/§4/§6, bridge doc
 | Backend lint + tests | `ruff check/format --check` · `pytest -q` | clean · **273 passed** (+3) |
 | Frontend | `npm run lint && npm run typecheck`; production build for e2e | clean |
 | Bridge e2e | `npx playwright test e2e/morningstar.spec.ts` (scratch DB, :8017/:3017) | **6 passed** (+1) |
+
+## Second integration checkpoint — `main` 34d528f merged (PR #13 Library Search, PR #15 Instrument Studio)
+
+- Merge commit `d45e9b5`; one conflict in `docs/verification-register.md` (Team A updated F-Q11/F-Q12 in the
+  same table where F-Q14 was added) → kept Team A's rows, appended F-Q14. No code conflicts.
+- **Mobile header overflow, root cause measured** (Playwright, 390 px, production build): the `<nav>` had
+  `white-space: nowrap` / `flex-wrap: nowrap` from PR #11; with the Morningstar Bridge link the nav's right
+  edge was at **391 px** (links: Rigs 28 px, Device library 87 px, Morningstar Bridge 123 px) → document
+  scroll width 391 px, at the ±1 px tolerance of the `images.spec.ts` / `instrument.spec.ts` phone
+  assertions and font-dependent in CI. Fix: nav `flex flex-wrap gap-x-3 gap-y-0.5 sm:gap-4 min-w-0`,
+  each link `whitespace-nowrap`. After: header scroll width **390 px**, third link wraps to row two
+  (`docs/screenshots/session-7/bridge-6-header-390-wrapped.png`). No overflow hidden, no test changed.
+- Pre-existing, out of scope: `/` (Rigs library) main content is 468 px wide at 390 px before and after
+  the fix; not covered by a test; left for Team A.
+
+| Check | Command | Result |
+|---|---|---|
+| Backend lint + tests | `ruff check/format --check` · `pytest -q` | clean · **273 passed** |
+| Frontend | `npm ci && npm run lint && npm run typecheck && npm run build` | clean |
+| Full e2e | production build, scratch DB, :8017/:3017, `npx playwright test` | **65 passed** in 2.4 min, 0 failed (incl. the `images.spec.ts` and `instrument.spec.ts` phone-width cases) |
