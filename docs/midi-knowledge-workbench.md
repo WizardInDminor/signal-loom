@@ -1,6 +1,7 @@
 # MIDI Knowledge Workbench — design and implementation plan (Session 6)
 
-**Status:** design checkpoint written before implementation; updated at delivery with what shipped.
+**Status:** design checkpoint written before implementation (§1–§11), followed by the delivery
+report (§12–§15) written at the end of the session.
 **Branch:** `feature/midi-knowledge-workbench`, from `main` at `863d5ec`.
 **Scope source:** the Session 6 charter (musician-friendly reading of manufacturer documentation,
 structured MIDI control definitions, pedal Quick Reference notes) and the backlog entries
@@ -167,3 +168,91 @@ every change below is a new optional field with a default, so existing rows load
 Automatic extraction beyond the page-text proposal; PDF annotation; semantic search; rich note
 formatting; contextual display of a preset-saving note inside the preset editor (data is ready);
 any MIDI transmission, hardware configuration or preset write.
+
+---
+
+# Delivery report
+
+## 12. What shipped
+
+**Backend** (no SQL migration: profiles and instances are validated JSON; every new field is
+optional with a "not stated" default and legacy rows load unchanged)
+
+- `CcDef` extended with `behavior`, `min_value`/`max_value`, `citation`, `mapping` + `factory_cc`,
+  `hardware_status` + `hardware_note`, `review_status`, `notes`; `behavior` and the Session 5
+  `continuous` flag are kept in agreement by a validator (a flag-only client still saves; toggle or
+  trigger plus `continuous = True` is refused). `SourceCitation` is the shared citation shape
+  (`CommandCitation` remains as an alias).
+- `DeviceNote`; `DeviceProfile.quick_reference` (model) and `DeviceInstance.quick_reference` (unit).
+- `PUT /api/catalog/devices/{id}/controls`, `PUT …/quick-reference`, `GET …/control-usage`,
+  `GET /api/documents/{id}/pages/{n}/proposals`.
+- Eligibility: `proposed` controls are not eligible; toggle/trigger refused as switches; a Texture
+  range outside the documented range is a warning. Compiler: `midi.cc_out_of_range`,
+  `midi.cc_unreviewed` (warnings, bytes unchanged). `commands_from_midi_spec` copies the citation and
+  the hardware claim and skips proposed controls.
+- Project files: unchanged format; default-valued Session 6 keys are omitted so older versions still
+  open plain exports; cited PDFs travel with *Export with manuals* and the complete backup.
+- Robustness: every PDFium call runs under one lock (two concurrent page renders segfaulted the
+  backend during visual testing; the viewer's page prefetch made that routine).
+
+**Frontend**
+
+- `/catalog/[id]/workbench` with `IdentityBar`, `SplitPane` (drag, ← →, Home/End/Enter; Editor |
+  Reference segments below 1024 px with both panes mounted), `ControlsPane` (rows, filters, inline
+  editor in three tiers, *Use the page open on the right*, *Save & add another*, usage impact,
+  remove), `NotesPane` (pinned first, categories, steps, references, provenance; reused in the Board
+  inspector for unit notes), `ReferencePane` (document select, page navigation, zoom incl. fit
+  width, find, previous page kept until the next has loaded, next page prefetched, explicit *PDF
+  page N of M · printed page numbers may differ*, cite / new control / new note from the page,
+  proposals from text, in-place upload, missing-file and render-error fallbacks).
+- Device library: **Knowledge Workbench** entry, controls and pinned-notes summary, `?device=`
+  deep link back. Board inspector: pinned model notes and *This unit only* notes.
+- Scene picker: *Documented controls* section (reviewed only; value inside the documented range;
+  link to the cited page in the workbench). Texture destination picker: behaviour labels and
+  *needs review*.
+- Global: the app header no longer wraps on phones.
+
+## 13. Verification
+
+| Check | Result |
+|---|---|
+| Backend `pytest -q` | **225 passed, 4 skipped** (10 new in `tests/test_knowledge_workbench.py`; baseline 215) |
+| `ruff check` / `ruff format --check` | clean |
+| `npm run lint` / `npm run typecheck` / `npm run build` | clean |
+| Playwright, full suite | see §13a |
+| Screenshots | `docs/screenshots/session-6/` (1440 controls + notes, 1280, 390 editor + reference) |
+
+Acceptance journey (charter §8), where each step is proven: 1–2 library → workbench with the manual
+beside the editor (`workbench.spec.ts`, first test); 3 *Find* turns to the chart page; 4–6 three
+controls entered consecutively with page citations, behaviours and one hardware claim (the
+citation alone never sets it); 7–8 a pinned note with steps and a page reference; 9 reload and API
+check; 10 the Scene picker applies the reviewed control (and refuses the proposed one), the Texture
+picker labels behaviours (`test_proposed_controls_are_not_eligible…`); 11 export with documents and
+re-import (`test_knowledge_and_notes_travel_in_project_files…`, fresh database). Non-transmission:
+no new live code path exists; the workbench talks only to catalog and document routes.
+
+## 14. Limitations
+
+- The Volante and Collider profiles live in the owner's database, not in the repository, so the
+  browser journey runs on a profile copy with a synthetic three-page PDF; the owner's real profiles
+  open in the workbench unchanged (their existing `continuous` entries show as *continuous*, with
+  *not tried on my pedal* until the owner says otherwise) — S6-H01/H02 in the verification register.
+- *Suggest controls from text* understands "CC nn name [lo–hi]" patterns in a page's text layer; it
+  does not read tables laid out in columns, scanned pages, or program-change lists. Every result is
+  *proposed* and must be reviewed by hand.
+- Program Change range, bypass CC and the default channel are shown in the identity bar but are
+  still edited in the full profile editor (JSON), not in the workbench.
+- A duplicate CC number in one profile is refused by the controls endpoint; a pedal whose user remap
+  collides with another documented number is recorded as one entry with the factory number.
+- Unit-level notes are edited from the Board inspector, not from the workbench (the workbench is
+  profile-scoped and has no rig context).
+- Profile saves remain last-write-wins (F-Q03, unchanged); the workbench saves one list per commit
+  under the server's configuration lock, so a control save and a note save never overwrite each
+  other, but two people editing the same list in two tabs still can.
+
+## 15. Deferred (also in `docs/future-features.md`)
+
+Contextual notes in the preset editor and next to the channel field; table-aware extraction, a
+whole-map diff/approve flow, OCR; page text selection, highlights, bookmarks, semantic search; note
+formatting and images; PC/bypass knowledge and preset inventories in the same editor; per-control
+hardware status in the Live coverage view.

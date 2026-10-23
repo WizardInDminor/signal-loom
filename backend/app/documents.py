@@ -19,6 +19,7 @@ import json
 import os
 import re
 import shutil
+import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -105,6 +106,12 @@ def _pdfium():
     return pdfium
 
 
+# PDFium is not thread-safe, and FastAPI runs sync endpoints on a thread pool: two page renders in
+# flight at once (the viewer prefetching the next page, two tabs, a render during a text
+# extraction) can crash the whole process. Every PDFium call in this module runs under this lock.
+_PDFIUM_LOCK = threading.RLock()
+
+
 def inspect_pdf(data: bytes) -> int:
     """Validate the bytes as a PDF and return the page count. Raises ``DocumentError``."""
     if not data:
@@ -117,11 +124,12 @@ def inspect_pdf(data: bytes) -> int:
         raise DocumentError("the PDF is truncated or damaged (no end-of-file trailer)", 415)
     pdfium = _pdfium()
     try:
-        pdf = pdfium.PdfDocument(data)
-        try:
-            count = len(pdf)
-        finally:
-            pdf.close()
+        with _PDFIUM_LOCK:
+            pdf = pdfium.PdfDocument(data)
+            try:
+                count = len(pdf)
+            finally:
+                pdf.close()
     except pdfium.PdfiumError as e:
         hint = " (encrypted PDFs are not accepted)" if "password" in str(e).lower() else ""
         raise DocumentError(f"the file could not be opened as a PDF{hint}: {e}", 415) from e
@@ -294,16 +302,17 @@ class DocumentStore:
         from io import BytesIO
 
         try:
-            pdf = pdfium.PdfDocument(data)
-            try:
-                if not 1 <= page <= len(pdf):
-                    raise DocumentError(f"page {page} does not exist (the document has {len(pdf)} pages)", 404)
-                pg = pdf[page - 1]
-                w_pt, _ = pg.get_size()
-                scale = width / w_pt if w_pt > 0 else 1.0
-                image = pg.render(scale=scale).to_pil()
-            finally:
-                pdf.close()
+            with _PDFIUM_LOCK:
+                pdf = pdfium.PdfDocument(data)
+                try:
+                    if not 1 <= page <= len(pdf):
+                        raise DocumentError(f"page {page} does not exist (the document has {len(pdf)} pages)", 404)
+                    pg = pdf[page - 1]
+                    w_pt, _ = pg.get_size()
+                    scale = width / w_pt if w_pt > 0 else 1.0
+                    image = pg.render(scale=scale).to_pil()
+                finally:
+                    pdf.close()
         except pdfium.PdfiumError as e:
             raise DocumentError(f"the page could not be rendered: {e}", 422) from e
         out = BytesIO()
@@ -332,16 +341,17 @@ class DocumentStore:
         pdfium = _pdfium()
         texts: list[str] = []
         try:
-            pdf = pdfium.PdfDocument(data)
-            try:
-                for i in range(len(pdf)):
-                    tp = pdf[i].get_textpage()
-                    try:
-                        texts.append(tp.get_text_range() or "")
-                    finally:
-                        tp.close()
-            finally:
-                pdf.close()
+            with _PDFIUM_LOCK:
+                pdf = pdfium.PdfDocument(data)
+                try:
+                    for i in range(len(pdf)):
+                        tp = pdf[i].get_textpage()
+                        try:
+                            texts.append(tp.get_text_range() or "")
+                        finally:
+                            tp.close()
+                finally:
+                    pdf.close()
         except pdfium.PdfiumError as e:
             raise DocumentError(f"text could not be extracted: {e}", 422) from e
         try:
