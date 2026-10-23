@@ -52,3 +52,13 @@ editor backup files, without replacing the official editors. Three layers are ke
 7. **P7 docs + PR**: `docs/morningstar-bridge.md` (architecture decisions, format findings, limitations,
    test evidence), README/ARCHITECTURE pointers, `docs/research.md` findings, `SESSION-7-PROGRESS.md`
    ledger, draft PR. Private backups, serials and user configurations are never committed.
+
+## Amendment — integration checkpoint (main 5502911)
+
+The Engineering Operating Model (PR #12) and Team A's Workbench (PR #11) were merged into `main`
+mid-sprint and incorporated into this branch without conflicts. Deliverables are unchanged. Added to
+package 7: an [Engineering Handoff](SESSION-7-HANDOFF.md) following `docs/engineering/HANDOFF-TEMPLATE.md`,
+Session 7 entries in `docs/verification-register.md` (software claims as `SW-PASS`, editor acceptance
+as `OPEN`, controller write as `DEFERRED`, ML10X export as `BLOCKED`), and the PR description reduced
+to a summary that links the handoff (one canonical copy). Ownership: this is Team B work (Morningstar
+interoperability); no shared contract was changed.
