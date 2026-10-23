@@ -175,6 +175,16 @@ Recommended milestones: (1) offline draft preset capture/inventory, (2) one manu
 
 **Priority:** High polish/usability; keep distinct from MIDI/hardware correctness.
 
+**Addressed (A-01, register F-Q11):** the cause was a response race, not state restoration or
+pagination — every keystroke asked the backend for a list and the page accepted whichever answer
+arrived last; the unfiltered answer (the whole imported catalog) is the slowest to serialize, so it
+regularly landed after the answer for the full word. The library now numbers and aborts its
+requests, applies only the newest answer, debounces typing, keeps the search and the open profile
+in the URL (reload and Back restore them; the Workbench's way back restores the tab's last search),
+and shows explicit *Loading*, *Searching…*, *No devices match* and *Clear* states. A deterministic
+browser regression (`frontend/e2e/library-search.spec.ts`) holds short-query answers back longer
+than long-query answers and checks every acceptance item above.
+
 ### Additional workflow observations (existing requests)
 
 - **UX-MANUAL-01:** Two vendor MIDI guides were uploaded and one relevant continuous CC per pedal was manually inserted in full-profile JSON to prepare the Undertow Texture. Both controls became `documented continuous` without claimed hardware verification. This proves the data model works, but the upload → JSON edit → refresh workflow is too clerical for a creative instrument. **Addressed in Session 6:** the Knowledge Workbench enters controls beside the manual with no JSON; verification **F-Q08** stays partial until controls are physically checked.
