@@ -8,7 +8,7 @@ frontend (Next.js 16, React 19, TypeScript, zustand)
                                   ├── models/      hardware-independent domain types
                                   ├── repo.py      SQLite persistence (+ migrations/*.sql)
                                   ├── domain/      geometry · wiring · ml10x · compiler
-                                  ├── morningstar/ specs (with evidence) · MC8 export · ML10X reader
+                                  ├── morningstar/ specs (with evidence) · MC8 export · MC8/ML10X native bridge · ML10X reader
                                   ├── exports/     project file · Markdown/CSV package
                                   └── catalog/     hand-authored profiles · demo rig · PP importer
 ```
@@ -362,6 +362,20 @@ validation, no overwrite of existing library profiles, fresh rig id unless reque
   as explicit PC/CC messages (other message types are reported, not guessed).
 - `backup_diff.py` — labelled structural diff of two editor backups (any model) for controlled
   experiments on the undecoded fields.
+- `mc8_native.py` (Session 7) — the bridge's three layers for MC8 files: `load_native` (file kept
+  whole, hash and byte-exactness checked, unknown keys listed), `interpret_*` (every message,
+  preset, bank and controller setting tagged with an evidence level; unsupported message types
+  named from a third-party enum and preserved), `compare_bank_to_plan` (native bank vs the rig's
+  compiled bank rendered through the validated writer) and `propose` (allow-listed edits, structural
+  diff, self-checked `singleBank` output; everything else verbatim).
+- `ml10x_native.py` (Session 7) — the same native/interpreted split for ML10X backups: hash check
+  (algorithm reproduced on one real sample), controller/connector/preset interpretation, the routing
+  matrix kept opaque with a labelled row observation, and `matrix_differential` for controlled export
+  pairs. Still no writer.
+- `app/api/morningstar.py` — stateless `/api/morningstar/*` endpoints (status, inspect with device
+  auto-detection, mc8/compare, mc8/propose, ml10x/matrix-diff). Nothing is stored; the browser keeps
+  the file text. UI: `frontend/src/components/morningstar/*`, route `/morningstar`,
+  API/types in `frontend/src/lib/morningstar.ts`. See `docs/morningstar-bridge.md`.
 
 The core model never depends on these; a future adapter (another controller or switcher) adds
 a module here and a compile target, not a change to scenes or wiring.

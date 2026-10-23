@@ -22,6 +22,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <nav className="flex gap-4 text-sm" aria-label="Main">
             <Link href="/" className="hover:underline">Rigs</Link>
             <Link href="/catalog" className="hover:underline">Device library</Link>
+            <Link href="/morningstar" className="hover:underline">Morningstar Bridge</Link>
           </nav>
           <span className="ml-auto text-xs text-neutral-500">Design the rig. Weave the signal.</span>
         </header>

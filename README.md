@@ -173,7 +173,8 @@ tab says so plainly and offers the synthetic demo instead of inventing one.
 - **Scenes to switches.** Duplicate a scene, then pick its MC8 bank/switch directly in the
   scene; switches already used by other scenes are disabled.
 - **Morningstar tools** (Exports tab): import an MC8 "Current Bank" backup into the plan, and
-  compare any two editor backups (MC8 or ML10X) field by field for controlled experiments.
+  compare any two editor backups (MC8 or ML10X) field by field for controlled experiments. The
+  **Morningstar Bridge** workspace (Session 7, below) is the full inspect / compare / propose flow.
 
 ## The Stage (Session 3)
 
@@ -354,6 +355,33 @@ Before touching real pedals, read [docs/live-hardware-validation.md](docs/live-h
 a reversible, step-by-step checklist that records what is documented, simulation-tested and
 hardware-verified (by you). Nothing in this repository claims a hardware test that was not run.
 
+## Morningstar Bridge: inspect, compare and propose on native backups (Session 7)
+
+Open **Morningstar Bridge** in the top navigation and choose an editor backup — an MC8 *Current
+Bank* or *All Banks* file, or an ML10X *Device Backup*. Nothing leaves the local backend and nothing
+talks to a controller; the official editors stay the tools that program the hardware.
+
+- **Native snapshot.** The file is kept whole: dump type, export date, integrity hash check,
+  byte-exactness, and every key Signal Loom has not seen in a real export listed under *Unknown
+  data* with its value — never dropped, never given an invented meaning.
+- **Inspect (MC8).** Banks → preset grid (page 1 A–H, page 2 I–P, aux-only Q–V, expression presets)
+  → every message slot with a *known* / *third-party name* / *unknown* badge, the decoded message
+  (`CC#49 = 0 on ch 1`), action, toggle position and raw bytes. Bank messages and, for all-banks
+  files, the global controller settings have their own panels with an evidence tag per setting.
+- **Compare (MC8).** Pick a rig and one of its banks: each switch is *same*, *differs*, *controller
+  only* or *Signal Loom only*, with the differences named. Messages the rig cannot express are shown
+  as controller-only, not as something to remove.
+- **Propose (MC8).** Edit names, flags and PC/CC messages; slots of other types are locked and
+  preserved verbatim. *Review* shows the exact field diff and a self-check before the single-bank
+  file is offered — the only native file Signal Loom writes, fixture-validated and still **not**
+  editor- or hardware-validated.
+- **Inspect (ML10X).** Controller settings and the 14 connectors with their jack labels, the 4 × 128
+  presets, and each preset's routing matrix shown verbatim as *undecoded* (with a row observation
+  marked *hypothesis*). *Routing experiment* compares two exports and lists the matrix rows that
+  moved, the raw material a future decoder needs. No ML10X file is written.
+
+Details, format findings and limitations: [docs/morningstar-bridge.md](docs/morningstar-bridge.md).
+
 ## A short tour: the three-scene demo
 
 1. **Rigs** — open *Demo rig: three-scene song* (or create a new rig, optionally "from the demo").
@@ -377,6 +405,9 @@ hardware-verified (by you). Nothing in this repository claims a hardware test th
    page), and a Morningstar-editor-shaped **MC8 bank backup** whose evidence level is shown
    honestly (fixture-validated, not editor- or hardware-validated). ML10X native export is
    marked *blocked* with the reason.
+7. **Morningstar Bridge** (top navigation) — load that bank backup, or a real one from the editor,
+   and see every slot classified; compare it with the demo rig's bank 1 (identical where Signal
+   Loom models); change a name, review the diff, download the single-bank file.
 
 ## Repository layout
 

@@ -139,8 +139,8 @@ controlled pairs (change one loop, export again) that a decoder would need. Stat
 One real `dumpType: full` backup (deviceModel 7, 4 × 128 presets, 14 named connectors,
 `midiChannel`, `deviceId`, `inputSplit`, `loopBypassPersistent`) exists in a GPL-3.0
 third-party repository (ragb/ml10x-access-rs). Its per-preset `matrixArray` (16 × 3 ints)
-encodes the routing and **nobody public has decoded it**; the file `hash` algorithm for this
-model is unverified. Therefore Signal Loom does **not** write ML10X files. It ships a defensive
+encodes the routing and **nobody public has decoded it**; the file `hash` algorithm was
+unverified until Session 7 (now: the MC8 Java algorithm, 1 sample). Therefore Signal Loom does **not** write ML10X files. It ships a defensive
 *reader* (`POST /api/rigs/inspect/ml10x-backup`) validated locally against that file (not
 committed because of its license) and a synthetic-shape test. Native ML10X export status: **blocked**.
 
@@ -151,6 +151,23 @@ real public fixture (`Mainstage FX`) every PC/CC message slot round-trips byte-f
 export (`test_real_mc8_bank_round_trip`). Message types other than PC/CC are listed as skipped
 with their third-party type name. Evidence level for import: **fixture-validated** on PC/CC
 content; names are carried verbatim; expression presets and bank messages are not imported.
+
+### Session 7: native backup findings (Morningstar Bridge)
+
+Full write-up in `docs/morningstar-bridge.md` §2. In short:
+
+- **MC8 all-banks inventory** (real fixture): `controller_settings` has nine sections
+  (`omniports`, `resistor_ladder_aux`, `controller_settings/general_configurations`,
+  `waveform_engines`, `sequencer_engines`, `scroll_counters`, `midi_channels`, `bank_arrangement`,
+  `midi_events`); observed `t` ∈ {0,1,2}, `a` ∈ {0,1,3,5}, `tg` ∈ {0,2}, `d3` = `d4` = 0, `mi` = "".
+  Both real files re-serialize byte-for-byte with zero unknown keys (`test_real_mc8_files_are_lossless_and_fully_known`).
+- **ML10X hash** = Java `String.hashCode` over compact `data` JSON, the MC8 algorithm — reproduced on
+  the one real backup (1 sample; `test_real_ml10x_backup_hash_and_shape`, skipped without the file).
+- **ML10X `matrixArray`** = the device's preset SysEx segments 48–63 byte for byte (3 presets vs the
+  third-party captures). The explicit `[from, to, flag]` connection records on the wire are **not** in
+  the backup JSON. Non-zero rows = chain source connectors in the order Input Tip, Input Ring, A Tip …
+  E Ring (8/8, an observation); the one-hot columns are **not** a function of the target alone →
+  routing stays undecoded, shown verbatim, no writer.
 
 ## 5. What the user can do to raise the evidence level
 
