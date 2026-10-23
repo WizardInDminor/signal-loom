@@ -159,15 +159,15 @@ Full write-up in [`research/ml10x-integration-2026-10-23.md`](research/ml10x-int
 the USB SysEx protocol as reverse-engineered by a third party, owner test package). In short:
 
 - The backup JSON carries routing **only** as `matrixArray`; the device's explicit `[from, to, flag]`
-  records are on the wire (read and write) but not in the file. Matrix **rows are now device-labelled**
-  (the read message echoes each slot's source connector: Input Tip, Input Ring, A Tip, A Ring … E Ring,
-  12/12 in every capture); the **columns remain undecoded** (8 known cells, bit not a function of the
+  records are on the wire (read and write) but not in the file. READ source-record slots are device-labelled (Input Tip, Input Ring, A Tip, A Ring … E Ring,
+  12/12 in the captures) and their matrix-row correspondence is strongly corroborated, **not
+  independently device-confirmed**; the **columns remain undecoded** (8 observed cells, bit not a function of the
   target). Native routing export stays blocked (`F-Q14`); routing-free backup edits (names, settings,
   spillover, moving whole presets between slots/banks with the matrix carried verbatim and the hash
-  recomputed) are feasible and editor-unvalidated.
-- A full wire dump of the owner's own device would pair records and matrix for every used preset — the
-  decoder path that needs no editor experiments — but it changes the live preset and is a
-  hardware-risk-gated owner session (`S8-E04`).
+  recomputed) are candidates, not editor/restore-validated.
+- A full wire dump would pair records and matrix for each stored preset, enlarging decoder evidence,
+  but may miss unrepresented edges or combined states. It changes the active preset and is a
+  hardware-risk-gated owner session (`S8-E04`); controlled known-answer experiments remain necessary.
 - CC#30–39 polarity resolved from the v1.2 release notes (0 restore, 127 cut, 64 toggle); CC#40–43,
   50, 51, 52 documented; v1.2.0 remains the "BETA" pre-release but is the maintained line (builds to
   2026-10-01). Loop Bypass Persist = ON breaks the compiler's "bank + PC = known loop states" claim.
