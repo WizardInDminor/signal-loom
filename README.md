@@ -21,7 +21,7 @@ Workbench, design and delivery). The domain model is described in
 [ARCHITECTURE.md](ARCHITECTURE.md); research and licensing findings in
 [docs/research.md](docs/research.md).
 
-Future product concepts (proposed, not implemented or scheduled) are tracked in
+**Engineering process:** [CLAUDE.md](CLAUDE.md) is the onboarding entry point for new Claude Code sessions; [Engineering Operating Model](docs/engineering/OPERATING-MODEL.md) defines team boundaries, PR/CI gates and the software-to-hardware acceptance cadence. Use the [Engineering Handoff Template](docs/engineering/HANDOFF-TEMPLATE.md) for every substantive delivery. The [Verification Register](docs/verification-register.md) remains the single source of truth for what is actually tested.\n\nFuture product concepts (proposed, not implemented or scheduled) are tracked in
 [docs/future-features.md](docs/future-features.md), starting with a deliberately isolated
 **Experiment Mode** for capturing serendipitous multi-pedal combinations.
 
