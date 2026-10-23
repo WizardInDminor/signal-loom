@@ -15,16 +15,16 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col">
-        <header className="border-b border-line bg-panel px-4 py-2 flex items-center gap-6">
-          <Link href="/" className="font-semibold tracking-tight text-lg">
+        <header className="border-b border-line bg-panel px-3 sm:px-4 py-2 flex items-center gap-4 sm:gap-6">
+          <Link href="/" className="font-semibold tracking-tight text-lg whitespace-nowrap">
             Signal Loom
           </Link>
-          <nav className="flex gap-4 text-sm" aria-label="Main">
+          <nav className="flex gap-3 sm:gap-4 text-sm whitespace-nowrap" aria-label="Main">
             <Link href="/" className="hover:underline">Rigs</Link>
             <Link href="/catalog" className="hover:underline">Device library</Link>
             <Link href="/morningstar" className="hover:underline">Morningstar Bridge</Link>
           </nav>
-          <span className="ml-auto text-xs text-neutral-500">Design the rig. Weave the signal.</span>
+          <span className="ml-auto text-xs text-neutral-500 hidden md:inline">Design the rig. Weave the signal.</span>
         </header>
         <main className="flex-1 flex flex-col">{children}</main>
       </body>

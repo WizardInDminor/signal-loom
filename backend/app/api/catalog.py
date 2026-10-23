@@ -13,7 +13,8 @@ from ..documents import MAX_DOCUMENT_BYTES, DocumentError, DocumentStore
 from ..domain.commands import commands_from_midi_spec
 from ..live.sender import LiveRefused
 from ..models.board import PedalboardSpec
-from ..models.profile import DeviceProfile, DocumentKind, DocumentRef, MidiCommand, PortDef
+from ..models.profile import CcDef, DeviceNote, DeviceProfile, DocumentKind, DocumentRef, MidiCommand, PortDef
+from ..models.rig import utcnow_iso
 from ..repo import RigRepository
 from .deps import profile_repo
 
@@ -551,3 +552,140 @@ def command_usage(profile_id: str, request: Request):
                         }
                     )
     return usage
+
+
+# ----------------------------------------------------------------------------- MIDI control knowledge (Session 6)
+
+
+class ControlsBody(BaseModel):
+    """The profile's documented CC map, replaced whole. One entry per CC number: a remapped pedal
+    records the factory number on the entry (``mapping = user_configured``) rather than listing the
+    same number twice."""
+
+    cc_map: list[CcDef]
+
+    @model_validator(mode="after")
+    def _unique(self) -> ControlsBody:
+        ccs = [c.cc for c in self.cc_map]
+        dup = sorted({c for c in ccs if ccs.count(c) > 1})
+        if dup:
+            raise ValueError(f"CC number(s) listed more than once: {', '.join(str(c) for c in dup)}")
+        return self
+
+
+@router.put("/devices/{profile_id}/controls", response_model=ProfileOut)
+def update_controls(profile_id: str, body: ControlsBody, request: Request):
+    """Replace only the documented CC map (the structured control knowledge). Jacks, picture,
+    commands, program-change and bypass facts, documents and notes are untouched. Scenes keep the
+    exact CC values they saved; the compiler reports out-of-range or unreviewed values and Textures
+    whose control is no longer continuous lose eligibility, but nothing is rewritten here."""
+
+    def mutate(profile: DeviceProfile) -> None:
+        # Only the control list changes. A list of CCs says nothing about *how* MIDI reaches the
+        # pedal (DIN, TRS, USB…): the interface stays as the profile states it — unknown until the
+        # user declares it through ``midi-capability`` — and scenes compile the controls only then.
+        profile.midi.cc_map = body.cc_map
+
+    return _modify_profile(request, profile_id, mutate, guard="changing this device's MIDI controls")
+
+
+class QuickReferenceBody(BaseModel):
+    notes: list[DeviceNote]
+
+    @model_validator(mode="after")
+    def _unique(self) -> QuickReferenceBody:
+        ids = [n.id for n in self.notes]
+        if len(set(ids)) != len(ids):
+            raise ValueError("note ids must be unique")
+        return self
+
+
+@router.put("/devices/{profile_id}/quick-reference", response_model=ProfileOut)
+def update_quick_reference(profile_id: str, body: QuickReferenceBody, request: Request):
+    """Replace only the profile's model-level Quick Reference notes. Notes never affect
+    compilation or performance, so no live guard applies."""
+    now = utcnow_iso()
+
+    def mutate(profile: DeviceProfile) -> None:
+        before = {n.id: n for n in profile.quick_reference}
+        fresh: list[DeviceNote] = []
+        for n in body.notes:
+            old = before.get(n.id)
+            n.created_at = old.created_at if old and old.created_at else (n.created_at or now)
+            changed = old is None or old.model_dump(exclude={"created_at", "updated_at"}) != n.model_dump(
+                exclude={"created_at", "updated_at"}
+            )
+            n.updated_at = now if changed else (old.updated_at if old else now)
+            fresh.append(n)
+        profile.quick_reference = fresh
+
+    return _modify_profile(request, profile_id, mutate)
+
+
+@router.get("/devices/{profile_id}/control-usage")
+def control_usage(profile_id: str, request: Request):
+    """Where each CC number of this profile is in use across every rig (``controls``, keyed by CC
+    number as a string: scene values, hand-typed or applied from a command, and Texture mappings),
+    and every placed unit that shares the profile (``units``). Shown before a control is renumbered
+    or removed, and before a profile-level claim is recorded; saved scenes and textures are never
+    rewritten by such an edit."""
+    repo = profile_repo(request)
+    if repo.get(profile_id) is None:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    rigs = RigRepository(request.app.state.db)
+    usage: dict[str, dict[str, list[dict]]] = {}
+    # Every placed unit that shares this profile: a profile-level fact (a hardware claim, a remapped
+    # number) applies to all of them, so the editor says so before the user records one.
+    units: list[dict] = []
+
+    def slot(cc: int) -> dict[str, list[dict]]:
+        return usage.setdefault(str(cc), {"scenes": [], "textures": []})
+
+    for rig_id in repo.referenced_by(profile_id):
+        rig = rigs.get(rig_id)
+        if rig is None:
+            continue
+        ours = {i.id: i for i in rig.instances if i.profile_id == profile_id}
+        units.extend(
+            {"rig_id": rig.id, "rig_name": rig.name, "instance_id": i.id, "instance_label": i.label}
+            for i in ours.values()
+        )
+        for scene in rig.scenes:
+            for st in scene.device_states:
+                inst = ours.get(st.instance_id)
+                if inst is None:
+                    continue
+                for cv in st.cc_values:
+                    slot(cv.cc)["scenes"].append(
+                        {
+                            "rig_id": rig.id,
+                            "rig_name": rig.name,
+                            "scene_id": scene.id,
+                            "scene_name": scene.name,
+                            "instance_id": inst.id,
+                            "instance_label": inst.label,
+                            "value": cv.value,
+                            "command": cv.command.name if cv.command else None,
+                        }
+                    )
+        for tex in rig.textures:
+            for macro in tex.macros:
+                for m in macro.mappings:
+                    inst = ours.get(m.instance_id)
+                    if inst is None:
+                        continue
+                    slot(m.cc)["textures"].append(
+                        {
+                            "rig_id": rig.id,
+                            "rig_name": rig.name,
+                            "texture_id": tex.id,
+                            "texture_name": tex.name,
+                            "macro_name": macro.name,
+                            "instance_id": inst.id,
+                            "instance_label": inst.label,
+                            "output_min": m.output_min,
+                            "output_max": m.output_max,
+                            "enabled": m.enabled,
+                        }
+                    )
+    return {"controls": usage, "units": units}

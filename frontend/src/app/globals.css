@@ -65,3 +65,20 @@ table th { font-weight: 500; }
 @media (prefers-reduced-motion: reduce) {
   .inst-meter, .inst-cursor { transition: none; }
 }
+
+/* Knowledge Workbench: the pane separator and the page-loading bar. */
+.wb-separator {
+  flex: 0 0 9px;
+  cursor: col-resize;
+  background: var(--line);
+  position: relative;
+  touch-action: none;
+}
+.wb-separator:hover, .wb-separator:focus-visible, .wb-separator-active { background: var(--accent); }
+.wb-separator-grip {
+  position: absolute; top: 50%; left: 50%; width: 3px; height: 36px; margin: -18px 0 0 -1.5px;
+  border-radius: 2px; background: var(--panel); opacity: 0.9;
+}
+@keyframes wb-loading { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+.wb-loading { transform-origin: left; animation: wb-loading 0.9s ease-out infinite; }
+@media (prefers-reduced-motion: reduce) { .wb-loading { animation: none; } }

@@ -11,7 +11,7 @@ export const KIND_COLOR: Record<SignalKind, string> = {
   usb: "var(--usb)",
 };
 
-export function Button({ children, variant = "default", className = "", ...rest }: { children: ReactNode; variant?: "default" | "primary" | "danger" | "ghost" } & React.ButtonHTMLAttributes<HTMLButtonElement>) {
+export function Button({ children, variant = "default", className = "", ref, ...rest }: { children: ReactNode; variant?: "default" | "primary" | "danger" | "ghost"; ref?: React.Ref<HTMLButtonElement> } & React.ButtonHTMLAttributes<HTMLButtonElement>) {
   const base = "inline-flex items-center gap-1 rounded px-2.5 py-1 text-sm border transition disabled:opacity-50 disabled:cursor-not-allowed";
   const v = {
     default: "bg-panel border-line hover:bg-neutral-100",
@@ -20,7 +20,7 @@ export function Button({ children, variant = "default", className = "", ...rest 
     ghost: "border-transparent hover:bg-neutral-100",
   }[variant];
   return (
-    <button type="button" className={`${base} ${v} ${className}`} {...rest}>
+    <button ref={ref} type="button" className={`${base} ${v} ${className}`} {...rest}>
       {children}
     </button>
   );

@@ -205,6 +205,32 @@ def compile_scene(rig: Rig, scene: Scene, profiles: dict[str, DeviceProfile], ct
                         related_ids=[inst.id],
                     )
                 )
+            else:
+                # Session 6: structured control knowledge. Neither finding changes the bytes.
+                if not known.reviewed:
+                    d.append(
+                        Diagnostic(
+                            code="midi.cc_unreviewed",
+                            severity=Severity.WARNING,
+                            message=f"CC {cv.cc} ({known.name}) on '{inst.label}' was proposed from a document and not yet reviewed; sent as specified.",
+                            subject_type="scene",
+                            subject_id=scene.id,
+                            related_ids=[inst.id],
+                        )
+                    )
+                if not known.in_range(cv.value):
+                    lo = known.min_value if known.min_value is not None else 0
+                    hi = known.max_value if known.max_value is not None else 127
+                    d.append(
+                        Diagnostic(
+                            code="midi.cc_out_of_range",
+                            severity=Severity.WARNING,
+                            message=f"CC {cv.cc} = {cv.value} on '{inst.label}' is outside the documented range {lo}–{hi} of '{known.name}'; sent as specified.",
+                            subject_type="scene",
+                            subject_id=scene.id,
+                            related_ids=[inst.id],
+                        )
+                    )
             deterministic = True
             if cv.command is not None:
                 _check_applied_command(scene, inst, prof, cv.command, f"CC {cv.cc}", plan)

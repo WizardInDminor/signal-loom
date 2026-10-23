@@ -210,8 +210,8 @@ forms never execute in the browser; the original is only offered as `Content-Dis
 attachment` with `nosniff`, a `default-src 'none'; sandbox` CSP and `no-store`. Text search is
 local PDFium text extraction, cached per document; scanned PDFs report "no text layer". A profile
 carries `documents: [DocumentRef{document_id, title, kind, note}]` and a command may cite
-`{document_id, page}`; both are found by a JSON `instr` search, so `referenced_by` sees attachments
-and citations alike. Replace keeps the id (citations survive) and is refused while another profile
+`{document_id, page}` (since Session 6 so may a documented control and a Quick Reference note); all
+are found by a JSON `instr` search, so `referenced_by` sees attachments and citations alike. Replace keeps the id (citations survive) and is refused while another profile
 shares the file; detach never deletes bytes unless asked and unreferenced; `DELETE
 /api/documents/{id}` is refused while referenced. The API's `document_files` echo tells the UI
 whether each referenced file is present on this computer, so an imported profile degrades to
@@ -247,6 +247,74 @@ with the PDFs base64-bundled, restored on import through the same validation und
 Format 1 and 2 files cannot carry `documents`. The plain export still writes `assets: []` as it
 always has, and omits the `documents` section entirely when empty, so older app versions keep
 reading plain files.
+
+## Structured control knowledge and Quick Reference notes (Session 6)
+
+The documented CC map (`CcDef` in `MidiSpec.cc_map`) is the one place every consumer already reads
+— the compiler's range and documentation checks, Session 5 eligibility, the Live panels, the Scene
+picker's hints, `commands_from_midi_spec` — so Session 6 makes *it* the structured knowledge rather
+than adding a parallel table. Every new field is optional with a "not stated" default, so existing
+rows load unchanged and no SQL migration is needed (profiles and instances are validated JSON):
+
+- `behavior` (`continuous · discrete · toggle · trigger · unknown`, None = not stated) is the richer
+  form of the Session 5 `continuous` flag; a validator keeps the two in agreement (continuous ⇔ True,
+  discrete/toggle/trigger ⇔ False, unknown ⇔ None). A legacy entry carrying only the flag gets the
+  behaviour it implies; a client that only knows the flag and flips it wins over a behaviour that
+  said no more than the flag (so a profile fetched and sent back by an older editor still saves);
+  toggle/trigger plus `continuous = True` is a contradiction and is refused.
+- `min_value` / `max_value` (documented range), `citation` (`SourceCitation`: document id, **PDF page
+  index**, note — the same shape `MidiCommand.citation` always had, now shared), `mapping`
+  (`manufacturer_default` or `user_configured` with the `factory_cc` the manual documents),
+  `hardware_status` (`unverified · verified · failed`, with `hardware_note`; never set by the app),
+  `review_status` (None/`reviewed`, or `proposed` for anything that came from automated extraction),
+  `notes`.
+- **Scope of `hardware_status` and `mapping`: the profile, deliberately.** A `CcDef` is model-level
+  knowledge, so both are statements about every unit placed with that profile — exactly like
+  `MidiCommand.verified_on_hardware` has been since Session 3f, and like jacks and pictures, where a
+  unit that differs gets its own duplicated profile (the profile is the unit of configuration; the
+  per-instance override seams are `port_overrides` and `image`, not MIDI). The editor shows the
+  placed units sharing the profile (`control-usage.units`) before either is recorded and says to
+  duplicate the profile for a unit that is remapped or was tested on its own; `hardware_note` is
+  where the unit and date belong. A per-instance CC override (a remap on one unit only, with its
+  own compiler, eligibility and picker resolution) is a separate seam not built in Session 6.
+- **No connectivity inference.** Saving a control list never adds a MIDI interface: how MIDI reaches
+  the pedal stays unknown until the user declares it (`midi-capability`, evidence `user`), and the
+  workbench says so while scenes cannot yet address the pedal.
+- `DeviceNote` (`id`, `title`, `body`, `category`, ordered `steps`, `references` as citations,
+  `evidence`, `source_note`, `pinned`, timestamps) lives in `DeviceProfile.quick_reference` for the
+  model and in `DeviceInstance.quick_reference` for one physical unit; the two are different facts
+  and stored in different places on purpose.
+
+Consequences, by construction rather than by duplication: `document_ids()` includes control
+citations and note references, so `referenced_by`, the "present on this computer" echo, the
+delete/detach refusals and the complete backup all see them; eligibility refuses a `proposed`
+control (soft) and a toggle/trigger (hard, through `continuous = False`) and warns when a Texture
+range leaves a documented range; the compiler adds `midi.cc_out_of_range` and `midi.cc_unreviewed`
+(warnings; bytes unchanged); `commands_from_midi_spec` copies the control's citation and hardware
+claim into the derived command and skips proposed controls. API: `PUT …/controls` (CC map only,
+duplicate numbers refused, guarded while the performing rig uses the profile), `PUT
+…/quick-reference` (timestamps kept for unchanged notes), `GET …/control-usage` (scene values and
+Texture mappings per CC, for impact review), `GET /api/documents/{id}/pages/{n}/proposals` (regex
+over the page's own text; proposals only, nothing written). `control-usage` returns `{controls,
+units}`. Project files are unchanged in format:
+`project_dict` omits Session 6 keys that hold their defaults (and a behaviour the legacy flag
+already implies), so a plain export of a profile without new knowledge still opens in the previous
+version, exactly as `textures` is handled. PDFium is not thread-safe: all PDFium work in
+`app/documents.py` now runs under one re-entrant process-wide lock (two concurrent page renders
+crashed the process before; `tests/test_pdf_concurrency.py` overlaps renders, text extraction and
+proposals from eight threads and, with a fake PDFium, asserts that never more than one thread is
+inside it).
+
+**UI** (`frontend/src/components/workbench/*`, route `/catalog/[id]/workbench`): `Workbench` owns the
+reading position (`ReferenceState`), so it survives every edit, and routes citations both ways (a
+row turns the viewer to its page; the viewer cites its page into the open editor, or starts a
+control or note from it); `SplitPane` is the resizable, keyboard-operable split that becomes two
+segments below 1024 px with both panes kept mounted; `ControlsPane` / `NotesPane` edit one list each
+and persist it whole with one PUT per committed edit; `ReferencePane` shows page pictures (the
+previous page stays until the next has loaded, the next page is prefetched), find, zoom, the
+explicit PDF-page footer, proposals and in-place upload. `lib/knowledge.ts` mirrors the model rules
+and derives `continuous` from `behavior` before every save. `NotesPane` is reused in the Board
+inspector for unit-level notes (an ordinary rig edit: undo, revision, debounced PUT).
 
 ## Mounting surfaces and the underside (Session 3e, phase A)
 

@@ -124,7 +124,7 @@ left for later sessions, with the seams already in place:
 
 ## Official-manual MIDI mapping library (requested 2026-10-22)
 
-**Priority:** High after first Instrument authoring experience; foundational for expressive control, scenes and later preset editing. **Status: future / not implemented.** The existing device profile model supports `midi.cc_map`, control `continuous`, commands and evidence, but the app does not yet offer a complete assisted official-manual-to-MIDI-map ingestion and review flow.
+**Priority:** High after first Instrument authoring experience; foundational for expressive control, scenes and later preset editing. **Status: first version implemented in Session 6** ([MIDI Knowledge Workbench](midi-knowledge-workbench.md)): source-cited structured controls (behaviour, range, page, default vs remapped, hardware status, review state), Quick Reference notes, page-text proposals that stay *proposed* until reviewed. Still future: extraction beyond the simple "CC nn …" pattern, table-aware parsing, firmware/manual revision tracking per control, structured diff/approve of a whole proposed map. The existing device profile model supports `midi.cc_map`, control `continuous`, commands and evidence, but the app does not yet offer a complete assisted official-manual-to-MIDI-map ingestion and review flow.
 
 Desired workflow: attach or link an official manufacturer manual / MIDI implementation chart in the Device Library, extract the MIDI controls into **proposed** profile entries, inspect/edit a structured diff and approve. Record manufacturer/model, firmware/manual revision where known, source URL or attachment and page, CC number, semantic name, valid range, continuous vs discrete/toggle/unknown, warnings, and per-control provenance. Preserve uncertainty, user edits, and meaningful Scene/Texture links; never auto-promote documented data to physically verified.
 
@@ -177,7 +177,19 @@ Recommended milestones: (1) offline draft preset capture/inventory, (2) one manu
 
 ### Additional workflow observations (existing requests)
 
-- **UX-MANUAL-01:** Two vendor MIDI guides were uploaded and one relevant continuous CC per pedal was manually inserted in full-profile JSON to prepare the Undertow Texture. Both controls became `documented continuous` without claimed hardware verification. This proves the data model works, but the upload → JSON edit → refresh workflow is too clerical for a creative instrument. Track under [official-manual MIDI mapping library](#official-manual-midi-mapping-library-requested-2026-10-22) and verification **F-Q08**; review/approval should be native UI, no JSON required.
+- **UX-MANUAL-01:** Two vendor MIDI guides were uploaded and one relevant continuous CC per pedal was manually inserted in full-profile JSON to prepare the Undertow Texture. Both controls became `documented continuous` without claimed hardware verification. This proves the data model works, but the upload → JSON edit → refresh workflow is too clerical for a creative instrument. **Addressed in Session 6:** the Knowledge Workbench enters controls beside the manual with no JSON; verification **F-Q08** stays partial until controls are physically checked.
 - **UX-INSTRUMENT-01:** Functional grouping still shows Volante, Collider, Zelzah, Hedra and MOOD MKII as `Other` on the existing rig. Per-Texture roles are editable, but classification/onboarding could suggest meaningful multi-role categories without misrepresenting audio topology. Keep this a future interface refinement; don't block the offline Texture test. Existing macro-undo coalescing remains **F-Q02**.
 
 **Scope discipline:** These are future implementation inputs, not authority to add new live MIDI commands or hardware preset writes. Preserve the user's present Texture, manufacturer-sourced CC entries, attached manuals and physical evidence flags during a future polish pass.
+
+
+## Deferred from Session 6 — the Knowledge Workbench beyond the first slice
+
+**Status:** Backlog, captured 2026-10-23 at the end of Session 6 ([design and delivery note](midi-knowledge-workbench.md)). **Not authorized to transmit by this entry.**
+
+- Contextual Quick Reference: show a pedal's pinned *presets* note inside the preset/program editor and the *midi_setup* note next to the channel field (the data and the pin are in place; only the surfaces are missing).
+- Smarter extraction: table-aware parsing of MIDI charts, a whole-map structured diff with approve/reject per row, firmware and manual revision per control, OCR for scanned manuals (the current proposals read only the page's own text layer).
+- Reference viewer: text selection and highlight on the page picture, annotations, bookmarks per document, a thumbnail strip, semantic search across all manuals of a rig.
+- Notes: light formatting (lists, bold), images, links between notes and controls, a rig-wide "stage card" of pinned notes.
+- Program Change and bypass knowledge in the same editor (today they stay in the full-profile editor), named preset inventories per pedal (prerequisite for safe preset saving, F-Q09).
+- Owner-side: physical verification per control from a recorded test (S6-H01/H02), and surfacing the per-control hardware status in the Live coverage view.

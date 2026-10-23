@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { api } from "@/lib/api";
 import type { AssetRecord, DeviceProfile } from "@/lib/types";
 import { CATEGORIES } from "@/lib/types";
@@ -11,6 +12,7 @@ import { ConfigureJacksButton, JackMapper } from "@/components/images/JackMapper
 import { DocumentsSection } from "@/components/library/DocumentsSection";
 import { MidiCommandsSection } from "@/components/library/MidiCommandsSection";
 import { enclosureFill } from "@/lib/boardLayout";
+import { behaviorLabel, isReviewed, rangeText } from "@/lib/knowledge";
 import type { PortDef, SignalKind, PortDirection, Edge } from "@/lib/types";
 import { CONNECTORS } from "@/lib/types";
 
@@ -65,6 +67,11 @@ export default function CatalogPage() {
   const refreshAssets = () => api.assets.list().then(setAssets).catch(() => setAssets(null));
   useEffect(() => { void refresh(); }, [q, category]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { void refreshAssets(); }, [sel?.image?.asset_id]);
+  useEffect(() => {
+    // `/catalog?device=<id>` (the Workbench's way back) opens that profile directly.
+    const id = new URLSearchParams(window.location.search).get("device");
+    if (id) api.catalog.get(id).then((p) => { setSel(p); setDraft(null); }).catch(() => undefined);
+  }, []);
   const unused = assets?.filter((a) => !a.referenced) ?? [];
   const duplicate = (p: DeviceProfile) => {
     const copy = structuredClone(p);
@@ -176,7 +183,7 @@ export default function CatalogPage() {
           </Field>
         </Panel>
       ) : sel ? (
-        <Panel className="min-w-0" title={`${sel.manufacturer} ${sel.model}`} actions={<div className="flex gap-2"><Button onClick={() => duplicate(sel)}>Duplicate</Button><Button onClick={() => setDraft(structuredClone(sel))}>Edit{sel.builtin ? " (creates your own copy)" : ""}</Button><Button variant="danger" onClick={async () => { if (!window.confirm(`Delete profile ${sel.id}?`)) return; try { await api.catalog.remove(sel.id); setSel(null); void refresh(); } catch (e) { setError((e as Error).message); } }}>Delete</Button></div>}>
+        <Panel className="min-w-0" title={`${sel.manufacturer} ${sel.model}`} actions={<div className="flex flex-wrap gap-2 justify-end"><Link href={`/catalog/${encodeURIComponent(sel.id)}/workbench`} className="inline-flex items-center gap-1 rounded px-2.5 py-1 text-sm border bg-accent text-white border-accent hover:opacity-90" data-testid="open-workbench" title="Read the manual beside the MIDI controls and Quick Reference notes">Knowledge Workbench</Link><Button onClick={() => duplicate(sel)}>Duplicate</Button><Button onClick={() => setDraft(structuredClone(sel))}>Edit{sel.builtin ? " (creates your own copy)" : ""}</Button><Button variant="danger" onClick={async () => { if (!window.confirm(`Delete profile ${sel.id}?`)) return; try { await api.catalog.remove(sel.id); setSel(null); void refresh(); } catch (e) { setError((e as Error).message); } }}>Delete</Button></div>}>
           <div className="text-xs flex flex-col gap-2">
             <div className="flex flex-wrap gap-1 items-center">
               <Badge>{sel.category}</Badge><Badge>{sel.source}</Badge>
@@ -188,7 +195,27 @@ export default function CatalogPage() {
             <div>Power: {sel.power.voltage_v ?? "?"} V {sel.power.polarity.replace("_", " ")} {sel.power.current_ma_min ?? "?"} mA <EvidenceBadge evidence={sel.power.evidence} /> {sel.power.note}</div>
             <div>MIDI: {sel.midi.interfaces.join(", ") || "none"} · default channel {sel.midi.default_channel ?? <Badge tone="warn">unknown</Badge>} · PC {sel.midi.program_change.supported === true ? `${sel.midi.program_change.min}–${sel.midi.program_change.max}` : sel.midi.program_change.supported === false ? "no" : "unknown"} <EvidenceBadge evidence={sel.midi.program_change.evidence} /> {sel.midi.program_change.note}</div>
             {sel.midi.bypass.cc != null && <div>Bypass: CC {sel.midi.bypass.cc} on={sel.midi.bypass.on_value} off={sel.midi.bypass.off_value} <EvidenceBadge evidence={sel.midi.bypass.evidence} /> {sel.midi.bypass.note}</div>}
-            {sel.midi.cc_map.length > 0 && <div>CC map: <ul className="list-disc pl-4">{sel.midi.cc_map.map((c) => <li key={c.cc}>CC {c.cc} {c.name} {c.value_semantics && <span className="text-neutral-500">({c.value_semantics})</span>} <EvidenceBadge evidence={c.evidence} /></li>)}</ul></div>}
+            <div className="rounded-md border border-line p-2 flex flex-col gap-1" data-testid="knowledge-summary">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-semibold">MIDI controls ({sel.midi.cc_map.length})</span>
+                <span className="text-neutral-500">· Quick Reference notes ({(sel.quick_reference ?? []).length}{(sel.quick_reference ?? []).some((n) => n.pinned) ? `, ${(sel.quick_reference ?? []).filter((n) => n.pinned).length} pinned` : ""})</span>
+                <Link href={`/catalog/${encodeURIComponent(sel.id)}/workbench`} className="underline ml-auto">Open in the Knowledge Workbench →</Link>
+              </div>
+              {sel.midi.cc_map.length > 0 ? (
+                <ul className="flex flex-wrap gap-1">
+                  {[...sel.midi.cc_map].sort((a, b) => a.cc - b.cc).map((c) => (
+                    <li key={c.cc} className="inline-flex items-center gap-1 rounded border border-line px-1.5 py-0.5 bg-neutral-50" title={c.value_semantics ?? undefined}>
+                      <span className="font-mono">CC {c.cc}</span><span>{c.name}</span><span className="text-neutral-500">· {behaviorLabel(c)}{rangeText(c) ? ` ${rangeText(c)}` : ""}</span>
+                      <EvidenceBadge evidence={c.evidence} />
+                      {c.citation?.page && <span className="text-neutral-500">p. {c.citation.page}</span>}
+                      {c.hardware_status === "verified" && <Badge tone="ok">✓ verified</Badge>}
+                      {!isReviewed(c) && <Badge tone="warn">needs review</Badge>}
+                    </li>
+                  ))}
+                </ul>
+              ) : <span className="text-neutral-500">No documented controls yet — enter them from the manual in the Workbench.</span>}
+              {(sel.quick_reference ?? []).filter((n) => n.pinned).map((n) => <div key={n.id} className="text-neutral-700"><span className="text-amber-500">★</span> <b>{n.title}</b>{n.steps.length ? <span className="text-neutral-500"> · {n.steps.length} step{n.steps.length === 1 ? "" : "s"}</span> : null}</div>)}
+            </div>
             <div>Unknown / unverified: {(sel.unknown_attributes ?? []).length ? sel.unknown_attributes!.map((u) => <Badge key={u} tone="warn">{u}</Badge>) : "nothing declared"}</div>
             <div className="overflow-x-auto"><table className="w-full"><thead><tr className="text-left text-neutral-500"><th>Jack</th><th>Kind</th><th>Dir</th><th>Connector</th><th>Edge</th><th>Position</th><th>Notes</th></tr></thead>
               <tbody>{sel.ports.map((p) => <tr key={p.id} className="border-t border-line"><td>{p.label}</td><td>{p.kind}</td><td>{p.direction}</td><td>{p.connector}{p.midi_trs_type ? ` (${p.midi_trs_type})` : ""}{p.audio_channel ? ` ${p.audio_channel}` : ""}{p.kind === "power" && p.direction === "out" && (p.role === "expansion_out" ? <> · <Badge tone="warn">{p.supply_voltage_v ?? "?"} V expansion link, not a pedal outlet</Badge></> : <> · supplies {p.supply_voltage_v ?? "?"} V {p.supply_current_ma_max ?? "?"} mA{p.supply_options?.length ? ` (selectable: ${p.supply_options.map((o) => `${o.voltage_v} V/${o.current_ma_max ?? "?"} mA`).join(", ")})` : ""}{p.supply_isolated === true ? ", isolated" : p.supply_isolated === false ? ", shared" : ""}</>)}</td><td>{p.edge}</td><td>{p.position == null ? <Badge tone="bad">unknown</Badge> : <>{p.position} <EvidenceBadge evidence={p.position_evidence} /></>}</td><td className="text-neutral-500">{p.notes}</td></tr>)}</tbody>

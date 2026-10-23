@@ -19,6 +19,7 @@ import json
 import os
 import re
 import shutil
+import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -105,6 +106,12 @@ def _pdfium():
     return pdfium
 
 
+# PDFium is not thread-safe, and FastAPI runs sync endpoints on a thread pool: two page renders in
+# flight at once (the viewer prefetching the next page, two tabs, a render during a text
+# extraction) can crash the whole process. Every PDFium call in this module runs under this lock.
+_PDFIUM_LOCK = threading.RLock()
+
+
 def inspect_pdf(data: bytes) -> int:
     """Validate the bytes as a PDF and return the page count. Raises ``DocumentError``."""
     if not data:
@@ -117,11 +124,12 @@ def inspect_pdf(data: bytes) -> int:
         raise DocumentError("the PDF is truncated or damaged (no end-of-file trailer)", 415)
     pdfium = _pdfium()
     try:
-        pdf = pdfium.PdfDocument(data)
-        try:
-            count = len(pdf)
-        finally:
-            pdf.close()
+        with _PDFIUM_LOCK:
+            pdf = pdfium.PdfDocument(data)
+            try:
+                count = len(pdf)
+            finally:
+                pdf.close()
     except pdfium.PdfiumError as e:
         hint = " (encrypted PDFs are not accepted)" if "password" in str(e).lower() else ""
         raise DocumentError(f"the file could not be opened as a PDF{hint}: {e}", 415) from e
@@ -294,16 +302,17 @@ class DocumentStore:
         from io import BytesIO
 
         try:
-            pdf = pdfium.PdfDocument(data)
-            try:
-                if not 1 <= page <= len(pdf):
-                    raise DocumentError(f"page {page} does not exist (the document has {len(pdf)} pages)", 404)
-                pg = pdf[page - 1]
-                w_pt, _ = pg.get_size()
-                scale = width / w_pt if w_pt > 0 else 1.0
-                image = pg.render(scale=scale).to_pil()
-            finally:
-                pdf.close()
+            with _PDFIUM_LOCK:
+                pdf = pdfium.PdfDocument(data)
+                try:
+                    if not 1 <= page <= len(pdf):
+                        raise DocumentError(f"page {page} does not exist (the document has {len(pdf)} pages)", 404)
+                    pg = pdf[page - 1]
+                    w_pt, _ = pg.get_size()
+                    scale = width / w_pt if w_pt > 0 else 1.0
+                    image = pg.render(scale=scale).to_pil()
+                finally:
+                    pdf.close()
         except pdfium.PdfiumError as e:
             raise DocumentError(f"the page could not be rendered: {e}", 422) from e
         out = BytesIO()
@@ -332,16 +341,17 @@ class DocumentStore:
         pdfium = _pdfium()
         texts: list[str] = []
         try:
-            pdf = pdfium.PdfDocument(data)
-            try:
-                for i in range(len(pdf)):
-                    tp = pdf[i].get_textpage()
-                    try:
-                        texts.append(tp.get_text_range() or "")
-                    finally:
-                        tp.close()
-            finally:
-                pdf.close()
+            with _PDFIUM_LOCK:
+                pdf = pdfium.PdfDocument(data)
+                try:
+                    for i in range(len(pdf)):
+                        tp = pdf[i].get_textpage()
+                        try:
+                            texts.append(tp.get_text_range() or "")
+                        finally:
+                            tp.close()
+                finally:
+                    pdf.close()
         except pdfium.PdfiumError as e:
             raise DocumentError(f"text could not be extracted: {e}", 422) from e
         try:
@@ -371,6 +381,76 @@ class DocumentStore:
                     return hits
                 start = i + len(q)
         return hits
+
+
+# ---------------------------------------------------------------------- proposals from page text (Session 6)
+# "CC 12", "CC#12", "CC12", "cc 12:", "Controller 12", "Control Change 12". Deliberately simple:
+# every hit is a *proposal* that a human must review and may discard; nothing is written to a
+# profile here.
+_CC_MENTION = re.compile(r"\b(?:CC|Control\s+Change|Controller)\s*#?\s*(\d{1,3})\b", re.IGNORECASE)
+_RANGE = re.compile(r"(?<![\w.])(\d{1,3})\s*(?:-|–|to)\s*(\d{1,3})(?!\w)")
+_NAME_END = re.compile(r"[.;|:=]|\(|\s\d{1,3}\s*(?:-|–|to|=)\s*\w|\s(?:value|values|range|min|max)\b", re.IGNORECASE)
+_BEHAVIOR_HINTS = (
+    ("toggle", re.compile(r"\btoggle", re.IGNORECASE)),
+    ("trigger", re.compile(r"\b(tap|trigger|momentary|any value)\b", re.IGNORECASE)),
+    ("discrete", re.compile(r"\b(on/off|bypass|engage|select|switch)\b|\b0\s*=\s*\w+.*\b127\s*=", re.IGNORECASE)),
+)
+
+
+def propose_controls(text: str, document_id: str, page: int) -> list[dict]:
+    """Candidate CC definitions found in one page of text, shaped like ``CcDef`` JSON plus the
+    matched snippet. Each is ``review_status = "proposed"``, cites the page, and carries
+    ``evidence = documented`` (the text is from the attached document) — never any hardware claim.
+    One proposal per CC number (first occurrence wins); numbers above 127 are dropped. The name is
+    the text that follows the number up to the next sentence/table break; a ``lo-hi`` range in the
+    same span becomes the value range; a few words hint at the behaviour, which stays a hint."""
+    out: list[dict] = []
+    seen: set[int] = set()
+    flat = " ".join(text.split())
+    mentions = list(_CC_MENTION.finditer(flat))
+    for i, m in enumerate(mentions):
+        cc = int(m.group(1))
+        if cc > 127 or cc in seen:
+            continue
+        span_end = mentions[i + 1].start() if i + 1 < len(mentions) else len(flat)
+        span = flat[m.end() : min(span_end, m.end() + 160)]
+        tail = span.lstrip(" :=-–|.\t")
+        stop = _NAME_END.search(tail)
+        name = tail[: stop.start()] if stop else tail
+        name = name.strip(" :=-–|.,")[:60] or f"CC {cc}"
+        rng = None
+        r = _RANGE.search(span)
+        if r is not None:
+            lo, hi = int(r.group(1)), int(r.group(2))
+            if lo <= hi <= 127:
+                rng = (lo, hi)
+        behavior = None
+        for label, rx in _BEHAVIOR_HINTS:
+            if rx.search(span):
+                behavior = label
+                break
+        a, b = max(0, m.start() - 30), min(len(flat), m.end() + min(len(span), 90))
+        seen.add(cc)
+        out.append(
+            {
+                "cc": cc,
+                "name": name,
+                "value_semantics": None,
+                "evidence": "documented",
+                "behavior": behavior,
+                "min_value": rng[0] if rng else None,
+                "max_value": rng[1] if rng else None,
+                "citation": {"document_id": document_id, "page": page, "note": None},
+                "mapping": "manufacturer_default",
+                "factory_cc": None,
+                "hardware_status": "unverified",
+                "hardware_note": None,
+                "review_status": "proposed",
+                "notes": None,
+                "snippet": flat[a:b].strip(),
+            }
+        )
+    return out
 
 
 def default_documents_dir(db_path: Path) -> Path:

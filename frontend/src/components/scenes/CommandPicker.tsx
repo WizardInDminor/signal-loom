@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { CcValue, DeviceInstance, DeviceProfile, DeviceSceneState, MidiCommand, ProgramSelection } from "@/lib/types";
+import type { CcDef, CcValue, DeviceInstance, DeviceProfile, DeviceSceneState, MidiCommand, ProgramSelection } from "@/lib/types";
 import { applyCc, applyPc, displayedProgram, evidenceWord, orderedCommands, wireSummary } from "@/lib/commands";
+import { BEHAVIOR_TONE, behaviorLabel, behaviorOf, isReviewed, rangeText } from "@/lib/knowledge";
 import { Badge, Button, EvidenceBadge } from "@/components/ui/basics";
 
 /**
@@ -22,14 +23,27 @@ export function CommandPicker({ instance, profile, state, onApplyCc, onApplyPc, 
   const commands = useMemo(() => profile.midi.commands ?? [], [profile.midi.commands]);
   const [q, setQ] = useState("");
   const [picked, setPickedState] = useState<MidiCommand | null>(null);
+  // Session 6: a reviewed documented control can be applied directly, with a value inside its documented range.
+  const [pickedCtl, setPickedCtl] = useState<CcDef | null>(null);
   const [value, setValue] = useState<number | null>(null);
   const channel = instance.midi_channel ?? profile.midi.default_channel ?? null;
   const shown = useMemo(() => orderedCommands(commands, q), [commands, q]);
+  const controls = useMemo(() => {
+    const t = q.trim().toLowerCase();
+    return [...profile.midi.cc_map].filter((c) => isReviewed(c)).filter((c) => !t || `cc ${c.cc} ${c.name} ${behaviorLabel(c)}`.toLowerCase().includes(t)).sort((a, b) => a.cc - b.cc);
+  }, [profile.midi.cc_map, q]);
+  const proposedCount = profile.midi.cc_map.filter((c) => !isReviewed(c)).length;
   const docs = profile.documents ?? [];
   const files = new Map((profile.document_files ?? []).map((f) => [f.document_id, f]));
   const setPicked = (c: MidiCommand) => {
     setPickedState(c);
+    setPickedCtl(null);
     setValue(c.value_mode === "choice" ? (c.choices[0]?.value ?? null) : (c.value ?? null));
+  };
+  const pickControl = (d: CcDef) => {
+    setPickedState(null);
+    setPickedCtl(d);
+    setValue(d.min_value ?? 0);
   };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -38,6 +52,10 @@ export function CommandPicker({ instance, profile, state, onApplyCc, onApplyPc, 
   }, [onClose]);
 
   const preview = (() => {
+    if (pickedCtl) {
+      if (value == null || !Number.isInteger(value) || value < 0 || value > 127) return { err: `“${pickedCtl.name}” needs a value between 0 and 127` };
+      return { cv: { cc: pickedCtl.cc, value, label: pickedCtl.name, command: null } as CcValue, pc: null as ProgramSelection | null };
+    }
     if (!picked) return null;
     try {
       if (picked.kind === "pc") return { pc: applyPc(picked), cv: null as CcValue | null };
@@ -68,7 +86,7 @@ export function CommandPicker({ instance, profile, state, onApplyCc, onApplyPc, 
         <div className="grid md:grid-cols-[1fr_1fr] gap-0">
           <div className="border-r border-line p-2 flex flex-col gap-1 max-h-[70vh] overflow-auto">
             <input aria-label="Search commands" autoFocus placeholder="Search by name, category, CC/PC…" value={q} onChange={(e) => setQ(e.target.value)} />
-            {!commands.length && <p className="text-neutral-500 p-2">This profile has no MIDI commands yet. Add them in the Device library (“MIDI commands” on the profile), or type CC values by hand below.</p>}
+            {!commands.length && !controls.length && <p className="text-neutral-500 p-2">This profile has no MIDI commands or documented controls yet. Add them in the Device library (Knowledge Workbench), or type CC values by hand below.</p>}
             {shown.map((c, i) => {
               const firstNonFav = i > 0 && !c.favorite && shown[i - 1].favorite;
               return (
@@ -88,9 +106,56 @@ export function CommandPicker({ instance, profile, state, onApplyCc, onApplyPc, 
                 </div>
               );
             })}
+            {controls.length > 0 && (
+              <>
+                <div className="text-[10px] uppercase tracking-wide text-neutral-400 px-1 mt-2">Documented controls{proposedCount ? <span className="normal-case"> · {proposedCount} awaiting review are not offered</span> : null}</div>
+                {controls.map((d) => {
+                  const b = behaviorOf(d);
+                  return (
+                    <button key={d.cc} type="button" className={`w-full text-left border rounded px-2 py-1 ${pickedCtl?.cc === d.cc ? "border-accent bg-blue-50" : "border-line hover:bg-neutral-50"}`} onClick={() => pickControl(d)} data-testid={`control-pick-${d.cc}`}>
+                      <div className="flex items-center gap-1 flex-wrap">
+                        <code className="bg-neutral-100 rounded px-1 text-[11px]">CC {d.cc}</code>
+                        <span className="font-medium">{d.name}</span>
+                        <Badge tone={b ? BEHAVIOR_TONE[b] : "bad"}>{behaviorLabel(d)}</Badge>
+                        {rangeText(d) && <span className="text-neutral-500 font-mono text-[11px]">{rangeText(d)}</span>}
+                        <EvidenceBadge evidence={d.evidence} />
+                        {d.hardware_status === "verified" && <Badge tone="ok">✓ verified (your claim)</Badge>}
+                      </div>
+                      {d.value_semantics && <div className="text-neutral-500">{d.value_semantics}</div>}
+                    </button>
+                  );
+                })}
+              </>
+            )}
           </div>
           <div className="p-3 flex flex-col gap-2" data-testid="command-detail">
-            {!picked ? <p className="text-neutral-500">Pick a command to see exactly what it will send.</p> : (
+            {pickedCtl ? (
+              <>
+                <div className="flex flex-wrap items-center gap-1">
+                  <span className="text-sm font-semibold">{pickedCtl.name}</span>
+                  <Badge>CC {pickedCtl.cc}</Badge>
+                  <Badge tone={behaviorOf(pickedCtl) ? BEHAVIOR_TONE[behaviorOf(pickedCtl)!] : "bad"}>{behaviorLabel(pickedCtl)}</Badge>
+                  <EvidenceBadge evidence={pickedCtl.evidence} />
+                  {pickedCtl.hardware_status === "verified" && <Badge tone="ok">verified on hardware (your claim)</Badge>}
+                </div>
+                <p className="text-neutral-600">{pickedCtl.value_semantics ?? "Value meaning not stated."}{pickedCtl.notes ? ` ${pickedCtl.notes}` : ""}</p>
+                {pickedCtl.citation && (files.get(pickedCtl.citation.document_id)?.present ? <a className="underline" href={`/catalog/${encodeURIComponent(profile.id)}/workbench?doc=${pickedCtl.citation.document_id}&page=${pickedCtl.citation.page ?? 1}`} target="_blank" rel="noreferrer" data-testid="picker-control-citation">Open {docs.find((x) => x.document_id === pickedCtl.citation!.document_id)?.title ?? "document"}{pickedCtl.citation.page ? ` at PDF page ${pickedCtl.citation.page}` : ""} ↗</a> : <span className="text-amber-800">Cites a document that is not on this computer.</span>)}
+                <label className="flex items-center gap-2">Value ({pickedCtl.min_value ?? 0}–{pickedCtl.max_value ?? 127}) <input aria-label="Control value" type="number" min={pickedCtl.min_value ?? 0} max={pickedCtl.max_value ?? 127} className="w-20" value={value ?? ""} onChange={(e) => setValue(e.target.value === "" ? null : Number(e.target.value))} /></label>
+                <div className="border border-line rounded p-2 bg-neutral-50" data-testid="command-preview">
+                  <div className="text-[10px] uppercase tracking-wide text-neutral-400">Will send</div>
+                  {preview && "err" in preview ? <p className="text-red-700">{preview.err}</p> : preview?.cv ? <p className="font-mono">CC {preview.cv.cc} = {preview.cv.value} on channel {channel ?? "?"} → {instance.label}</p> : null}
+                </div>
+                <ul className="flex flex-col gap-1">
+                  {channel == null && <li className="text-red-700">This pedal has no MIDI channel: set it on the device (Board tab) or the profile default. The compiler will refuse until then.</li>}
+                  {value != null && (value < (pickedCtl.min_value ?? 0) || value > (pickedCtl.max_value ?? 127)) && <li className="text-amber-800">Outside the documented range {pickedCtl.min_value ?? 0}–{pickedCtl.max_value ?? 127}; the compiler will warn.</li>}
+                  {(behaviorOf(pickedCtl) === "toggle") && <li className="text-amber-800">Toggle: the result depends on the device&apos;s prior state; scene recall cannot be guaranteed from an unknown starting state.</li>}
+                  {behaviorOf(pickedCtl) == null && <li className="text-neutral-500">The control&apos;s behaviour is not stated.</li>}
+                  {conflicts.length > 0 && <li className="text-amber-800" data-testid="command-conflict">This scene already sets CC {conflicts[0].cc} = {conflicts.map((x) => x.value).join(", ")} on this pedal. Applying replaces it.</li>}
+                  {sameAlready && <li className="text-neutral-500">The scene already sends exactly this.</li>}
+                </ul>
+                <div className="flex justify-end gap-2"><Button onClick={onClose}>Cancel</Button><Button variant="primary" onClick={apply} disabled={!preview || "err" in preview || sameAlready} data-testid="command-apply">Add to scene</Button></div>
+              </>
+            ) : !picked ? <p className="text-neutral-500">Pick a command or a documented control to see exactly what it will send.</p> : (
               <>
                 <div className="flex flex-wrap items-center gap-1">
                   <span className="text-sm font-semibold">{picked.name}</span>

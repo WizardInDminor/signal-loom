@@ -54,8 +54,41 @@ export interface PortDef {
 }
 export interface SupplyOption { voltage_v: number; current_ma_max: number | null; note?: string | null }
 
-/** `continuous`: documented as a repeatable 0–127 sweep (true), discrete (false) or not stated (null/absent). Only true makes a CC eligible for modulation. */
-export interface CcDef { cc: number; name: string; value_semantics?: string | null; evidence: Evidence; continuous?: boolean | null }
+// ---------------------------------------------------------------------------- MIDI control knowledge (Session 6)
+// Mirror of backend CcDef / SourceCitation / DeviceNote. Everything beyond cc/name is optional and
+// defaults to "not stated"; nothing is inferred by the app.
+export type ControlBehavior = "continuous" | "discrete" | "toggle" | "trigger" | "unknown";
+export type ControlMapping = "manufacturer_default" | "user_configured";
+export type HardwareStatus = "unverified" | "verified" | "failed";
+export type ReviewStatus = "proposed" | "reviewed";
+/** Where in an attached document a fact is described. `page` is the PDF page index (1-based), not the printed number. */
+export interface SourceCitation { document_id: string; page?: number | null; note?: string | null }
+/** `continuous`: documented as a repeatable 0–127 sweep (true), discrete (false) or not stated (null/absent). Only true makes a CC eligible for modulation. `behavior` is the richer statement and is kept in agreement with it (derive `continuous` before saving: see lib/knowledge.ts). */
+export interface CcDef {
+  cc: number; name: string; value_semantics?: string | null; evidence: Evidence; continuous?: boolean | null;
+  behavior?: ControlBehavior | null;
+  min_value?: number | null; max_value?: number | null;
+  citation?: SourceCitation | null;
+  mapping?: ControlMapping; factory_cc?: number | null;
+  hardware_status?: HardwareStatus; hardware_note?: string | null;
+  /** null/absent = reviewed (legacy or hand-entered); "proposed" = came from PDF text and awaits a human. */
+  review_status?: ReviewStatus | null;
+  notes?: string | null;
+}
+export type NoteCategory = "presets" | "modes" | "midi_setup" | "global_settings" | "startup" | "firmware" | "troubleshooting" | "technique" | "other";
+/** A Quick Reference note: on a profile it describes the model, on a placed instance that one unit. */
+export interface DeviceNote {
+  id: string; title: string; body: string; category: NoteCategory; steps: string[]; references: SourceCitation[];
+  evidence: Evidence; source_note?: string | null; pinned: boolean; created_at?: string | null; updated_at?: string | null;
+}
+/** A control proposed from one page's text (`GET /api/documents/{id}/pages/{n}/proposals`): a CcDef plus the matched snippet; always `review_status: "proposed"`. */
+export interface ControlProposal extends CcDef { snippet: string }
+export interface ControlSceneUse { rig_id: string; rig_name: string; scene_id: string; scene_name: string; instance_id: string; instance_label: string; value: number; command: string | null }
+export interface ControlTextureUse { rig_id: string; rig_name: string; texture_id: string; texture_name: string; macro_name: string; instance_id: string; instance_label: string; output_min: number; output_max: number; enabled: boolean }
+export type ControlUsage = Record<string, { scenes: ControlSceneUse[]; textures: ControlTextureUse[] }>;
+/** A placed unit that shares a profile: profile-level claims (hardware status, remapping) apply to every one of them. */
+export interface ProfileUnit { rig_id: string; rig_name: string; instance_id: string; instance_label: string }
+export interface ControlUsageReport { controls: ControlUsage; units: ProfileUnit[] }
 
 /** A user-supplied PDF attached to a profile, by reference only (bytes live in the local document store). */
 export type DocumentKind = "manual" | "quick_start" | "midi_chart" | "other";
@@ -72,7 +105,7 @@ export type ValueMode = "fixed" | "choice" | "any";
 export type CommandIntent = "engage" | "bypass" | "set" | "toggle" | "recall" | "other";
 export const COMMAND_INTENTS: CommandIntent[] = ["engage", "bypass", "set", "toggle", "recall", "other"];
 export interface ValueChoice { value: number; label: string }
-export interface CommandCitation { document_id: string; page?: number | null; note?: string | null }
+export type CommandCitation = SourceCitation;
 export interface MidiCommand {
   id: string; name: string; category?: string | null; tags: string[]; description?: string | null; favorite: boolean;
   kind: CommandKind;
@@ -125,6 +158,8 @@ export interface DeviceProfile {
   };
   /** Attached PDF documents by reference; absent on older profiles. */
   documents?: DocumentRef[];
+  /** Model-level Quick Reference notes (Session 6); absent on older profiles. */
+  quick_reference?: DeviceNote[];
   capabilities: { bypass_method?: string | null; patch_selection?: string | null; params_via_midi?: boolean | null; is_stereo?: boolean | null; notes?: string | null };
   declared_unknowns: string[];
   tags: string[];
@@ -169,6 +204,8 @@ export interface DeviceInstance {
   /** Selected voltage per selectable outlet (port id → V) on a power supply. */
   supply_settings?: Record<string, number>;
   image?: DeviceImage | null; notes?: string | null;
+  /** Quick Reference notes about this one unit (Session 6); absent on older rigs. */
+  quick_reference?: DeviceNote[];
 }
 export interface PortRef { instance_id: string; port_id: string }
 export interface Connection {

@@ -12,7 +12,10 @@ import { enclosureFill } from "@/lib/boardLayout";
 import { SURFACES, SURFACE_LABEL, setSurface, surfaceOf } from "@/lib/mounting";
 import type { Surface } from "@/lib/types";
 import { useState } from "react";
-import type { PortDef } from "@/lib/types";
+import Link from "next/link";
+import type { DeviceNote, PortDef } from "@/lib/types";
+import { NotesPane } from "@/components/workbench/NotesPane";
+import { citableDocuments } from "@/lib/knowledge";
 
 export function InstanceInspector() {
   const { rig, analysis, profiles, selectedInstanceId, update, removeInstance, refreshCatalog, reanalyze } = useRigStore();
@@ -66,6 +69,32 @@ export function InstanceInspector() {
           </div>
         </div>
         <Field label="Notes"><textarea rows={2} value={inst.notes ?? ""} onChange={(e) => edit((i) => { i.notes = e.target.value || null; })} /></Field>
+        {profile && (
+          <div className="flex flex-col gap-2 border border-line rounded p-2" data-testid="unit-knowledge">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="font-semibold">Quick Reference</h3>
+              <Link href={`/catalog/${encodeURIComponent(profile.id)}/workbench`} className="underline text-neutral-600 ml-auto" data-testid="inspector-workbench-link">Knowledge Workbench ↗</Link>
+            </div>
+            {(profile.quick_reference ?? []).filter((n) => n.pinned).length > 0 ? (
+              <ul className="flex flex-col gap-1" data-testid="pinned-model-notes">
+                {(profile.quick_reference ?? []).filter((n) => n.pinned).map((n) => (
+                  <li key={n.id} className="rounded border border-line bg-neutral-50 px-2 py-1">
+                    <div className="flex items-center gap-1"><span className="text-amber-500">★</span><b>{n.title}</b><span className="text-neutral-400 text-[10px] ml-auto">every {profile.model}</span></div>
+                    {n.body && <p className="text-neutral-700 whitespace-pre-wrap">{n.body}</p>}
+                    {n.steps.length > 0 && <ol className="list-decimal pl-4 text-neutral-800">{n.steps.map((st, i) => <li key={i}>{st}</li>)}</ol>}
+                  </li>
+                ))}
+              </ul>
+            ) : <p className="text-[11px] text-neutral-500">Pinned notes about every {profile.model} (how to save a preset, set the channel…) appear here once you pin them in the Workbench.</p>}
+            <details data-testid="unit-notes-details" open={(inst.quick_reference ?? []).length > 0}>
+              <summary className="cursor-pointer text-neutral-600">This unit only ({(inst.quick_reference ?? []).length}) — its channel setting, a global mode, a quirk of this one pedal</summary>
+              <div className="mt-2">
+                <NotesPane compact notes={inst.quick_reference ?? []} docs={citableDocuments(profile)} reference={null} cite={null} spawn={null} scopeLabel={`this ${inst.label}`}
+                  onSave={async (next: DeviceNote[]) => { edit((i) => { i.quick_reference = next; }); return true; }} />
+              </div>
+            </details>
+          </div>
+        )}
         {geo?.unknowns.length ? (
           <div>
             <span className="text-neutral-600">Unknown / unverified on this profile: </span>

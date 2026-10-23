@@ -8,7 +8,7 @@ from typing import Literal
 from pydantic import Field, model_validator
 
 from .common import Rotation, SignalKind, StrictModel, new_id
-from .profile import DeviceImage, PortDef
+from .profile import DeviceImage, DeviceNote, PortDef, unique_note_ids
 from .texture import Texture
 
 # Where a device is mounted. "top": on the board's upper surface; "underside": under the board,
@@ -67,9 +67,13 @@ class DeviceInstance(StrictModel):
     # profile's image is used. Never affects geometry.
     image: DeviceImage | None = None
     notes: str | None = None
+    # Quick Reference notes about *this* unit (its MIDI channel setting, a global mode it is in, a
+    # quirk of this one pedal). Model-level notes live on the profile. Empty on older rigs.
+    quick_reference: list[DeviceNote] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _surface_and_flag_agree(self) -> DeviceInstance:
+        unique_note_ids(self.quick_reference)
         # An explicit surface is the user's statement; the legacy flag follows it so code that still
         # reads ``off_board`` sees the same fact. A missing surface leaves the flag exactly as saved.
         if self.surface is not None:
