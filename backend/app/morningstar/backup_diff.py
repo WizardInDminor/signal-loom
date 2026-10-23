@@ -137,3 +137,18 @@ def diff_backups(raw_a: str, raw_b: str) -> dict:
     }
     report["ok"] = True
     return report
+
+
+def diff_objects(a: Any, b: Any, root: str = "bank") -> list[dict]:
+    """Structural diff of two already-parsed JSON objects, labelled like ``diff_backups``.
+
+    Used by the bridge to show exactly what a proposed modification changes against the native
+    snapshot. Paths are returned as strings; ``label`` names MC8 presets, message slots and
+    ML10X presets the way the file-level diff does.
+    """
+    changes: list[dict] = []
+    _walk(a, b, [root], a, changes)
+    for c in changes:
+        c["label"] = _label_path(c["path"], {root: a} if c["change"] != "added" else {root: b})
+        c["path"] = [str(p) for p in c["path"]]
+    return changes

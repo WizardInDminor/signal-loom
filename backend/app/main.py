@@ -15,6 +15,7 @@ from .api import catalog as catalog_api
 from .api import documents as documents_api
 from .api import exports as exports_api
 from .api import live as live_api
+from .api import morningstar as morningstar_api
 from .api import rigs as rigs_api
 from .assets import AssetStore, default_assets_dir
 from .catalog.builtin import builtin_profiles
@@ -78,6 +79,7 @@ def create_app(db_path: Path | str | None = None) -> FastAPI:
     app.include_router(assets_api.router)
     app.include_router(documents_api.router)
     app.include_router(live_api.router)
+    app.include_router(morningstar_api.router)
 
     @app.get("/api/health")
     def health() -> dict:
