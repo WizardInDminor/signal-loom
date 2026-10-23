@@ -12,7 +12,7 @@ comes from, and, separately and only by hand, whether it was tried on the real p
 another* keeps the page open and the next row ready. **Quick Reference** notes (how to save a preset,
 set the channel, startup shortcuts, fixes) take steps and page references and can be pinned; pinned
 notes show up next to the placed pedal on the Board, where notes about *that one unit* live too.
-Reviewed controls are offered by name in the Scene editor and labelled in the Texture picker;
+Hardware verification and remapping are recorded on the profile and shown as statements about every unit placed with it; a list of controls never declares how MIDI reaches the pedal (that stays the user's explicit statement). Reviewed controls are offered by name in the Scene editor and labelled in the Texture picker;
 proposals read from a page's text stay *proposed* until reviewed and are offered nowhere. Saved
 scenes and textures never change when a control is edited, nothing in the workbench sends MIDI, and
 project files carry the knowledge (and, on request, the cited PDFs).
