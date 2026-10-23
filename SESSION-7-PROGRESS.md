@@ -68,3 +68,26 @@ Checkpoints for the parallel build. Branch `feature/morningstar-bridge` from `ma
 
 Not achieved (by design of the charter): loading a Signal Loom-written file into the Morningstar
 editor or an MC8; decoding the ML10X routing matrix; any ML10X native export; any hardware interaction.
+
+## Integration checkpoint — `main` 5502911 merged (PR #11 Workbench, PR #12 Operating Model)
+
+- `git merge origin/main` into `feature/morningstar-bridge` → merge commit `ecad98c`, **no conflicts**
+  (Team A's files and the bridge's files are disjoint; `layout.tsx` carries both nav changes).
+- Read root `CLAUDE.md`, `docs/engineering/OPERATING-MODEL.md`, `docs/engineering/HANDOFF-TEMPLATE.md`,
+  `docs/verification-register.md`. Adopted for the rest of the sprint: Team B ownership boundary
+  (Morningstar native formats), handoff document with all six sections, verification IDs with
+  `SW-PASS` only for software evidence, editor acceptance kept separate from device acceptance,
+  no autonomous merge.
+- Added: `SESSION-7-HANDOFF.md` (linked from PR #14), Verification Register section "Session 7"
+  (S7-S01…S06 `SW-PASS`, S7-E01…E03 `OPEN`, S7-H01 `DEFERRED`, F-Q14 `BLOCKED`).
+- Plan changes: none to the deliverables. Documentation deliverables extended by the handoff and the
+  register entries; `SESSION-7-PLAN.md` amended accordingly.
+
+### Re-verification on the merged tree (head `ecad98c` + docs)
+
+| Check | Command | Result |
+|---|---|---|
+| Backend lint | `ruff check app tests && ruff format --check app tests` | clean |
+| Backend tests | `python -m pytest -q` | **270 passed** (256 before the merge + Team A's 14) |
+| Frontend | `npm ci && npm run lint && npm run typecheck && npm run build` | clean; `/morningstar` and `/catalog/[id]/workbench` both build |
+| Full e2e | production build, scratch DB, :8017/:3017, `npx playwright test` | **57 passed** in 2.3 min (48 existing + 5 bridge + 4 workbench) |
