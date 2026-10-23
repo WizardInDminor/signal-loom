@@ -174,6 +174,7 @@ export function ReferencePane({ profile, state, onChange, editing, onCite, onSpa
             <p className="font-medium">No manual attached to this pedal yet.</p>
             <p className="text-xs text-neutral-600">Upload the manufacturer&apos;s manual or MIDI implementation chart as a PDF. It stays on this computer; pages are shown as pictures, so nothing inside the PDF can run.</p>
             <UploadControls title={uploadTitle} kind={uploadKind} busy={uploading} onTitle={setUploadTitle} onKind={setUploadKind} onPick={() => fileRef.current?.click()} />
+            {error && <p role="alert" className="text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1" data-testid="reference-error">{error}</p>}
           </div>
         )}
         {doc && !file?.present && (
@@ -181,6 +182,7 @@ export function ReferencePane({ profile, state, onChange, editing, onCite, onSpa
             <p className="font-medium text-amber-900">“{doc.title}” is not on this computer.</p>
             <p className="text-xs text-neutral-600">The profile was imported without its files. Page references you entered are kept; upload the same PDF again to read it here (the reference keeps its id, so citations stay valid).</p>
             <div><Button variant="primary" disabled={uploading} onClick={() => replaceRef.current?.click()}>{uploading ? "Uploading…" : "Upload this PDF again"}</Button></div>
+            {error && <p role="alert" className="text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1" data-testid="reference-error">{error}</p>}
           </div>
         )}
         {doc && file?.present && (

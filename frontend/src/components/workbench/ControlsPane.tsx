@@ -26,7 +26,9 @@ export function ControlsPane({ profile, reference, cite, spawn, onSave, onEditin
   const docs = citableDocuments(profile);
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<ControlFilter>("all");
-  const [editing, setEditing] = useState<{ draft: CcDef; originalCc: number | null } | null>(null);
+  // `seq` remounts the form on every new draft (React would otherwise keep the previous draft's state).
+  const [editing, setEditing] = useState<{ draft: CcDef; originalCc: number | null; seq: number } | null>(null);
+  const seq = useRef(0);
   const [usage, setUsage] = useState<ControlUsage | null>(null);
   const [busy, setBusy] = useState(false);
   const addRef = useRef<HTMLButtonElement>(null);
@@ -42,11 +44,11 @@ export function ControlsPane({ profile, reference, cite, spawn, onSave, onEditin
   useEffect(() => {
     if (spawn && spawn.kind === "control" && spawn.seq !== lastSpawn.current) {
       lastSpawn.current = spawn.seq;
-      setEditing({ draft: blankControl(nextFreeCc(list), spawn.citation), originalCc: null });
+      setEditing({ draft: blankControl(nextFreeCc(list), spawn.citation), originalCc: null, seq: ++seq.current });
     }
   }, [spawn, list]);
 
-  const startNew = (citation: SourceCitation | null = null) => setEditing({ draft: blankControl(nextFreeCc(list), citation), originalCc: null });
+  const startNew = (citation: SourceCitation | null = null) => setEditing({ draft: blankControl(nextFreeCc(list), citation), originalCc: null, seq: ++seq.current });
   const currentCitation = (): SourceCitation | null => (reference.docId ? { document_id: reference.docId, page: reference.page, note: null } : null);
 
   const commit = async (draft: CcDef, addAnother: boolean) => {
@@ -58,7 +60,7 @@ export function ControlsPane({ profile, reference, cite, spawn, onSave, onEditin
     setBusy(false);
     if (!ok) return;
     if (addAnother) {
-      setEditing({ draft: blankControl(nextFreeCc(next, clean.cc + 1), clean.citation ? { ...clean.citation, note: null } : null), originalCc: null });
+      setEditing({ draft: blankControl(nextFreeCc(next, clean.cc + 1), clean.citation ? { ...clean.citation, note: null } : null), originalCc: null, seq: ++seq.current });
     } else {
       setEditing(null);
       setTimeout(() => addRef.current?.focus(), 0);
@@ -98,7 +100,7 @@ export function ControlsPane({ profile, reference, cite, spawn, onSave, onEditin
       </div>
       <div className="flex-1 min-h-0 overflow-auto px-3 sm:px-4 py-2">
         {editing && editing.originalCc === null && (
-          <ControlForm key="new" profile={profile} docs={docs} value={editing.draft} isNew busy={busy} reference={reference} cite={cite} usage={null}
+          <ControlForm key={`new-${editing.seq}`} profile={profile} docs={docs} value={editing.draft} isNew busy={busy} reference={reference} cite={cite} usage={null}
             onCancel={() => setEditing(null)} onSave={(d, more) => void commit(d, more)} onDelete={null} onGoToPage={onGoToPage} others={list} />
         )}
         {!list.length && !editing && (
@@ -116,10 +118,10 @@ export function ControlsPane({ profile, reference, cite, spawn, onSave, onEditin
             return (
               <li key={c.cc} data-testid={`control-cc-${c.cc}`} data-behavior={behaviorOf(c) ?? ""} data-review={c.review_status ?? "reviewed"}>
                 {open && editing ? (
-                  <ControlForm profile={profile} docs={docs} value={editing.draft} isNew={false} busy={busy} reference={reference} cite={cite} usage={u ?? null}
+                  <ControlForm key={`edit-${editing.seq}`} profile={profile} docs={docs} value={editing.draft} isNew={false} busy={busy} reference={reference} cite={cite} usage={u ?? null}
                     onCancel={() => setEditing(null)} onSave={(d, more) => void commit(d, more)} onDelete={() => void remove(c.cc)} onGoToPage={onGoToPage} others={list.filter((x) => x.cc !== c.cc)} />
                 ) : (
-                  <ControlRow c={c} docs={docs} uses={uses} disabled={busy} onOpen={() => setEditing({ draft: structuredClone(c), originalCc: c.cc })} onGoToPage={onGoToPage} />
+                  <ControlRow c={c} docs={docs} uses={uses} disabled={busy} onOpen={() => setEditing({ draft: structuredClone(c), originalCc: c.cc, seq: ++seq.current })} onGoToPage={onGoToPage} />
                 )}
               </li>
             );

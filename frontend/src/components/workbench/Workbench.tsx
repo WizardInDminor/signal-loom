@@ -29,7 +29,9 @@ export function Workbench({ initial }: { initial: DeviceProfile }) {
     const p = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
     const docId = p?.get("doc"), page = Number(p?.get("page"));
     const known = docId && (initial.documents ?? []).some((d) => d.document_id === docId) ? docId : null;
-    return { docId: known ?? initial.documents?.[0]?.document_id ?? null, page: known && page >= 1 ? page : 1, zoom: "fit" };
+    const first = initial.documents?.[0]?.document_id ?? null;
+    // `?page=N` alone applies to the first document; a page of a document that is not attached is ignored.
+    return { docId: known ?? first, page: (known || (!docId && first)) && page >= 1 ? page : 1, zoom: "fit" };
   });
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [saveError, setSaveError] = useState<string | null>(null);

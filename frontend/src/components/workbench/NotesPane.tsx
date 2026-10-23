@@ -27,12 +27,15 @@ export function NotesPane({ notes, docs, reference, cite, spawn, scopeLabel, onS
   const [q, setQ] = useState("");
   const [editing, setEditing] = useState<DeviceNote | null>(null);
   const [busy, setBusy] = useState(false);
+  const formSeq = useRef(0);
+  const open = (n: DeviceNote | null) => { formSeq.current++; setEditing(n); };
   const addRef = useRef<HTMLButtonElement>(null);
   useEffect(() => { onEditing?.(!!editing); }, [editing, onEditing]);
   const lastSpawn = useRef(0);
   useEffect(() => {
     if (spawn && spawn.kind === "note" && spawn.seq !== lastSpawn.current) {
       lastSpawn.current = spawn.seq;
+      formSeq.current++;
       setEditing(blankNote("other", spawn.citation));
     }
   }, [spawn]);
@@ -46,8 +49,8 @@ export function NotesPane({ notes, docs, reference, cite, spawn, scopeLabel, onS
     const ok = await onSave(next);
     setBusy(false);
     if (!ok) return;
-    if (addAnother) setEditing(blankNote(clean.category, clean.references[0] ? { ...clean.references[0], note: null } : null));
-    else { setEditing(null); setTimeout(() => addRef.current?.focus(), 0); }
+    if (addAnother) open(blankNote(clean.category, clean.references[0] ? { ...clean.references[0], note: null } : null));
+    else { open(null); setTimeout(() => addRef.current?.focus(), 0); }
   };
   const togglePin = async (n: DeviceNote) => { setBusy(true); await onSave(notes.map((x) => (x.id === n.id ? { ...x, pinned: !x.pinned } : x))); setBusy(false); };
   const remove = async (n: DeviceNote) => {
@@ -66,10 +69,10 @@ export function NotesPane({ notes, docs, reference, cite, spawn, scopeLabel, onS
       <div className={`flex flex-wrap items-center gap-2 ${compact ? "" : "px-3 sm:px-4 py-2 border-b border-line bg-panel"}`}>
         {notes.length > 2 && <input aria-label="Search notes" placeholder="Search notes…" className="flex-1 min-w-[140px]" value={q} onChange={(e) => setQ(e.target.value)} />}
         {!compact && notes.length <= 2 && <span className="text-xs text-neutral-500 flex-1">What you would otherwise have to look up again: saving presets, modes, the MIDI channel, startup shortcuts, fixes, discoveries.</span>}
-        <Button ref={addRef} variant="primary" onClick={() => setEditing(blankNote("other", currentCitation()))} disabled={busy || isNew} data-testid="note-add" title={`Add a note about ${scopeLabel}`}>+ Note</Button>
+        <Button ref={addRef} variant="primary" onClick={() => open(blankNote("other", currentCitation()))} disabled={busy || isNew} data-testid="note-add" title={`Add a note about ${scopeLabel}`}>+ Note</Button>
       </div>
       <div className={compact ? "flex flex-col gap-1" : "flex-1 min-h-0 overflow-auto px-3 sm:px-4 py-2 flex flex-col gap-1"}>
-        {editing && isNew && <NoteForm key="new" value={editing} docs={docs} reference={reference} cite={cite} busy={busy} isNew onCancel={() => setEditing(null)} onSave={(n, more) => void commit(n, more)} onDelete={null} onGoToPage={onGoToPage} />}
+        {editing && isNew && <NoteForm key={`new-${formSeq.current}`} value={editing} docs={docs} reference={reference} cite={cite} busy={busy} isNew onCancel={() => setEditing(null)} onSave={(n, more) => void commit(n, more)} onDelete={null} onGoToPage={onGoToPage} />}
         {!notes.length && !editing && (
           <div className="rounded-md border border-dashed border-line p-4 text-sm text-neutral-600 flex flex-col gap-1" data-testid="notes-empty">
             <p className="font-medium text-neutral-800">No notes about {scopeLabel} yet.</p>
@@ -78,9 +81,9 @@ export function NotesPane({ notes, docs, reference, cite, spawn, scopeLabel, onS
         )}
         {!!notes.length && !shown.length && <p className="text-xs text-neutral-500 py-2">No note matches “{q}”.</p>}
         {pinned.length > 0 && <div className="text-[11px] uppercase tracking-wide text-neutral-500 mt-1">Pinned</div>}
-        {pinned.map((n) => <NoteItem key={n.id} n={n} docs={docs} busy={busy} editing={editing?.id === n.id ? editing : null} reference={reference} cite={cite} onEdit={() => setEditing(structuredClone(n))} onCancel={() => setEditing(null)} onSave={(x, more) => void commit(x, more)} onDelete={() => void remove(n)} onPin={() => void togglePin(n)} onGoToPage={onGoToPage} />)}
+        {pinned.map((n) => <NoteItem key={n.id} n={n} docs={docs} busy={busy} editing={editing?.id === n.id ? editing : null} reference={reference} cite={cite} onEdit={() => open(structuredClone(n))} onCancel={() => setEditing(null)} onSave={(x, more) => void commit(x, more)} onDelete={() => void remove(n)} onPin={() => void togglePin(n)} onGoToPage={onGoToPage} />)}
         {pinned.length > 0 && rest.length > 0 && <div className="text-[11px] uppercase tracking-wide text-neutral-500 mt-2">All notes</div>}
-        {rest.map((n) => <NoteItem key={n.id} n={n} docs={docs} busy={busy} editing={editing?.id === n.id ? editing : null} reference={reference} cite={cite} onEdit={() => setEditing(structuredClone(n))} onCancel={() => setEditing(null)} onSave={(x, more) => void commit(x, more)} onDelete={() => void remove(n)} onPin={() => void togglePin(n)} onGoToPage={onGoToPage} />)}
+        {rest.map((n) => <NoteItem key={n.id} n={n} docs={docs} busy={busy} editing={editing?.id === n.id ? editing : null} reference={reference} cite={cite} onEdit={() => open(structuredClone(n))} onCancel={() => setEditing(null)} onSave={(x, more) => void commit(x, more)} onDelete={() => void remove(n)} onPin={() => void togglePin(n)} onGoToPage={onGoToPage} />)}
       </div>
     </div>
   );
@@ -90,7 +93,7 @@ function NoteItem({ n, docs, busy, editing, reference, cite, onEdit, onCancel, o
   n: DeviceNote; docs: DocumentRef[]; busy: boolean; editing: DeviceNote | null; reference: ReferenceState | null; cite: CiteRequest | null;
   onEdit: () => void; onCancel: () => void; onSave: (n: DeviceNote, more: boolean) => void; onDelete: () => void; onPin: () => void; onGoToPage?: (c: SourceCitation) => void;
 }) {
-  if (editing) return <NoteForm value={editing} docs={docs} reference={reference} cite={cite} busy={busy} isNew={false} onCancel={onCancel} onSave={onSave} onDelete={onDelete} onGoToPage={onGoToPage} />;
+  if (editing) return <NoteForm key={editing.id} value={editing} docs={docs} reference={reference} cite={cite} busy={busy} isNew={false} onCancel={onCancel} onSave={onSave} onDelete={onDelete} onGoToPage={onGoToPage} />;
   return (
     <article className="rounded-md border border-line bg-panel px-2.5 py-2 flex flex-col gap-1 text-xs" data-testid={`note-${n.id}`} data-pinned={n.pinned}>
       <div className="flex items-start gap-2">
