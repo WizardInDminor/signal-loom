@@ -65,7 +65,7 @@ test("instrument: the Undertow journey — preview without sends, two opposite d
   await expect(mapA).toHaveAttribute("data-eligible", "true");
   await expect(mapA).toContainText("macro 0 → 100");
   await expect(mapA).toContainText("1 → 30");
-  await expect(mapB).toContainText("rises with the macro");
+  await expect(mapB).toContainText("rises 15 → 110 as Bloom rises");
   await expect(mapB).toContainText("macro 0 → 15");
   await expect(mapB).toContainText("1 → 110");
   // Move the macro by keyboard with the LFO off: the two values move in opposite directions.
@@ -87,7 +87,7 @@ test("instrument: the Undertow journey — preview without sends, two opposite d
   const depth = page.getByTestId("lfo-depth-macro_bloom");
   await depth.focus();
   await page.keyboard.press("End");
-  await expect(page.getByTestId("texture-header")).toContainText("Depth 100%");
+  await expect(page.getByTestId("macro-macro_bloom")).toContainText("Depth 100%");
   await expect(page.getByTestId("save-state")).toHaveText("Saved", { timeout: 10_000 });
   // All of that transmitted nothing, and the engine is idle.
   expect(await sentOrQueued(page, rigId)).toBe(0);
@@ -161,7 +161,7 @@ test("instrument: the Undertow journey — preview without sends, two opposite d
   await expect(page.getByTestId("instrument-tab")).toBeVisible({ timeout: 15_000 });
   await expect(page.getByTestId("texture-name")).toHaveValue("Undertow (evening)");
   await expect(page.getByTestId("texture-bpm")).toHaveValue("120");
-  await expect(page.getByTestId("texture-header")).toContainText("Depth 100%");
+  await expect(page.getByTestId("macro-macro_bloom")).toContainText("Depth 100%");
   await expect(page.getByTestId("macro-effective-macro_bloom")).toHaveText("effective 100%");
   const saved = await (await page.request.get(`/api/rigs/${rigId}`)).json();
   expect(saved.textures[0].macros[0].base).toBe(1);
@@ -250,12 +250,17 @@ test("instrument: on a real rig unknown CCs are not controllable, bypass CCs are
   await expect(page.getByTestId("texture-name")).toHaveValue("Fracture");
   await expect(page.getByTestId("save-state")).toHaveText("Saved", { timeout: 10_000 });
   const macroId = (await (await page.request.get(`/api/rigs/${rigId}`)).json()).textures[0].macros[0].id as string;
-  // Sunset CC 100 ("Expression (unverified)") is offered as "not stated" and refused once added.
+  // Sunset CC 100 ("Expression (unverified)") is offered as "not stated" in the finder; added through
+  // the "Any CC number…" form with an inverse range, it is refused by the backend until declared.
   await page.getByTestId(`mapping-add-${macroId}`).click();
-  await page.getByTestId("mapping-add-form").getByLabel("Destination device").selectOption({ label: "Sunset" });
-  await page.getByTestId("mapping-add-form").getByLabel("Destination CC").selectOption("100");
-  await page.getByTestId("mapping-add-form").getByLabel("Range from").fill("127");
-  await page.getByTestId("mapping-add-form").getByLabel("Range to").fill("0");
+  const sunsetInst = (await (await page.request.get(`/api/rigs/${rigId}`)).json()).instances.find((i: { label: string }) => i.label === "Sunset").id as string;
+  await expect(page.getByTestId(`finder-control-${sunsetInst}-100`)).toHaveAttribute("data-offer", "declare");
+  await page.getByTestId("finder-advanced-toggle").click();
+  const form = page.getByTestId("mapping-add-form");
+  await form.getByLabel("Destination device").selectOption({ label: "Sunset" });
+  await form.getByLabel("Custom CC number").fill("100");
+  await form.getByLabel("Range from").fill("127");
+  await form.getByLabel("Range to").fill("0");
   await page.getByTestId("mapping-add-confirm").click();
   const row = page.getByTestId("patch-bay").locator('li[data-testid^="mapping-map_"]').first();
   await expect(row).toHaveAttribute("data-eligible", "false", { timeout: 10_000 });
@@ -264,29 +269,33 @@ test("instrument: on a real rig unknown CCs are not controllable, bypass CCs are
   await expect(page.getByTestId("perf-not-controllable")).toBeVisible();
   await expect(page.getByTestId("perf-not-controllable")).toContainText("Not yet controllable");
   await expect(page.getByTestId("perf-create-demo")).toBeVisible();
-  // The hardware-verified Sunset bypass CC 15 is a switch: refused outright, no override offered.
-  await page.getByTestId(`mapping-add-${macroId}`).click();
-  await page.getByTestId("mapping-add-form").getByLabel("Destination device").selectOption({ label: "Sunset" });
-  await page.getByTestId("mapping-add-form").getByLabel("Destination CC").selectOption("15");
+  // The hardware-verified Sunset bypass CC 15 is a switch: the finder offers no Map button for it,
+  // and added by number anyway it is refused outright, no override offered.
+  await expect(page.getByTestId(`finder-control-${sunsetInst}-15`)).toHaveAttribute("data-offer", "refused");
+  await expect(page.getByTestId(`finder-map-${sunsetInst}-15`)).toHaveCount(0);
+  await form.getByLabel("Custom CC number").fill("15");
+  await form.getByLabel("Range from").fill("0");
+  await form.getByLabel("Range to").fill("127");
   await page.getByTestId("mapping-add-confirm").click();
   const bypassRow = page.getByTestId("patch-bay").locator('li[data-testid^="mapping-map_"]').nth(1);
   await expect(bypassRow).toHaveAttribute("data-eligible", "false", { timeout: 10_000 });
   await expect(bypassRow).toContainText("bypass");
   await expect(bypassRow.getByRole("button", { name: "Declare with note" })).toHaveCount(0);
-  // BigSky CC 100 is documented continuous: eligible, with the honest "not hardware-verified" note.
-  await page.getByTestId(`mapping-add-${macroId}`).click();
-  await page.getByTestId("mapping-add-form").getByLabel("Destination device").selectOption({ label: "BigSky MX" });
-  await page.getByTestId("mapping-add-form").getByLabel("Destination CC").selectOption("100");
-  await page.getByTestId("mapping-add-confirm").click();
+  // BigSky CC 100 is documented continuous: the finder maps it in one click; eligible, with the
+  // honest "not hardware-verified" note.
+  const bigskyInst = (await (await page.request.get(`/api/rigs/${rigId}`)).json()).instances.find((i: { label: string }) => i.label === "BigSky MX").id as string;
+  await expect(page.getByTestId(`finder-control-${bigskyInst}-100`)).toHaveAttribute("data-offer", "sweep");
+  await page.getByTestId(`finder-map-${bigskyInst}-100`).click();
   const bigsky = page.getByTestId("patch-bay").locator('li[data-testid^="mapping-map_"]').nth(2);
   await expect(bigsky).toHaveAttribute("data-eligible", "true", { timeout: 10_000 });
   await expect(bigsky).toContainText("documented continuous");
   await expect(bigsky).toContainText("not hardware-verified");
-  // A second active destination on the same control (BigSky CC 100 again) is a conflict: both rows
-  // say so, Start would be refused, and nothing is chosen for the user; removing one repairs it.
-  await page.getByTestId(`mapping-add-${macroId}`).click();
-  await page.getByTestId("mapping-add-form").getByLabel("Destination device").selectOption({ label: "BigSky MX" });
-  await page.getByTestId("mapping-add-form").getByLabel("Destination CC").selectOption("100");
+  // A second active destination on the same control (BigSky CC 100 again; the finder now says
+  // "mapped", so it goes in by number) is a conflict: both rows say so, Start would be refused, and
+  // nothing is chosen for the user; removing one repairs it.
+  await expect(page.getByTestId(`finder-map-${bigskyInst}-100`)).toBeDisabled();
+  await form.getByLabel("Destination device").selectOption({ label: "BigSky MX" });
+  await form.getByLabel("Custom CC number").fill("100");
   await page.getByTestId("mapping-add-confirm").click();
   const dup = page.getByTestId("patch-bay").locator('li[data-testid^="mapping-map_"]').nth(3);
   await expect(dup).toHaveAttribute("data-conflict", "true", { timeout: 10_000 });

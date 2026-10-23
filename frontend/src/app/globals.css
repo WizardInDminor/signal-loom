@@ -82,3 +82,8 @@ table th { font-weight: 500; }
 @keyframes wb-loading { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 .wb-loading { transform-origin: left; animation: wb-loading 0.9s ease-out infinite; }
 @media (prefers-reduced-motion: reduce) { .wb-loading { animation: none; } }
+
+/* Instrument Studio: patch cords drift while a preview value moves; static under reduced motion. */
+@keyframes inst-cord { to { stroke-dashoffset: -24; } }
+.inst-cord { animation: inst-cord 1.4s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .inst-cord { animation: none; } }
