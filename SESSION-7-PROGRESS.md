@@ -91,3 +91,22 @@ editor or an MC8; decoding the ML10X routing matrix; any ML10X native export; an
 | Backend tests | `python -m pytest -q` | **270 passed** (256 before the merge + Team A's 14) |
 | Frontend | `npm ci && npm run lint && npm run typecheck && npm run build` | clean; `/morningstar` and `/catalog/[id]/workbench` both build |
 | Full e2e | production build, scratch DB, :8017/:3017, `npx playwright test` | **57 passed** in 2.3 min (48 existing + 5 bridge + 4 workbench) |
+
+## Review checkpoint — proposal gate corrections (commit `747a7de`)
+
+Team B review asked for three corrections to `mc8_native.propose`, applied without new features and
+without touching the ML10X export prohibition:
+
+1. A missing or mismatched integrity hash now refuses the proposal with a diagnostic (no re-hashing of
+   an unverifiable input). Inspection and compare of such files stay available.
+2. A `schemaVersion` other than the fixture-validated 1 refuses the proposal instead of being rewritten.
+3. `preserved.byte_identical_to_input` compares the actual output text with the input text.
+
+The proposal panel shows the refusal up front and disables *Review*. Regression tests: three backend
+cases, one API 422 case, one browser case. Docs: handoff §2/§4/§6, bridge doc §1/§4, register S7-S07.
+
+| Check | Command | Result |
+|---|---|---|
+| Backend lint + tests | `ruff check/format --check` · `pytest -q` | clean · **273 passed** (+3) |
+| Frontend | `npm run lint && npm run typecheck`; production build for e2e | clean |
+| Bridge e2e | `npx playwright test e2e/morningstar.spec.ts` (scratch DB, :8017/:3017) | **6 passed** (+1) |
