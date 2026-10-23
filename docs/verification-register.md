@@ -106,7 +106,7 @@ Evidence: [design and delivery note](midi-knowledge-workbench.md), branch `featu
 
 | F-Q10 | **OPEN** | `UX-ML10X-01`: direct typed ML10X preset numbers, commit-once move, explicit collision handling, stable assignments and regressions |
 | F-Q11 | **OPEN** | `UX-LIBRARY-01`: Device Library search query sometimes shows unfiltered catalog; preserve query/async results, add browser regressions |
-| F-Q12 | **DEFERRED** | `UX-INSTRUMENT-01`: category suggestions and multiple pedal functions for richer whole-rig view; keep assignments user-correctable |
+| F-Q12 | **PARTIAL (SW-PASS)** | `UX-INSTRUMENT-01`: Instrument Studio (A-02, `docs/instrument-studio.md`) adds user-correctable function suggestions with their basis for pedals under *Other* (model-name hints, documented control names; *Use* / *Keep Other* stored per texture), a control finder by musical name with Session 6 evidence (behaviour, range, page, hardware status, review state), direction-coloured cords, a range rail with Flip, and live preview values; browser regressions in `frontend/e2e/instrument-studio.spec.ts`. Still open: multiple functions per pedal (one role per texture is the model), owner run on the real Volante/Collider profiles |
 
 | F-Q13 | **SW-PASS — owner full-backup restore** | PR #8 added complete photo + PDF bundles; PR #10 fixed fresh-seed profile-ID collisions without modifying existing definitions. Real Windows owner recovery confirms all 9 pedal images visible after importing complete Test Board backup; two profile remap notices are intentional, not missing-file warnings. Export audited for 2 embedded PDFs; import/asset regression suite CI passed. Remaining optional confidence check: open each restored PDF in Device Library. No live hardware was tested |
 

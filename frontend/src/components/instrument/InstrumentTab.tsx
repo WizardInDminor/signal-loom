@@ -14,9 +14,10 @@ import { usePreviewClock } from "./usePreviewClock";
 
 /**
  * Instrument: play the whole rig as one evolving instrument. A Texture names a musical idea; one
- * macro moves several pedals' continuous controls through independent ranges; a tempo-related
- * triangle LFO breathes on top. Everything on this tab is a preview until the explicit
- * connect → arm → Start performance gesture in the panel below, and Stop is always one click away.
+ * macro (the source of the patch) moves several pedals' documented controls through independent
+ * ranges; a tempo-related triangle LFO breathes on top. Everything on this tab is a preview until
+ * the explicit connect → arm → Start performance gesture in the panel below, and Stop is always one
+ * click away.
  */
 export function InstrumentTab() {
   const router = useRouter();
@@ -85,8 +86,8 @@ export function InstrumentTab() {
       </Panel>
       {texture ? (
         <div className="flex flex-col gap-3 min-w-0">
-          <Panel title="1 · What am I playing?"><TextureHeader texture={texture} previews={previews} performing={performingThis} structuralLocked={structuralLocked} /></Panel>
-          <Panel title="2 · What does it move?" actions={structuralLocked ? <span className="text-xs text-red-700">routing is locked while performing — stop to edit</span> : undefined}><PatchBay texture={texture} report={report} previews={previews} structuralLocked={structuralLocked} /></Panel>
+          <Panel title="1 · What am I playing?"><TextureHeader texture={texture} performing={performingThis} /></Panel>
+          <Panel title="2 · The patch — what moves what" actions={structuralLocked ? <span className="text-xs text-red-700">routing is locked while performing — stop to edit</span> : undefined}><PatchBay texture={texture} report={report} previews={previews} structuralLocked={structuralLocked} performing={performingThis} /></Panel>
           <Panel title="3 · What is happening?"><PerformancePanel texture={texture} previews={previews} onCreateDemo={() => void createDemo()} /></Panel>
         </div>
       ) : (
