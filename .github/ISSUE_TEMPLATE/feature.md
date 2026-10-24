@@ -40,4 +40,4 @@ Link related issues, ADRs, domain contracts and known implementation constraints
 - **Target base:** `main`
 - **Unresolved decisions requiring the product owner:**
 
-Reviewers and implementers: follow [AGENTS.md](../../AGENTS.md), the [Engineering Operating Model](../../docs/engineering/OPERATING-MODEL.md) and [Agent Collaboration Playbook](../../docs/engineering/AGENT-COLLABORATION.md). No agent auto-merges, performs unapproved hardware operations or claims product acceptance.
+Reviewers and implementers: follow [AGENTS.md](https://github.com/WizardInDminor/signal-loom/blob/main/AGENTS.md), the [Engineering Operating Model](https://github.com/WizardInDminor/signal-loom/blob/main/docs/engineering/OPERATING-MODEL.md) and [Agent Collaboration Playbook](https://github.com/WizardInDminor/signal-loom/blob/main/docs/engineering/AGENT-COLLABORATION.md). No agent auto-merges, performs unapproved hardware operations or claims product acceptance.
