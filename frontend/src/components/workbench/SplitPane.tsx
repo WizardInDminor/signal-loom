@@ -78,7 +78,7 @@ export function SplitPane({ left, right, leftLabel, rightLabel, minLeft = 400, m
         <div role="tablist" aria-label="Workbench panes" className="grid grid-cols-2 border-b border-line bg-panel" data-testid="pane-segments">
           {(["left", "right"] as const).map((s) => (
             <button key={s} type="button" role="tab" aria-selected={segment === s} data-testid={`segment-${s}`} onClick={() => onSegment(s)}
-              className={`py-2 text-sm font-medium border-b-2 ${segment === s ? "border-accent text-accent" : "border-transparent text-neutral-500 hover:text-neutral-800"}`}>
+              className={`py-2 text-sm font-medium border-b-2 ${segment === s ? "border-accent text-accent-text" : "border-transparent text-neutral-500 hover:text-foreground"}`}>
               {s === "left" ? leftLabel : rightLabel}
             </button>
           ))}

@@ -81,7 +81,7 @@ export function InstanceInspector() {
                   <li key={n.id} className="rounded border border-line bg-neutral-50 px-2 py-1">
                     <div className="flex items-center gap-1"><span className="text-amber-500">★</span><b>{n.title}</b><span className="text-neutral-400 text-[10px] ml-auto">every {profile.model}</span></div>
                     {n.body && <p className="text-neutral-700 whitespace-pre-wrap">{n.body}</p>}
-                    {n.steps.length > 0 && <ol className="list-decimal pl-4 text-neutral-800">{n.steps.map((st, i) => <li key={i}>{st}</li>)}</ol>}
+                    {n.steps.length > 0 && <ol className="list-decimal pl-4 text-foreground">{n.steps.map((st, i) => <li key={i}>{st}</li>)}</ol>}
                   </li>
                 ))}
               </ul>

@@ -140,7 +140,7 @@ function MacroPatch({ texture, macro, devices, report, preview, structuralLocked
             return (
               <div key={g.id} className="flex flex-col gap-1" data-testid={`dest-group-${g.id}`}>
                 <div className="flex flex-wrap items-center gap-2 text-[11px] text-neutral-600 pl-2">
-                  <b className="text-neutral-800">{g.inst?.label ?? `missing device ${g.id}`}</b>
+                  <b className="text-foreground">{g.inst?.label ?? `missing device ${g.id}`}</b>
                   {role && <Badge>{ROLE_LABEL[role]}</Badge>}
                   {prof && <span>{prof.manufacturer} {prof.model}</span>}
                 </div>
@@ -152,7 +152,7 @@ function MacroPatch({ texture, macro, devices, report, preview, structuralLocked
           })}
           {!macro.mappings.length && (
             <div className="text-xs text-neutral-600 border border-dashed border-line rounded-md p-3 flex flex-col gap-1" data-testid={`patch-empty-${macro.id}`}>
-              <b className="text-neutral-800">No destination yet.</b>
+              <b className="text-foreground">No destination yet.</b>
               <span>A destination is one documented pedal control that {macro.name} moves through a range you choose. Two or more on different pedals make a whole-rig gesture.</span>
               {!structuralLocked && <div><Button variant="primary" onClick={() => setFinding(true)}>Find a control</Button></div>}
             </div>

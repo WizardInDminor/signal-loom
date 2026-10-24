@@ -185,7 +185,7 @@ export function BoardCanvas({ view }: { view: BoardViewOptions }) {
       viewBox={`0 0 ${vbW} ${vbH}`}
       width={vbW * pxPerMm}
       height={vbH * pxPerMm}
-      className={`bg-neutral-50 border border-line rounded select-none touch-none ${pendingCable ? "cursor-crosshair" : ""}`}
+      className={`bg-[#fafafa] border border-line rounded select-none touch-none ${pendingCable ? "cursor-crosshair" : ""}`}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerDown={() => select(null)}
@@ -215,7 +215,7 @@ export function BoardCanvas({ view }: { view: BoardViewOptions }) {
         </g>
       )}
       <text x={margin} y={margin - 8} fontSize={9} fill="#374151">{board.name} — {board.width_mm} × {board.depth_mm} mm (grid {board.grid_mm} mm){under ? " — UNDERSIDE" : ""}</text>
-      {gridLines.map((x) => <text key={x} x={margin + x} y={margin + board.depth_mm + 10} fontSize={6} fill="#9ca3af" textAnchor="middle">{x}</text>)}
+      {gridLines.map((x) => <text key={x} x={margin + x} y={margin + board.depth_mm + 10} fontSize={6} fill="#6b7280" textAnchor="middle">{x}</text>)}
       {offboard.length > 0 && <text x={margin + board.width_mm + OFFBOARD_GAP} y={margin - 8} fontSize={8} fill="#6b7280">Off-board (not on the pedalboard)</text>}
       {guides.x !== undefined && <line x1={margin + guides.x} y1={margin} x2={margin + guides.x} y2={margin + board.depth_mm} stroke="#2563eb" strokeWidth={0.6} strokeDasharray="2 2" />}
       {guides.y !== undefined && <line x1={margin} y1={margin + guides.y} x2={margin + board.width_mm} y2={margin + guides.y} stroke="#2563eb" strokeWidth={0.6} strokeDasharray="2 2" />}

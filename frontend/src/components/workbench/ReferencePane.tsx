@@ -142,8 +142,8 @@ export function ReferencePane({ profile, state, onChange, editing, onCite, onSpa
             </select>
             <Button variant={findOpen ? "primary" : "default"} onClick={() => setFindOpen((v) => !v)} aria-expanded={findOpen} aria-controls="reference-find" className="!px-2" title="Find in document">Find</Button>
             <span className="ml-auto flex items-center gap-2 text-xs">
-              <button type="button" className="underline text-neutral-600 hover:text-accent" onClick={() => setAddingDoc((v) => !v)} data-testid="reference-add-toggle">+ Document</button>
-              <a className="underline text-neutral-600 hover:text-accent" href={api.documents.downloadUrl(doc.document_id)}>Download</a>
+              <button type="button" className="underline text-neutral-600 hover:text-accent-text" onClick={() => setAddingDoc((v) => !v)} data-testid="reference-add-toggle">+ Document</button>
+              <a className="underline text-neutral-600 hover:text-accent-text" href={api.documents.downloadUrl(doc.document_id)}>Download</a>
             </span>
           </>
         )}

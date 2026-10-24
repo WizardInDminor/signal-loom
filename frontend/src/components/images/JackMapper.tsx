@@ -392,7 +392,7 @@ export function JackMapper({ profileId, title, ports, image, widthMm, depthMm, f
                 fits, scrollable from the top-left corner once zoomed past the area), with FRAME_PAD of
                 margin on every side so markers and labels at the photo's edge stay visible. */}
             <div ref={scrollRef} className="overflow-auto h-[62vh] min-h-[320px] rounded border border-line bg-neutral-900/90 relative flex" data-testid="jacks-scroll">
-              {!asset ? <div className="p-6 text-xs text-neutral-300">Loading the picture…</div> : (
+              {!asset ? <div className="p-6 text-xs text-slate-300">Loading the picture…</div> : (
                 <div className="m-auto shrink-0" style={{ padding: FRAME_PAD }}>
                 <div ref={frameRef} className="relative select-none touch-none" style={{ width: frameW, aspectRatio: `${asset.width} / ${asset.height}` }} data-testid="jacks-frame">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -450,9 +450,9 @@ export function JackMapper({ profileId, title, ports, image, widthMm, depthMm, f
             <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-neutral-500">
               <span><i className="inline-block w-3 border-t-2 border-dashed border-amber-400 align-middle" /> enclosure crop</span>
               <span><i className="inline-block w-3 border-t-[3px] border-amber-400 align-middle" /> top edge</span>
-              <span><i className="inline-block w-2.5 h-2.5 rounded-full bg-neutral-700 align-middle" /> connector as seen</span>
-              <span><i className="inline-block w-2 h-2 bg-white border border-neutral-700 rotate-45 align-middle" /> where the cable is modelled to start</span>
-              <span><i className="inline-block w-2.5 h-2.5 rounded-full border border-dashed border-neutral-700 align-middle" /> from the profile, not yet confirmed on this photo</span>
+              <span><i className="inline-block w-2.5 h-2.5 rounded-full bg-slate-700 align-middle" /> connector as seen</span>
+              <span><i className="inline-block w-2 h-2 bg-white border border-slate-700 rotate-45 align-middle" /> where the cable is modelled to start</span>
+              <span><i className="inline-block w-2.5 h-2.5 rounded-full border border-dashed border-slate-700 align-middle" /> from the profile, not yet confirmed on this photo</span>
               {dims ? <span>footprint {widthMm} × {depthMm} mm {footprintEvidence && <EvidenceBadge evidence={footprintEvidence} />}</span> : <Badge tone="warn">no dimensions: edges are suggested from the crop only</Badge>}
             </div>
           </div>

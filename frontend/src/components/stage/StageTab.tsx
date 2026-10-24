@@ -105,7 +105,7 @@ export function StageTab() {
           <span className="flex items-center gap-1"><i className="inline-block w-5 border-t border-dashed" style={{ borderColor: VIRTUAL_COLOR, background: "#0f172a" }} /> routing inside the ML10X (preset, not a cable)</span>
           <span className="flex items-center gap-1"><i className="inline-block w-5 h-1 rounded" style={{ background: MIDI_COLOR }} /> MIDI cable carrying this scene&apos;s messages</span>
           <span className="flex items-center gap-1"><i className="inline-block w-2.5 h-2.5 rounded-full bg-green-500" /> pedal engaged</span>
-          <span className="flex items-center gap-1"><i className="inline-block w-2.5 h-2.5 rounded-full bg-neutral-700" /> bypassed</span>
+          <span className="flex items-center gap-1"><i className="inline-block w-2.5 h-2.5 rounded-full bg-slate-700" /> bypassed</span>
           <span className="flex items-center gap-1"><i className="inline-block w-2.5 h-2.5 rounded-full border border-dashed border-neutral-500" /> not set by the scene</span>
           <span>faded pedal = not in this scene&apos;s path</span>
         </div>
@@ -148,7 +148,7 @@ export function StageTab() {
                     const t = story.midi.find((m) => m.instance_id === d.instance_id);
                     return (
                       <li key={d.instance_id} className={`flex gap-1.5 ${d.inPath ? "" : "text-neutral-400"}`} data-testid={`stage-pedal-${d.instance_id}`}>
-                        <i className={`mt-1 inline-block w-2.5 h-2.5 rounded-full shrink-0 ${d.enabled === true ? "bg-green-500" : d.enabled === false ? "bg-neutral-700" : "border border-dashed border-neutral-500"}`} />
+                        <i className={`mt-1 inline-block w-2.5 h-2.5 rounded-full shrink-0 ${d.enabled === true ? "bg-green-500" : d.enabled === false ? "bg-slate-700" : "border border-dashed border-neutral-500"}`} />
                         <span className="flex-1">
                           <b>{d.label}</b>{" "}
                           {d.enabled === true ? "engaged" : d.enabled === false ? "bypassed" : "state not set"}

@@ -140,18 +140,18 @@ export default function CatalogPage() {
           <div className="flex gap-1 mb-1">
             <div className="relative flex-1 min-w-0">
               <input ref={searchRef} type="search" aria-label="Search devices" placeholder="Search…" className="w-full pr-7" value={q} onChange={(e) => setFilters({ q: e.target.value })} onKeyDown={(e) => { if (e.key === "Escape" && q) { e.preventDefault(); clearSearch(); } }} />
-              {q && <button type="button" data-testid="library-clear" aria-label="Clear search" title="Clear search (Esc)" className="absolute right-1 top-1/2 -translate-y-1/2 rounded px-1 text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100" onClick={clearSearch}>✕</button>}
+              {q && <button type="button" data-testid="library-clear" aria-label="Clear search" title="Clear search (Esc)" className="absolute right-1 top-1/2 -translate-y-1/2 rounded px-1 text-neutral-500 hover:text-foreground hover:bg-neutral-100" onClick={clearSearch}>✕</button>}
             </div>
             <select aria-label="Category" value={category} onChange={(e) => setFilters({ category: e.target.value })}><option value="">all</option>{CATEGORIES.map((c) => <option key={c}>{c}</option>)}</select>
           </div>
           <div className="flex items-center justify-between gap-2 text-[11px] text-neutral-500 mb-1 min-h-4" aria-live="polite">
             <span data-testid="library-count">{countText}</span>
-            {pending && items !== null && <span data-testid="library-pending" className="text-accent">Searching…</span>}
+            {pending && items !== null && <span data-testid="library-pending" className="text-accent-text">Searching…</span>}
           </div>
           <ul data-testid="library-list" data-query={shown?.q ?? ""} data-category={shown?.category ?? ""} aria-busy={pending} className={`flex flex-col divide-y divide-line max-h-[60vh] overflow-auto transition-opacity motion-reduce:transition-none ${pending && items !== null ? "opacity-60" : ""}`}>
             {(items ?? []).map((p) => (
               <li key={p.id}>
-                <button type="button" className={`w-full text-left text-sm py-1 ${sel?.id === p.id ? "text-accent font-medium" : ""}`} aria-current={sel?.id === p.id ? "true" : undefined} onClick={() => { setSel(p); setDraft(null); }}>
+                <button type="button" className={`w-full text-left text-sm py-1 ${sel?.id === p.id ? "text-accent-text font-medium" : ""}`} aria-current={sel?.id === p.id ? "true" : undefined} onClick={() => { setSel(p); setDraft(null); }}>
                   {p.manufacturer} {p.model} <span className="text-[10px] text-neutral-400">{p.source}</span>
                 </button>
               </li>
