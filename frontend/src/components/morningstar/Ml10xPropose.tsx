@@ -29,7 +29,12 @@ function project(base: Map<string, Slot>, ops: Ml10xOperation[]): { slots: Map<s
   const at = (r: Ml10xSlotRef) => slots.get(key(r))!;
   const put = (r: Ml10xSlotRef, s: Slot) => { slots.set(key(r), { ...s, bank: r.bank, number: r.preset }); touched.add(key(r)); };
   for (const op of ops) {
-    if (op.op === "rename") put(op.slot, { ...at(op.slot), name: op.name, occupancy: "occupied" });
+    if (op.op === "rename") {
+      // Renaming never changes structure: a factory-empty slot renamed to "Empty" stays empty; any other name
+      // makes it occupied (named, no routing); an occupied slot stays occupied whatever the name.
+      const s = at(op.slot);
+      put(op.slot, { ...s, name: op.name, occupancy: s.occupancy === "empty" && op.name === "Empty" ? "empty" : "occupied", reason: s.occupancy === "empty" && op.name !== "Empty" ? `named “${op.name}” (no routing data)` : s.reason });
+    }
     else if (op.op === "copy") put(op.destination, at(op.source));
     else if (op.op === "move") {
       const src = at(op.source), dst = at(op.destination);

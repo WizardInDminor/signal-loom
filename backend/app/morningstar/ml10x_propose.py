@@ -44,12 +44,13 @@ from .mc8_export import compact_json, java_string_hash
 from .ml10x_native import (
     CONNECTOR_KEYS,
     DEFAULT_PRESET_NAME,
+    EXPECTED_CONNECTORS,
     MATRIX_ROW_BYTES,
     MATRIX_ROWS,
     PRESET_KEYS,
-    SPILLOVER_NOTHING,
     load_native,
     slot_occupancy,
+    uniform_unknown_items,
 )
 
 SUPPORTED_SCHEMA_VERSION = 1
@@ -58,6 +59,8 @@ PRESET_NAME_EDITOR_MAX = specs.ML10X_PRESET_NAME_MAX  # 16 — THIRD_PARTY (edit
 PRESET_NAME_WIRE_BYTES = 12  # THIRD_PARTY (READ pads to 12, WRITE trims; encoder truncates to 12)
 CONNECTOR_FIELD_WIRE_BYTES = {"name": 16, "shortName": 4, "inputName": 16, "outputName": 16}  # THIRD_PARTY
 MAX_OPERATIONS = 512
+MATRIX_ROW_KEYS = frozenset(str(k) for k in range(MATRIX_ROWS))  # the one real backup: keys "0".."15"
+BYPASS_LIMIT = 1 << (7 * MATRIX_ROW_BYTES)  # THIRD_PARTY: bypassLoopStatus is three 7-bit bytes on the wire
 OPS = ("rename", "copy", "move", "swap", "rename_connector")
 ON_OCCUPIED = ("refuse", "swap", "overwrite")
 
@@ -98,14 +101,31 @@ def _preset_shape_problem(p: Any, where: str) -> str | None:
     for k in ("tipT", "ringT", "bypass"):
         if not isinstance(p[k], int) or isinstance(p[k], bool):
             return f"{where}: {k} is not an integer"
+    for k in ("tipT", "ringT"):
+        if not 0 <= p[k] <= 127:
+            return f"{where}: {k} {p[k]!r} is outside the 7-bit spillover code range 0-127"
+    if not 0 <= p["bypass"] < BYPASS_LIMIT:
+        return f"{where}: bypass {p['bypass']!r} does not fit the three 7-bit bytes the wire carries (0-{BYPASS_LIMIT - 1})"
     if not isinstance(p["advancedMode"], bool):
         return f"{where}: advancedMode is not a boolean"
     m = p["matrixArray"]
     if not isinstance(m, dict):
         return f"{where}: matrixArray is not an object"
+    if set(m) != MATRIX_ROW_KEYS:
+        missing = sorted(MATRIX_ROW_KEYS - set(m), key=int)
+        extra = sorted(k for k in m if k not in MATRIX_ROW_KEYS)
+        return (
+            f'{where}: matrixArray rows must be exactly "0"-"{MATRIX_ROWS - 1}"'
+            + (f" (missing {', '.join(missing)})" if missing else "")
+            + (f" (unexpected {', '.join(map(str, extra))})" if extra else "")
+        )
     for row, v in m.items():
-        if not (isinstance(v, list) and len(v) == MATRIX_ROW_BYTES and all(isinstance(x, int) for x in v)):
-            return f"{where}: matrixArray row {row!r} is not a list of {MATRIX_ROW_BYTES} integers"
+        if not (
+            isinstance(v, list)
+            and len(v) == MATRIX_ROW_BYTES
+            and all(isinstance(x, int) and not isinstance(x, bool) and 0 <= x <= 127 for x in v)
+        ):
+            return f"{where}: matrixArray row {row!r} is not a list of {MATRIX_ROW_BYTES} 7-bit integers (0-127)"
     return None
 
 
@@ -148,46 +168,34 @@ def structure_problems(data: Any) -> list[str]:
     cd = data.get("controllerData")
     if not isinstance(cd, dict):
         problems.append("controllerData missing or not an object")
-    elif not isinstance(cd.get("connectors"), list):
-        problems.append("controllerData.connectors missing or not a list")
+        return problems
+    conns = cd.get("connectors")
+    if not isinstance(conns, list) or len(conns) != EXPECTED_CONNECTORS:
+        problems.append(
+            f"controllerData.connectors must be a list of {EXPECTED_CONNECTORS} "
+            f"(found {len(conns) if isinstance(conns, list) else type(conns).__name__})"
+        )
+        return problems
+    for i, c in enumerate(conns):
+        if not isinstance(c, dict):
+            problems.append(f"connector {i} is not an object")
+        elif any(k not in c for k in CONNECTOR_KEYS):
+            problems.append(f"connector {i} lacks a native key ({', '.join(k for k in CONNECTOR_KEYS if k not in c)})")
+        elif c.get("id") != i:
+            problems.append(
+                f"connector at position {i} carries id {c.get('id')!r}; the real backup numbers connectors by position"
+            )
     return problems
 
 
 # ----------------------------------------------------------------------------- empty-slot representation
 
 
-def _uniform_unknown_items(data: dict) -> dict:
-    """Per-preset keys Signal Loom has not seen that every preset carries with an identical value: inert
-    file-wide (a newer editor's constant), so a factory-empty slot may carry them. Any other unknown key is
-    per-preset data and makes its slot occupied."""
-    uniform: dict | None = None
-    for b in data["presetData"]:
-        for p in b["data"]:
-            extra = {k: compact_json(v) for k, v in p.items() if k not in PRESET_KEYS}
-            uniform = extra if uniform is None else {k: v for k, v in uniform.items() if extra.get(k) == v}
-    if not uniform:
-        return {}
-    first = data["presetData"][0]["data"][0]
-    return {k: first[k] for k in uniform}
-
-
-def _factory_core(p: dict) -> bool:
-    return (
-        p["presetName"] == DEFAULT_PRESET_NAME
-        and p["tipT"] == SPILLOVER_NOTHING
-        and p["ringT"] == SPILLOVER_NOTHING
-        and p["advancedMode"] is False
-        and p["bypass"] == 0
-        and len(p["matrixArray"]) == MATRIX_ROWS
-        and not any(any(v) for v in p["matrixArray"].values())
-    )
-
-
 class _EmptyRule:
     """Occupancy classification and the empty-slot template, both derived from the file at hand."""
 
     def __init__(self, data: dict):
-        self.uniform_unknown = _uniform_unknown_items(data)
+        self.uniform_unknown = uniform_unknown_items([p for b in data["presetData"] for p in b["data"]])
         self.template: dict | None = None
         self.template_note = ""
         empties = [p for b in data["presetData"] for p in b["data"] if self.is_empty(p)]
@@ -202,19 +210,11 @@ class _EmptyRule:
             )
 
     def is_empty(self, p: dict) -> bool:
-        if not _factory_core(p):
-            return False
-        extra = {k: v for k, v in p.items() if k not in PRESET_KEYS}
-        return extra == self.uniform_unknown  # any per-preset unknown data means the slot is never "free"
+        return self.describe(p)["state"] == "empty"
 
     def describe(self, p: dict) -> dict:
-        occ = slot_occupancy(p)
-        if occ["state"] == "empty" and not self.is_empty(p):
-            occ = {
-                "state": "occupied",
-                "reason": "carries per-preset data Signal Loom cannot account for (unknown keys not shared by every preset)",
-            }
-        return occ
+        # The same classification the inspector grid and /ml10x/slots show (ml10x_native.slot_occupancy).
+        return slot_occupancy(p, self.uniform_unknown)
 
     def cleared(self, source: dict) -> dict:
         """The source slot after a move: the file's own factory-empty payload in the source's key order."""
@@ -517,11 +517,6 @@ class _Txn:
         c = conns[idx]
         if not isinstance(c, dict) or any(k not in c for k in CONNECTOR_KEYS):
             self.problems.append(f"{where}: connector {idx} does not have the native connector shape; not edited")
-            return
-        if c.get("id") != idx:
-            self.problems.append(
-                f"{where}: connector at position {idx} carries id {c.get('id')!r}; identity unclear, not edited"
-            )
             return
         if field not in CONNECTOR_FIELD_WIRE_BYTES:
             self.problems.append(

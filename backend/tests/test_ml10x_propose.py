@@ -112,16 +112,49 @@ def test_matching_hash_accepted_missing_and_wrong_hash_refused_but_inspection_st
         (lambda d: d["data"]["presetData"][1].__setitem__("bank", 7), "bank entry 1 carries bank 7"),
         (lambda d: _preset(d, 3, 9).__setitem__("presetNumber", 10), "presetNumber 10 does not match"),
         (lambda d: _preset(d, 3, 9)["matrixArray"].__setitem__("4", "x"), "row '4' is not a list"),
+        (
+            lambda d: _preset(d, 3, 9)["matrixArray"].__setitem__("4", [0, 128, 0]),
+            "row '4' is not a list of 3 7-bit integers",
+        ),
+        (lambda d: _preset(d, 3, 9)["matrixArray"].__setitem__("4", [0, -1, 0]), "7-bit integers"),
+        (lambda d: _preset(d, 3, 9)["matrixArray"].__setitem__("4", [0, True, 0]), "7-bit integers"),
+        (lambda d: _preset(d, 3, 9)["matrixArray"].pop("15"), 'rows must be exactly "0"-"15" (missing 15)'),
+        (lambda d: _preset(d, 3, 9)["matrixArray"].__setitem__("16", [0, 0, 0]), "(unexpected 16)"),
+        (lambda d: _preset(d, 3, 9).__setitem__("tipT", 200), "tipT 200 is outside the 7-bit spillover code range"),
+        (lambda d: _preset(d, 3, 9).__setitem__("ringT", -1), "ringT -1 is outside"),
+        (
+            lambda d: _preset(d, 3, 9).__setitem__("bypass", 1 << 21),
+            "bypass 2097152 does not fit the three 7-bit bytes",
+        ),
+        (lambda d: _preset(d, 3, 9).__setitem__("bypass", -3), "bypass -3 does not fit"),
         (lambda d: _preset(d, 3, 9).pop("bypass"), "lacks the native key 'bypass'"),
         (lambda d: _preset(d, 3, 9).__setitem__("advancedMode", 1), "advancedMode is not a boolean"),
         (lambda d: d["data"].pop("controllerData"), "controllerData missing"),
+        (lambda d: d["data"]["controllerData"]["connectors"].pop(), "connectors must be a list of 14 (found 13)"),
+        (
+            lambda d: d["data"]["controllerData"]["connectors"].append({"id": 14}),
+            "connectors must be a list of 14 (found 15)",
+        ),
+        (lambda d: d["data"]["controllerData"]["connectors"].__setitem__(2, "x"), "connector 2 is not an object"),
+        (
+            lambda d: d["data"]["controllerData"]["connectors"][2].pop("shortName"),
+            "connector 2 lacks a native key (shortName)",
+        ),
+        (
+            lambda d: d["data"]["controllerData"]["connectors"][2].__setitem__("id", 9),
+            "connector at position 2 carries id 9",
+        ),
     ],
 )
-def test_unsupported_or_malformed_structure_is_refused(mutate, needle):
+def test_unsupported_or_malformed_structure_is_refused_but_stays_inspectable(mutate, needle):
     doc = _backup()
     mutate(doc)
     _rehash(doc)
     _assert_refused(_ops_result(doc, []), needle)
+    # The gate is for *editing*; the inspector still reads the file (as an opaque or interpreted snapshot).
+    report = ml10x_native.inspect(compact_json(doc))
+    assert report["native"]["hash_matches"] is True
+    assert report["interpreted"] is not None or report["device"] is None
 
 
 @pytest.mark.parametrize("raw", ["", "not json", "[1,2]", '{"deviceModel": 7}'])
@@ -510,6 +543,7 @@ def test_unknown_per_preset_keys_that_vary_make_slots_occupied_but_uniform_ones_
     sm = ml10x_propose.slot_map(compact_json(doc))
     assert sm["ok"] and sm["empty_rule"]["template_available"] is True
     assert next(s for s in sm["slots"] if (s["bank"], s["preset"]) == (2, 2))["occupancy"] == "empty"
+    _assert_grid_and_engine_agree(doc)
     r = _ops_result(doc, [{"op": "move", "source": _slot(1, 5), "destination": _slot(2, 2)}])
     assert r["ok"] and _preset(json.loads(r["text"]), 1, 5)["hasLoadedOnce"] is False
     _preset(doc, 2, 2)["hasLoadedOnce"] = True  # now the unknown data varies between presets
@@ -519,6 +553,38 @@ def test_unknown_per_preset_keys_that_vary_make_slots_occupied_but_uniform_ones_
     assert s["occupancy"] == "occupied" and "cannot account for" in s["reason"]
     assert next(s for s in sm["slots"] if (s["bank"], s["preset"]) == (2, 3))["occupancy"] == "occupied"
     assert sm["empty_rule"]["template_available"] is False  # the key is no longer uniform, so nothing is "free"
+    _assert_grid_and_engine_agree(doc)
+
+
+def _assert_grid_and_engine_agree(doc: dict) -> None:
+    """The inspector grid (inspect → preset_names), /ml10x/slots and the proposal engine use one rule."""
+    raw = compact_json(doc)
+    grid = {
+        (n["bank"], n["number"]): (n["occupancy"], n["occupancy_reason"])
+        for n in ml10x_native.inspect(raw)["interpreted"]["preset_names"]
+    }
+    engine = {(s["bank"], s["preset"]): (s["occupancy"], s["reason"]) for s in ml10x_propose.slot_map(raw)["slots"]}
+    assert grid == engine and len(grid) == 512
+
+
+def test_inspector_grid_and_proposal_engine_never_disagree_on_occupancy():
+    doc = _backup()
+    _assert_grid_and_engine_agree(doc)
+    # A per-preset unknown key on one factory-looking slot: occupied for both, and copying onto it is refused.
+    _preset(doc, 2, 2)["hasLoadedOnce"] = True
+    _rehash(doc)
+    _assert_grid_and_engine_agree(doc)
+    names = {
+        (n["bank"], n["number"]): n for n in ml10x_native.inspect(compact_json(doc))["interpreted"]["preset_names"]
+    }
+    assert names[(2, 2)]["occupancy"] == "occupied" and "cannot account for" in names[(2, 2)]["occupancy_reason"]
+    assert names[(2, 3)]["occupancy"] == "empty"
+    _assert_refused(
+        _ops_result(doc, [{"op": "copy", "source": _slot(0, 1), "destination": _slot(2, 2)}]), "is occupied"
+    )
+    path = external_fixture("ml10x-editor-device-backup.json")
+    if path is not None:
+        _assert_grid_and_engine_agree(json.loads(path.read_text(encoding="utf-8")))
     _assert_refused(
         _ops_result(doc, [{"op": "copy", "source": _slot(0, 1), "destination": _slot(2, 2)}]), "is occupied"
     )
@@ -549,11 +615,6 @@ def test_connector_names_are_editable_within_wire_widths_and_everything_else_is_
         ({"op": "rename_connector", "connector": 14, "field": "name", "value": "x"}, "connector must be 0-13"),
     ]:
         _assert_refused(_ops_result(doc, [op]), needle)
-    doc["data"]["controllerData"]["connectors"][2]["id"] = 9
-    _rehash(doc)
-    _assert_refused(
-        _ops_result(doc, [{"op": "rename_connector", "connector": 2, "field": "name", "value": "x"}]), "carries id 9"
-    )
 
 
 # ----------------------------------------------------------------------------- inspect report integration

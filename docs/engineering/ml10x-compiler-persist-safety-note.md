@@ -30,7 +30,9 @@ nevertheless put the rig into a **known** routing-and-bypass state.
 | **CC#51** reloads the current preset's saved loop states (DOCUMENTED, 2025-11-24 build) | A documented way to re-establish the preset's saved states even with Persist on — but only on builds ≥ 2025-11-24 and only "saved states" (unknown for Advanced presets on older builds). Candidate for an explicit, declared-capability compiler step; **not** to be emitted by default. |
 | **CC#52** saves the *current* loop bypass status **into preset memory** (DOCUMENTED; rate-limited once / 5 s). Menu + Select does the same from the device. | A **memory write triggered by MIDI**. Must never be reachable from a Scene, Texture or live control path without a separate memory-write authorization gate. |
 | **CC#50** sets Loop Bypass Persist on/off (FORUM-STAFF: >63 on, ≤63 off); persistence of the setting itself is not established | A **global configuration change**, not a performance gesture. Must never be emitted as an ordinary Scene message. |
-| CC#30–39 output cut (64 toggle, 0 restore, 127 cut), CC#40–43 input/output tip/ring bypass (64 = toggle; other values' meaning not stated) | Toggles are **not idempotent**: a repeated Scene recall flips state. These must not enter absolute-state Scene compilation; if ever supported, only with a documented non-toggle value and a verified readback story. |
+| **CC#20–29** toggle loop (any value toggles; DOCUMENTED for 20, openmidi for the rest) | **Toggle-only**: not idempotent, a repeated Scene recall flips state. Must not enter absolute-state Scene compilation. |
+| **CC#30–39** output cut: **0 = restore, 127 = cut are deterministic**, 64 = toggle (DOCUMENTED v1.2 release notes) | **Mixed**: deterministic values are candidates for absolute-state compilation once owner-verified; the toggle value 64 must be refused in Scenes. Not toggle-only. |
+| **CC#40–43** input/output tip/ring bypass: 64 = toggle (DOCUMENTED); other values' meaning not stated | **Toggle documented, deterministic values unverified**: refuse in Scenes until a non-toggle value is documented or owner-observed, plus a readback story. |
 
 **Precise statement of the defect:** with Persist ON (or unknown), the compiled ML10X part of a Scene is
 *routing-complete but bypass-incomplete*; the plan nevertheless describes itself as absolute and the Stage /
@@ -79,8 +81,11 @@ Three message classes with three gates, independent of transport:
 Implementation sketch (file level) for the follow-up issue:
 
 1. `backend/app/morningstar/specs.py`: add `ML10X_CC_CONFIG = {50}`, `ML10X_CC_MEMORY_WRITE = {52}`,
-   `ML10X_CC_TOGGLE_ONLY = {20..29, 30..43}` (toggle semantics / non-idempotent) with evidence notes; extend
-   `ml10x_feature_gate` as in §3.
+   `ML10X_CC_TOGGLE_ONLY = {20..29}` (any value toggles), `ML10X_CC_MIXED = {30..39: toggle_value 64,
+   deterministic {0: restore, 127: cut}}` and `ML10X_CC_TOGGLE_UNVERIFIED = {40..43: toggle_value 64,
+   deterministic values unknown}`, each with evidence notes; extend `ml10x_feature_gate` as in §3. The
+   distinction matters: a command with documented deterministic values can one day compile as absolute
+   state, a toggle-only command never can.
 2. `backend/app/models/rig.py` (**shared schema — Team A/B coordination**): `Ml10xConfig.loop_bypass_persistent:
    bool | None = None`, `Ml10xConfig.firmware_build: str | None = None`. Default `None` keeps every existing
    document valid (StrictModel + defaults; add a load test for a Session 7 export).
@@ -89,7 +94,9 @@ Implementation sketch (file level) for the follow-up issue:
    chain; loop engage/bypass states are inherited unless this Scene sets them") and record per-loop confidence;
    change the CC#0/PC explanation from "absolute state" to "bank and preset; loop states: see diagnostics".
    Refuse (ERROR `midi.cc_memory_write_in_scene`) any compiled CC on a switcher instance whose number is in
-   `ML10X_CC_MEMORY_WRITE` or `ML10X_CC_CONFIG`, and WARN on `ML10X_CC_TOGGLE_ONLY`.
+   `ML10X_CC_MEMORY_WRITE` or `ML10X_CC_CONFIG`; refuse `ML10X_CC_TOGGLE_ONLY` and the toggle value of a
+   mixed or toggle-unverified command (ERROR `midi.cc_toggle_in_scene`); allow the documented deterministic
+   values of `ML10X_CC_MIXED` only behind the feature gate, with a WARNING until owner-verified.
 4. A **profile-level** deny-list hook for any device: `DeviceProfile.midi.unsafe_ccs` (config / memory-write
    classes) consulted by the compiler, the Texture eligibility check and the Live replay path — so the
    separation is structural for every pedal, not ML10X-specific. (Device Library contract — Team A.)

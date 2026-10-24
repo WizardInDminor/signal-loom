@@ -172,15 +172,18 @@ is `presetNumber` (= array position in all 512 presets of the real file). Unaffe
 controller settings and unknown keys at every level are compared object-for-object after the transaction
 (`preservation` checks); a failed check refuses the whole proposal.
 
-**Empty slots are decided structurally** (`ml10x_native.slot_occupancy`): factory payload — name "Empty",
+**Empty slots are decided structurally** by one rule shared by the inspector grid, `/ml10x/slots` and the
+engine (`ml10x_native.slot_occupancy` with `uniform_unknown_items`): factory payload — name "Empty",
 `tipT`/`ringT` 127, Simple, `bypass` 0, all 16 matrix rows zero — and no per-preset unknown data (unknown keys
 present in *every* preset with the same value are inert). 506 of the 509 "Empty"-named slots of the real
 backup match; the other 3 carry matrix data and are occupied. A move clears its source with the file's own
 factory-empty payload; a file with no such slot refuses moves and offers copy or swap.
 
 **Gate.** Refused outright (no file): invalid JSON, `deviceModel ≠ 7`, `schemaVersion ≠ 1`, `dumpType ≠ "full"`,
-hash missing or mismatched (never re-hashed), 4 × 128 structure or preset shape violated, `presetNumber ≠`
-position, any invalid / ambiguous / destructive-without-intent operation. One transaction: any failure means
+hash missing or mismatched (never re-hashed), 4 × 128 structure or preset shape violated (exact matrix rows
+"0"–"15" of three 7-bit bytes, `tipT`/`ringT` 0–127, `bypass` within three 7-bit bytes), `presetNumber ≠`
+position, connectors other than exactly 14 native objects with positional ids, any invalid / ambiguous /
+destructive-without-intent operation. Every refused shape stays inspectable. One transaction: any failure means
 nothing is applied. Without changes the output is the input **byte for byte** (also for pretty-printed input);
 with changes the output is compact JSON with a fresh `downloadDate` (the proposal time) and a recomputed hash;
 `byte_identical_to_input` and `structurally_identical_to_input` are reported separately.
