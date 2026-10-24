@@ -43,4 +43,4 @@ Attach sanitized screenshots, CI logs, exception traces, or a dated hardware obs
 - **Reviewer:**
 - **Related PR / verification register entry:**
 
-Follow [Engineering Operating Model](../../docs/engineering/OPERATING-MODEL.md) and [Agent Collaboration Playbook](../../docs/engineering/AGENT-COLLABORATION.md). Never substitute a driver-send log for confirmed device response.
+Follow [Engineering Operating Model](https://github.com/WizardInDminor/signal-loom/blob/main/docs/engineering/OPERATING-MODEL.md) and [Agent Collaboration Playbook](https://github.com/WizardInDminor/signal-loom/blob/main/docs/engineering/AGENT-COLLABORATION.md). Never substitute a driver-send log for confirmed device response.
