@@ -564,8 +564,10 @@ def test_ml10x_native_and_interpretation_keep_routing_opaque():
         "connectors": 14,
         "unknown_keys": 2,
         "anomalies": 0,
+        "presets_empty": 510,
         "routing_decoded": False,
         "native_export_available": False,
+        "proposal_available": True,
     }
     assert len(interp["preset_names"]) == 512
 

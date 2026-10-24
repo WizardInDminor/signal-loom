@@ -55,7 +55,8 @@ export function Ml10xInspector({ report, fileText }: { report: Ml10xReport; file
         <Badge tone="warn">{cov.presets_with_matrix_data} with routing data (undecoded)</Badge>
         <Badge>{cov.connectors} connectors</Badge>
         <Badge tone={cov.anomalies ? "warn" : "ok"}>{cov.anomalies} anomalies</Badge>
-        <Badge tone="bad">native export: blocked</Badge>
+        <Badge tone="bad">routing authorship: blocked</Badge>
+        <Badge tone="warn">preset proposals: candidate file only</Badge>
       </div>
       <div role="tablist" aria-label="ML10X views" className="flex gap-1 border-b border-line">
         {(["presets", "controller", "experiment", "unknown"] as const).map((t) => (
@@ -103,8 +104,8 @@ export function Ml10xInspector({ report, fileText }: { report: Ml10xReport; file
               {names.map((n) => (
                 <button key={n.number} type="button" role="option" aria-selected={selBank === n.bank && sel === n.number} onClick={() => { setSel(n.number); setSelBank(n.bank); }}
                   data-testid={`ml10x-preset-${n.bank}-${n.number}`} title={n.name}
-                  className={`rounded border px-1 py-0.5 text-[10px] text-left truncate ${selBank === n.bank && sel === n.number ? "bg-accent text-white border-accent" : n.used ? "bg-panel border-neutral-400" : "bg-neutral-50 border-line text-neutral-400"}`}>
-                  {n.number}{n.advanced ? "ᴬ" : ""} <span className="font-mono">{n.used ? n.name : ""}</span>
+                  className={`rounded border px-1 py-0.5 text-[10px] text-left truncate ${selBank === n.bank && sel === n.number ? "bg-accent text-white border-accent" : n.occupancy === "occupied" ? "bg-panel border-neutral-400" : "bg-neutral-50 border-line text-neutral-400"}`}>
+                  {n.number}{n.advanced ? "ᴬ" : ""} <span className="font-mono">{n.occupancy === "occupied" ? n.name : ""}</span>
                 </button>
               ))}
             </div>
@@ -125,7 +126,11 @@ export function Ml10xInspector({ report, fileText }: { report: Ml10xReport; file
                 <MatrixView p={current} />
               </div>
             ) : (
-              <p className="text-neutral-500">Factory-default preset: name “{currentName?.name}”, no routing data, Simple mode, spillover off. Nothing to interpret.</p>
+              <p className="text-neutral-500">
+                {currentName?.occupancy === "empty"
+                  ? <>Factory-empty slot: name “{currentName?.name}”, no routing data, Simple mode, bypass 0, spillover off. Nothing to interpret.</>
+                  : <>Preset “{currentName?.name}”: {currentName?.occupancy_reason}. No routing data to show.</>}
+              </p>
             )}
           </Panel>
         </div>

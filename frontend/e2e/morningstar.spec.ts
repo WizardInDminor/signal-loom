@@ -212,7 +212,8 @@ test("bridge: an ML10X backup shows controller, connectors and presets, and keep
   await expect(summary).toContainText("hash OK");
   await expect(summary).toContainText("1 unknown key");
   await expect(page.getByTestId("ml10x-coverage")).toContainText("1 in use");
-  await expect(page.getByTestId("ml10x-coverage")).toContainText("native export: blocked");
+  await expect(page.getByTestId("ml10x-coverage")).toContainText("routing authorship: blocked");
+  await expect(page.getByTestId("ml10x-coverage")).toContainText("preset proposals: candidate file only");
   const detail = page.getByTestId("ml10x-preset-detail");
   await expect(detail).toContainText("Lead");
   await expect(detail).toContainText("undecoded");
@@ -221,7 +222,7 @@ test("bridge: an ML10X backup shows controller, connectors and presets, and keep
   await expect(page.getByTestId("ml10x-matrix")).toContainText("0 64 0");
   await expect(detail).toContainText("futureField");
   await page.getByTestId("ml10x-preset-0-3").click();
-  await expect(page.getByText(/Factory-default preset/)).toBeVisible();
+  await expect(page.getByText(/Factory-empty slot/)).toBeVisible();
   await page.getByRole("tab", { name: "Controller & connectors" }).click();
   await expect(page.getByTestId("ml10x-controller")).toContainText("MIDI channel");
   await expect(page.getByTestId("ml10x-controller")).toContainText("A Tip (loop 1)");

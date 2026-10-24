@@ -1,12 +1,13 @@
-# Morningstar Bridge (Session 7)
+# Morningstar Bridge (Session 7, extended by ML10X Native Integration V2)
 
 Import, understand, compare and — where the format is already validated — export native Morningstar
-MC8 (original) and ML10X editor backup files. The official Morningstar editors remain the tools that
+MC8 (original) and ML10X editor backup files. Since the V2 slice the bridge also produces a **candidate**
+ML10X Device Backup for routing-free, whole-preset operations (§7). The official Morningstar editors remain the tools that
 program the hardware; the bridge is for interoperability, workflow consolidation and preservation
 of a controller's configuration. Workspace: **Morningstar Bridge** in the top navigation
 (`/morningstar`). Backend: `backend/app/morningstar/mc8_native.py`, `ml10x_native.py`,
-`backend/app/api/morningstar.py`. Tests: `backend/tests/test_morningstar_bridge.py`,
-`frontend/e2e/morningstar.spec.ts`.
+`ml10x_propose.py`, `backend/app/api/morningstar.py`. Tests: `backend/tests/test_morningstar_bridge.py`,
+`backend/tests/test_ml10x_propose.py`, `frontend/e2e/morningstar.spec.ts`, `frontend/e2e/ml10x-propose.spec.ts`.
 
 ## 1. Architecture decisions
 
@@ -35,10 +36,11 @@ Messages the rig cannot express are reported as *controller only*, never as *to 
 - **Stateless API.** `/api/morningstar/*` takes the file text in the request and returns a report.
   No new tables, no stored files, no change to the rig document (the existing `import/mc8-bank`
   route stays the way to put a bank into a rig). The browser keeps the file text.
-- **No new output format.** The only file produced is the `singleBank` shape the Session 1 writer
+- **No new output format.** The MC8 file produced is the `singleBank` shape the Session 1 writer
   already validated against real exports. An `allBanks` input can have one bank object lifted
-  verbatim into such a file (same shape, fresh hash and date). No `allBanks` output, no ML10X output,
-  no SysEx, no hardware I/O.
+  verbatim into such a file (same shape, fresh hash and date). No `allBanks` output. The ML10X candidate
+  file (§7) is the input's own `full` shape with whole preset objects re-slotted; no routing is authored.
+  No SysEx, no hardware I/O.
 - **Separation from Team A.** New modules and components only; the shared `lib/api.ts`,
   `lib/types.ts`, `models/rig.py` and the compiler are untouched. Two one-line registrations:
   the router in `app/main.py` and the navigation link in `layout.tsx`.
@@ -131,7 +133,8 @@ layout is unverified.
 - `general_configurations` values are shown with their key names; units and scales (e.g.
   `longPressTime`, `switchSensitivity`) are unverified.
 - ML10X: routing undecoded; spillover connector codes other than 127 unverified; `bypass` bit layout
-  unverified; `inputRingSwapPin` meaning unknown. No ML10X file is written.
+  unverified; `inputRingSwapPin` meaning unknown. The only ML10X file written is the §7 candidate, which
+  re-slots existing preset objects and never authors routing, bypass, spillover or global settings.
 - No hardware, firmware or SysEx interaction of any kind.
 
 ## 5. How to raise the evidence level
@@ -149,4 +152,59 @@ layout is unverified.
 
 ## 6. Test evidence
 
-See the "Verification" section of `SESSION-7-PROGRESS.md` for the exact commands and counts.
+See the "Verification" section of `SESSION-7-PROGRESS.md` for the exact commands and counts (Session 7) and
+`SESSION-8-HANDOFF.md` §3 for the V2 slice.
+
+## 7. ML10X preset management (Native Integration V2, 2026-10-24)
+
+**Musician journey.** Load an ML10X *Device Backup* → *Manage presets* → the four banks and their 128 slots
+(empty slots faded, Advanced marked ᴬ) → select a preset → *Rename*, *Copy to…*, *Move to…* or *Swap with…* →
+choose the destination by typing bank/number or by clicking a slot while the source stays selected → an
+occupied destination shows a red panel that demands an explicit choice (copy: *Replace*; move: *Swap* or
+*Replace*) → operations queue up and the grid shows the projected result → *Review proposal* → exact
+before/after per slot, verified effects, every changed value and the preservation checks → *Download candidate
+backup*. Connector long/short names are edited in a table on the same page. Keyboard: arrow keys, Home/End,
+PageUp/PageDown (bank), Enter. Screenshots: `docs/screenshots/session-8/`.
+
+**What travels verbatim.** A preset is moved as its complete native object: `matrixArray`, `advancedMode`,
+`bypass`, `tipT`, `ringT`, `presetName` and any key Signal Loom has not seen. The only identity field rewritten
+is `presetNumber` (= array position in all 512 presets of the real file). Unaffected presets, bank wrappers,
+controller settings and unknown keys at every level are compared object-for-object after the transaction
+(`preservation` checks); a failed check refuses the whole proposal.
+
+**Empty slots are decided structurally** by one rule shared by the inspector grid, `/ml10x/slots` and the
+engine (`ml10x_native.slot_occupancy` with `uniform_unknown_items`): factory payload — name "Empty",
+`tipT`/`ringT` 127, Simple, `bypass` 0, all 16 matrix rows zero — and no per-preset unknown data (unknown keys
+present in *every* preset with the same value are inert). 506 of the 509 "Empty"-named slots of the real
+backup match; the other 3 carry matrix data and are occupied. A move clears its source with the file's own
+factory-empty payload; a file with no such slot refuses moves and offers copy or swap.
+
+**Gate.** Refused outright (no file): invalid JSON, `deviceModel ≠ 7`, `schemaVersion ≠ 1`, `dumpType ≠ "full"`,
+hash missing or mismatched (never re-hashed), 4 × 128 structure or preset shape violated (exact matrix rows
+"0"–"15" of three 7-bit bytes, `tipT`/`ringT` 0–127, `bypass` within three 7-bit bytes), `presetNumber ≠`
+position, connectors other than exactly 14 native objects with positional ids, any invalid / ambiguous /
+destructive-without-intent operation. Every refused shape stays inspectable. One transaction: any failure means
+nothing is applied. Without changes the output is the input **byte for byte** (also for pretty-printed input);
+with changes the output is compact JSON with a fresh `downloadDate` (the proposal time) and a recomputed hash;
+`byte_identical_to_input` and `structurally_identical_to_input` are reported separately.
+
+**Names.** Preset names: printable ASCII only; ≤12 characters accepted; 13–16 only with
+`accept_unverified_length` (the device stores 12 bytes, editor behaviour for 13–16 unknown); >16 refused;
+character and UTF-8 byte counts are shown separately. Connector fields: fixed wire widths (name 16, shortName 4,
+inputName 16, outputName 16). Nothing is ever truncated.
+
+**Read-only in this version:** MIDI channel, Device ID, Input Split, Loop Bypass Persist, `inputRingSwapPin`,
+trails, spillover codes, `bypass`, `matrixArray`.
+
+**Evidence level.** `third_party_shape`: the hash algorithm is reproduced on one real backup; a forum user
+reports the editor rejects a hand-edited file whose hash no longer matches, so a correct hash is necessary but
+not known to be sufficient. **No Signal Loom-written ML10X file has been loaded in the official editor or
+restored to a device.** A `full` backup restore may replace all 512 presets and the controller settings.
+Owner acceptance: `S9-E01…E03` in the Verification Register; future direct programming:
+[`docs/architecture/ml10x-native-adapter.md`](architecture/ml10x-native-adapter.md).
+
+API: `POST /api/morningstar/ml10x/propose` `{file, operations[]}` with typed operations
+(`rename`, `copy`, `move`, `swap`, `rename_connector`; discriminated by `op`), 200 with `{text, filename, diff,
+effects, slots, self_check, preservation, preserved, identity, evidence, warnings}` or 422
+`{message, ok: false, problems, warnings, effects, evidence}` and no text; `POST /api/morningstar/ml10x/slots`
+returns the structural occupancy of all 512 slots.
