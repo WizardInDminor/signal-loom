@@ -2,7 +2,7 @@
 
 - **Issue:** Closes #
 - **Engineering team / implementing agent:**
-- **Base / head SHA:**
+- **Base revision at start / last code-changing commit / current head SHA (final handoff):**
 - **Musician-facing change:**
 - **Scope / explicit non-goals:**
 - **Shared-contract or architecture decision links:**
@@ -25,7 +25,9 @@
 | Visual/mobile/keyboard QA (as relevant) | |
 | Verification Register IDs and statuses | |
 
-**Source commit and test environment:**
+**Source commit, current CI head and test environment:**
+
+**Authoritative evidence read-back (final handoff):** Re-open this PR and verify the actual head SHA, saved description, test counts, screenshot links, latest required CI, resolved review threads and owner-accepted limitations before requesting merge. A claimed successful metadata edit is not evidence it persisted; update and read back rather than assuming.
 
 **What these tests do NOT prove:**
 
