@@ -426,7 +426,14 @@ talks to a controller; the official editors stay the tools that program the hard
 - **Inspect (ML10X).** Controller settings and the 14 connectors with their jack labels, the 4 × 128
   presets, and each preset's routing matrix shown verbatim as *undecoded* (with a row observation
   marked *hypothesis*). *Routing experiment* compares two exports and lists the matrix rows that
-  moved, the raw material a future decoder needs. No ML10X file is written.
+  moved, the raw material a future decoder needs.
+- **Manage presets (ML10X).** Select a preset, then *Rename*, *Copy to…*, *Move to…* or *Swap with…*
+  another slot or bank; an occupied destination demands an explicit *Swap* or *Replace* choice, and a
+  slot named "Empty" that still carries routing data counts as occupied. *Review proposal* shows the
+  before/after of every touched slot and the preservation checks; the download is a **candidate**
+  Device Backup in which every preset travelled with its routing, mode, bypass and spillover exactly as
+  the editor wrote them (hash recomputed). Not yet loaded in the official editor or on a device; keep the
+  original export as the recovery baseline. Signal Loom still authors no routing.
 
 Details, format findings and limitations: [docs/morningstar-bridge.md](docs/morningstar-bridge.md).
 

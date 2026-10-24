@@ -8,14 +8,16 @@ import { Mc8Inspector } from "./Mc8Inspector";
 import { Mc8Compare } from "./Mc8Compare";
 import { Mc8Propose } from "./Mc8Propose";
 import { Ml10xInspector } from "./Ml10xInspector";
+import { Ml10xPropose } from "./Ml10xPropose";
 
 type Mode = "inspect" | "compare" | "propose";
 
 /**
  * Morningstar Bridge: load an official editor backup (MC8 or ML10X), inspect what it holds with
  * known / third-party / unknown made explicit, compare an MC8 bank with a rig's modeled intent,
- * and review a proposed modification before any file is produced. Offline: the file text goes to
- * the local backend and nowhere else; nothing talks to a controller.
+ * and review a proposed modification before any file is produced. For an ML10X backup, manage whole
+ * presets (rename / copy / move / swap) with their routing carried verbatim. Offline: the file text goes
+ * to the local backend and nowhere else; nothing talks to a controller.
  */
 export function MorningstarBridge() {
   const [status, setStatus] = useState<BridgeStatus | null>(null);
@@ -103,7 +105,21 @@ export function MorningstarBridge() {
           {mode === "propose" && <Mc8Propose key={bankIndex} report={mc8} fileText={fileText} bankIndex={bankIndex} />}
         </>
       )}
-      {ml10x && ml10x.interpreted && fileText && <Ml10xInspector report={ml10x} fileText={fileText} />}
+      {ml10x && ml10x.interpreted && fileText && (
+        <>
+          <div role="tablist" aria-label="Bridge workflow" className="flex flex-wrap gap-1">
+            {(["inspect", "propose"] as const).map((m) => (
+              <button key={m} role="tab" type="button" aria-selected={mode === m} onClick={() => setMode(m)} data-testid={`bridge-mode-${m}`}
+                className={`px-3 py-1 text-sm rounded border ${mode === m ? "bg-accent text-white border-accent" : "bg-panel border-line hover:bg-neutral-100"}`}>
+                {m === "inspect" ? "Inspect" : "Manage presets"}
+              </button>
+            ))}
+            {mode === "propose" && <Badge tone="warn">candidate file only — not editor- or hardware-validated</Badge>}
+          </div>
+          {mode === "inspect" && <Ml10xInspector report={ml10x} fileText={fileText} />}
+          {mode === "propose" && <Ml10xPropose report={ml10x} fileText={fileText} />}
+        </>
+      )}
     </div>
   );
 }

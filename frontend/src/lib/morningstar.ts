@@ -140,7 +140,7 @@ export interface Ml10xReport {
     };
     banks: { bank: number; preset_count: number; used: number }[];
     presets: Ml10xPreset[];
-    preset_names: { bank: number; number: number; name: string; used: boolean; advanced: boolean }[];
+    preset_names: Ml10xSlotName[];
     routing_status: string;
     anomalies: string[];
   } | null;
@@ -149,12 +149,89 @@ export interface Ml10xReport {
     presets_used: number;
     presets_advanced: number;
     presets_with_matrix_data: number;
+    presets_empty: number;
     connectors: number;
     unknown_keys: number;
     anomalies: number;
     routing_decoded: boolean;
     native_export_available: boolean;
+    proposal_available: boolean;
   } | null;
+}
+
+/** One of the 512 slots as the inspector lists it; `occupancy` is the structural empty-slot rule, never the name alone. */
+export interface Ml10xSlotName {
+  bank: number;
+  number: number;
+  name: string;
+  used: boolean;
+  advanced: boolean;
+  occupancy: "empty" | "occupied" | "malformed";
+  occupancy_reason: string;
+}
+
+// ---------------------------------------------------------------------------- ML10X proposals (V2)
+
+export interface Ml10xSlotRef { bank: number; preset: number }
+export type Ml10xOperation =
+  | { op: "rename"; slot: Ml10xSlotRef; name: string; accept_unverified_length?: boolean }
+  | { op: "copy"; source: Ml10xSlotRef; destination: Ml10xSlotRef; overwrite?: boolean }
+  | { op: "move"; source: Ml10xSlotRef; destination: Ml10xSlotRef; on_occupied?: "refuse" | "swap" | "overwrite" }
+  | { op: "swap"; a: Ml10xSlotRef; b: Ml10xSlotRef }
+  | { op: "rename_connector"; connector: number; field: "name" | "shortName" | "inputName" | "outputName"; value: string };
+
+export interface Ml10xSlotSnapshot { bank: number; preset: number; name: string; occupancy: "empty" | "occupied" | "malformed"; reason: string; advanced: boolean }
+export interface Ml10xSlotSummary {
+  name: string;
+  occupancy: "empty" | "occupied" | "malformed";
+  reason: string;
+  advanced: boolean;
+  matrix_rows_with_data: number;
+  bypass: number;
+  spillover: [number, number];
+  unknown_keys: string[];
+}
+export type Ml10xEffect =
+  | { op: "rename"; slot: Ml10xSlotSnapshot; after: Ml10xSlotSnapshot; name_before: string; verified: Record<string, boolean> }
+  | { op: "copy"; source: Ml10xSlotSnapshot; destination: Ml10xSlotSnapshot; after: Ml10xSlotSnapshot; overwrote: Ml10xSlotSnapshot | null; verified: Record<string, boolean> }
+  | { op: "move"; source: Ml10xSlotSnapshot; destination: Ml10xSlotSnapshot; after: Ml10xSlotSnapshot; source_after: Ml10xSlotSnapshot; overwrote: Ml10xSlotSnapshot | null; cleared_with: string; verified: Record<string, boolean> }
+  | { op: "swap"; via: "move" | "swap"; a: Ml10xSlotSnapshot; b: Ml10xSlotSnapshot; a_after: Ml10xSlotSnapshot; b_after: Ml10xSlotSnapshot; verified: Record<string, boolean> }
+  | { op: "rename_connector"; connector: number; field: string; before: string; after: string };
+
+export interface Ml10xProposeResult {
+  ok: boolean;
+  problems: string[];
+  warnings: string[];
+  text: string;
+  filename: string;
+  diff: {
+    changes: { path: string[]; label: string; change: string; before: unknown; after: unknown }[];
+    total: number;
+    metadata: { download_date: { before: string | null; after: string | null }; hash: { before: number | null; after: number | null } };
+  };
+  effects: Ml10xEffect[];
+  slots: { bank: number; preset: number; before: Ml10xSlotSummary; after: Ml10xSlotSummary; fields_changed: string[] }[];
+  self_check: { ok: boolean; problems: string[]; hash_matches: boolean | null };
+  preservation: { check: string; ok: boolean; detail: string }[];
+  preserved: {
+    untouched_presets: number;
+    touched_presets: number;
+    unknown_keys_before: number;
+    unknown_keys_after: number;
+    routing_fields_authored: number;
+    byte_identical_to_input: boolean;
+    structurally_identical_to_input: boolean;
+  };
+  identity: { device_model: number; dump_type: string; schema_version: number; download_date: string; hash: number; presets: number; size_bytes: number };
+  evidence: Record<string, unknown> & { editor_validated: boolean; hardware_validated: boolean };
+  operations_applied: number;
+}
+
+export interface Ml10xSlotMap {
+  ok: boolean;
+  problems: string[];
+  slots: Ml10xSlotSnapshot[];
+  empty_rule: { template_available: boolean; note: string } | null;
 }
 
 export interface UnknownReport { device: null; native: NativeSummary; interpreted: null; coverage: null }
@@ -230,6 +307,10 @@ export const bridgeApi = {
   propose: (file: string, edits: Edit[], bankIndex: number | null) =>
     call<ProposeResult>("/api/morningstar/mc8/propose", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ file, edits, bank_index: bankIndex }) }),
   matrixDiff: (a: string, b: string) => call<MatrixDiff>("/api/morningstar/ml10x/matrix-diff", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ a, b }) }),
+  /** One transaction of routing-free ML10X preset operations → a reviewable candidate Device Backup (422 with diagnostics on refusal). */
+  ml10xPropose: (file: string, operations: Ml10xOperation[]) =>
+    call<Ml10xProposeResult>("/api/morningstar/ml10x/propose", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ file, operations }) }),
+  ml10xSlots: (file: string) => call<Ml10xSlotMap>("/api/morningstar/ml10x/slots", { method: "POST", body: file, headers: { "Content-Type": "application/json" } }),
 };
 
 /** Human text for an ApiError detail of the shape {message, problems?}. */

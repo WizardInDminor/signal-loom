@@ -203,3 +203,30 @@ than long-query answers and checks every acceptance item above.
 - Notes: light formatting (lists, bold), images, links between notes and controls, a rig-wide "stage card" of pinned notes.
 - Program Change and bypass knowledge in the same editor (today they stay in the full-profile editor), named preset inventories per pedal (prerequisite for safe preset saving, F-Q09).
 - Owner-side: physical verification per control from a recorded test (S6-H01/H02), and surfacing the per-control hardware status in the Live coverage view.
+
+
+## Deferred from ML10X Native Integration V2 (Team B, 2026-10-24)
+
+**Status:** backlog. **Not authorized to transmit, read a device or write memory by this entry.**
+
+The V2 slice shipped routing-free ML10X preset management on editor backups (rename / copy / move / swap /
+connector names, candidate files only). Deliberately left for later, with the seams described in
+[`docs/architecture/ml10x-native-adapter.md`](architecture/ml10x-native-adapter.md):
+
+- **Global settings in a candidate file** (MIDI channel, Device ID, Input Split, Loop Bypass Persist, trails):
+  a separate feature with its own configuration-change gate and owner checklist (S9-D01).
+- **Spillover and saved bypass states** (`tipT` / `ringT`, `bypass`): writable only after S8-E02 pins the file
+  encodings on the owner's exports.
+- **Routing authorship in files** (`matrixArray`): blocked (`F-Q14`) until controlled export pairs (S7-E03)
+  and/or a wire dump (S8-E04) give a verified column table and round trips.
+- **Guarded native device reader** (connect, navigate, read; never write): the next hardware-risk-gated
+  Team B assignment, prerequisite for any SysEx writer; depends on an owner-approved scope, the allow-listed
+  opcode encoder, the fixture-driven protocol harness and a muted-amp session (S8-E04 posture).
+- **SysEx writer** (Simple / Advanced connection records, `P3=127` save on the verified-current slot): only
+  after the reader is owner-validated, a backup / compare / restore story exists, and S8-E03 has settled
+  whether a non-persistent apply exists.
+- **Compiler / Persist follow-up** (cross-team): per-loop state confidence, Persist and firmware build as
+  declared instance facts, structural refusal of memory-write / configuration CCs in Scenes, Textures and
+  replay — see [`docs/engineering/ml10x-compiler-persist-safety-note.md`](engineering/ml10x-compiler-persist-safety-note.md).
+- **UX-ML10X-01 bridge**: once a candidate file is editor-accepted (S9-E01), offer "move this rig preset's
+  slot" from the planner through the same proposal layer instead of hand-editing numbers.

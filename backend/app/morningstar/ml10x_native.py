@@ -14,7 +14,9 @@ captured device messages:
 - The one-hot column values are not a function of the target connector alone, so the routing stays
   **undecoded**: it is preserved as opaque native data and the limitation is reported.
 
-Signal Loom does not write ML10X files.
+Signal Loom authors no routing. Since the ML10X Native Integration V2 slice, ``ml10x_propose`` produces a
+**candidate** backup for routing-free, whole-preset operations (rename, copy, move, swap, connector names)
+with every opaque field carried verbatim and the hash recomputed; editor and hardware acceptance stay open.
 """
 
 from __future__ import annotations
@@ -147,6 +149,44 @@ def _bit_positions(row: list) -> list[str]:
                 if v >> b & 1:
                     bits.append(f"byte{bi}.bit{b}")
     return bits
+
+
+def slot_occupancy(p: Any) -> dict:
+    """Is a preset slot confidently empty? Decided on structure, never on the name alone.
+
+    ``empty``: the factory payload — name "Empty", spillover 127/127, Simple mode, bypass 0, all matrix rows zero
+    (506 of the 509 "Empty"-named slots of the one real backup). ``occupied``: anything else, with the first
+    reason found. ``malformed``: not a preset object Signal Loom can read. A musician may name a configured
+    preset "Empty"; three slots of the real backup are exactly that (routing data left behind), so the name is
+    never sufficient.
+    """
+    if not isinstance(p, dict):
+        return {"state": "malformed", "reason": "preset is not an object"}
+    name = p.get("presetName")
+    matrix = p.get("matrixArray")
+    rows_with_data = (
+        [k for k, v in matrix.items() if isinstance(v, list) and any(x for x in v if isinstance(x, int))]
+        if isinstance(matrix, dict)
+        else None
+    )
+    if rows_with_data is None:
+        return {"state": "malformed", "reason": "matrixArray is not an object"}
+    if rows_with_data:
+        return {"state": "occupied", "reason": f"routing data in matrix row(s) {', '.join(rows_with_data)}"}
+    if p.get("advancedMode") is True:
+        return {"state": "occupied", "reason": "Advanced mode flag set"}
+    if p.get("bypass") not in (0, None) and isinstance(p.get("bypass"), int):
+        return {"state": "occupied", "reason": f"bypass bitmap {p.get('bypass')}"}
+    if p.get("tipT") != SPILLOVER_NOTHING or p.get("ringT") != SPILLOVER_NOTHING:
+        return {"state": "occupied", "reason": "spillover target set"}
+    if name != DEFAULT_PRESET_NAME:
+        return {"state": "occupied", "reason": f"named {name!r} (no routing data)"}
+    if len(matrix) != MATRIX_ROWS:
+        return {"state": "occupied", "reason": f"matrixArray has {len(matrix)} rows, not the factory {MATRIX_ROWS}"}
+    return {
+        "state": "empty",
+        "reason": "factory payload: name 'Empty', no routing data, Simple mode, bypass 0, spillover off",
+    }
 
 
 def interpret_preset(p: Any, bank: Any, idx: int, sink: list[dict], path: str) -> dict:
@@ -309,6 +349,7 @@ def interpret(native: dict, sink: list[dict]) -> dict:
             used = 0
             for pi, p in enumerate(items):
                 ip = interpret_preset(p, bno, pi, sink, f"$.data.presetData[{bi}].data[{pi}]")
+                occ = slot_occupancy(p)
                 names.append(
                     {
                         "bank": bno,
@@ -316,6 +357,8 @@ def interpret(native: dict, sink: list[dict]) -> dict:
                         "name": ip.get("name", ""),
                         "used": bool(ip.get("used")),
                         "advanced": bool(ip.get("advanced_mode")),
+                        "occupancy": occ["state"],
+                        "occupancy_reason": occ["reason"],
                     }
                 )
                 if ip.get("used"):
@@ -359,8 +402,10 @@ def inspect(raw: str) -> dict:
         "connectors": len(interp["controller"]["connectors"]),
         "unknown_keys": len(sink),
         "anomalies": len(interp["anomalies"]),
+        "presets_empty": sum(1 for n in interp["preset_names"] if n["occupancy"] == "empty"),
         "routing_decoded": False,
         "native_export_available": False,
+        "proposal_available": True,
     }
     return report
 
