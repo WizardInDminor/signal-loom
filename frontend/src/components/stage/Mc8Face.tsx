@@ -48,7 +48,7 @@ export function Mc8Face({ rig, positions, current, messageCounts, onSelectScene 
           className={`group flex flex-col items-center gap-1 rounded-md px-1 py-1.5 transition ${scene ? "hover:bg-white/10 cursor-pointer" : "cursor-default"}`}
           title={scene ? `Recall “${scene.name}”` : p ? p.short_name : "no preset on this switch"}
         >
-          <span className={`w-7 h-7 rounded-full border-2 flex items-center justify-center text-[10px] font-semibold ${lit ? "bg-amber-300 border-amber-200 text-foreground shadow-[0_0_14px_rgba(252,211,77,0.9)]" : scene ? "bg-slate-700 border-slate-500 text-slate-200 group-hover:border-slate-300" : "bg-slate-800 border-slate-700 text-slate-500"}`}>
+          <span className={`w-7 h-7 rounded-full border-2 flex items-center justify-center text-[10px] font-semibold ${lit ? "bg-amber-300 border-amber-200 text-slate-900 shadow-[0_0_14px_rgba(252,211,77,0.9)]" : scene ? "bg-slate-700 border-slate-500 text-slate-200 group-hover:border-slate-300" : "bg-slate-800 border-slate-700 text-slate-500"}`}>
             {pos}
           </span>
           <span className={`font-mono text-[10px] leading-none ${lit ? "text-amber-200" : "text-slate-300"}`}>{p?.short_name || "—"}</span>
@@ -67,7 +67,7 @@ export function Mc8Face({ rig, positions, current, messageCounts, onSelectScene 
         {(hasPage2 || effectivePage === 2) && (
           <span className="flex gap-1 ml-1">
             {[1, 2].map((pg) => (
-              <button key={pg} type="button" onClick={() => { setPage(pg as 1 | 2); setBankPick(bank.number); }} aria-pressed={effectivePage === pg} className={`rounded px-1.5 py-0.5 text-[10px] border ${effectivePage === pg ? "bg-slate-100 text-foreground border-slate-100" : "border-slate-600 text-slate-300"}`}>page {pg}</button>
+              <button key={pg} type="button" onClick={() => { setPage(pg as 1 | 2); setBankPick(bank.number); }} aria-pressed={effectivePage === pg} className={`rounded px-1.5 py-0.5 text-[10px] border ${effectivePage === pg ? "bg-slate-100 text-slate-900 border-slate-100" : "border-slate-600 text-slate-300"}`}>page {pg}</button>
             ))}
           </span>
         )}

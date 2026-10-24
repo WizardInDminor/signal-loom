@@ -146,12 +146,12 @@ export default function CatalogPage() {
           </div>
           <div className="flex items-center justify-between gap-2 text-[11px] text-neutral-500 mb-1 min-h-4" aria-live="polite">
             <span data-testid="library-count">{countText}</span>
-            {pending && items !== null && <span data-testid="library-pending" className="text-accent">Searching…</span>}
+            {pending && items !== null && <span data-testid="library-pending" className="text-accent-text">Searching…</span>}
           </div>
           <ul data-testid="library-list" data-query={shown?.q ?? ""} data-category={shown?.category ?? ""} aria-busy={pending} className={`flex flex-col divide-y divide-line max-h-[60vh] overflow-auto transition-opacity motion-reduce:transition-none ${pending && items !== null ? "opacity-60" : ""}`}>
             {(items ?? []).map((p) => (
               <li key={p.id}>
-                <button type="button" className={`w-full text-left text-sm py-1 ${sel?.id === p.id ? "text-accent font-medium" : ""}`} aria-current={sel?.id === p.id ? "true" : undefined} onClick={() => { setSel(p); setDraft(null); }}>
+                <button type="button" className={`w-full text-left text-sm py-1 ${sel?.id === p.id ? "text-accent-text font-medium" : ""}`} aria-current={sel?.id === p.id ? "true" : undefined} onClick={() => { setSel(p); setDraft(null); }}>
                   {p.manufacturer} {p.model} <span className="text-[10px] text-neutral-400">{p.source}</span>
                 </button>
               </li>

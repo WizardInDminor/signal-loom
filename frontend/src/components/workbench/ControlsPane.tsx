@@ -158,7 +158,7 @@ function ControlRow({ c, docs, uses, disabled, onOpen, onGoToPage }: { c: CcDef;
       {(c.citation || c.value_semantics) && (
         <div className="px-2.5 pb-1.5 -mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-neutral-500">
           {c.citation && (
-            <button type="button" className="underline decoration-dotted hover:text-accent" onClick={(e) => { e.stopPropagation(); onGoToPage(c.citation!); }} data-testid="control-citation" title="Turn the reference viewer to this page">
+            <button type="button" className="underline decoration-dotted hover:text-accent-text" onClick={(e) => { e.stopPropagation(); onGoToPage(c.citation!); }} data-testid="control-citation" title="Turn the reference viewer to this page">
               {doc?.title ?? "document"}{c.citation.page ? ` · p. ${c.citation.page}` : ""}
             </button>
           )}
@@ -246,7 +246,7 @@ function ControlForm({ docs, value, isNew, busy, reference, cite, usage, units, 
         </Field>
         <div className="sm:col-span-3 flex flex-wrap items-center gap-2">
           <Button onClick={useCurrentPage} disabled={!reference.docId} data-testid="control-use-page" title={cur ? `${cur.title}, PDF page ${reference.page}` : "Open a document on the right first"}>Use the page open on the right{reference.docId ? ` (p. ${reference.page})` : ""}</Button>
-          {c.citation?.page && <button type="button" className="underline decoration-dotted text-neutral-600 hover:text-accent" onClick={() => onGoToPage(c.citation!)}>show cited page</button>}
+          {c.citation?.page && <button type="button" className="underline decoration-dotted text-neutral-600 hover:text-accent-text" onClick={() => onGoToPage(c.citation!)}>show cited page</button>}
           <input aria-label="Citation note" className="flex-1 min-w-[160px]" placeholder="where on the page, e.g. “MIDI chart, row 3”" value={c.citation?.note ?? ""} disabled={!c.citation} onChange={(e) => set({ citation: c.citation ? { ...c.citation, note: e.target.value || null } : null })} />
         </div>
       </fieldset>

@@ -72,7 +72,7 @@ export function WiringDiagram({ selectedId, onSelect }: { selectedId: string | n
           return (
             <g key={i.id}>
               <rect x={b.x} y={b.y} width={BOX_W} height={b.h} rx={3} fill="#f9fafb" stroke="#374151" strokeWidth={0.8} />
-              <text x={b.x + 4} y={b.y + 11} fontSize={9} fontWeight={600}>{i.label}</text>
+              <text x={b.x + 4} y={b.y + 11} fontSize={9} fontWeight={600} fill="#111827">{i.label}</text>
               {ports.map((p) => {
                 const pp = b.ports[p.id];
                 const isOrigin = pendingCable?.instance_id === i.id && pendingCable?.port_id === p.id;

@@ -106,7 +106,7 @@ function NoteItem({ n, docs, busy, editing, reference, cite, onEdit, onCancel, o
             {n.references.map((r, i) => {
               const d = docs.find((x) => x.document_id === r.document_id);
               const label = `${d?.title ?? "document"}${r.page ? ` · p. ${r.page}` : ""}`;
-              return onGoToPage ? <button key={i} type="button" className="underline decoration-dotted text-neutral-600 hover:text-accent text-[11px]" onClick={() => onGoToPage(r)} data-testid="note-reference">{label}</button> : <span key={i} className="text-[11px] text-neutral-500">{label}</span>;
+              return onGoToPage ? <button key={i} type="button" className="underline decoration-dotted text-neutral-600 hover:text-accent-text text-[11px]" onClick={() => onGoToPage(r)} data-testid="note-reference">{label}</button> : <span key={i} className="text-[11px] text-neutral-500">{label}</span>;
             })}
           </div>
           {n.body && <p className="text-neutral-700 whitespace-pre-wrap mt-0.5">{n.body}</p>}
@@ -171,7 +171,7 @@ function NoteForm({ value, docs, reference, cite, busy, isNew, onCancel, onSave,
               </select>
               <span className="text-neutral-500">p.</span>
               <input aria-label={`Reference ${i + 1} page`} type="number" min={1} inputMode="numeric" className="w-16" value={r.page ?? ""} onChange={(e) => set({ references: n.references.map((x, k) => (k === i ? { ...x, page: e.target.value === "" ? null : Number(e.target.value) } : x)) })} />
-              {r.page && onGoToPage && <button type="button" className="underline decoration-dotted text-neutral-600 hover:text-accent" onClick={() => onGoToPage(r)}>show</button>}
+              {r.page && onGoToPage && <button type="button" className="underline decoration-dotted text-neutral-600 hover:text-accent-text" onClick={() => onGoToPage(r)}>show</button>}
               <Button variant="ghost" aria-label={`Remove reference ${i + 1}`} onClick={() => set({ references: n.references.filter((_, k) => k !== i) })}>✕</Button>
             </div>
           ))}

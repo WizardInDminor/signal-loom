@@ -80,3 +80,71 @@ test("phone width: toggle fits without horizontal overflow", async ({ page }) =>
   const box = await page.getByTestId("theme-toggle").boundingBox();
   expect(box!.x + box!.width).toBeLessThanOrEqual(390);
 });
+
+// ---- Contrast regressions (WCAG AA) ----
+const lum = (c: number[]) => { const f = (v: number) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }; return 0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2]); };
+const ratio = (a: number[], b: number[]) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+// Chromium may report lab()/color() values; normalise any CSS colour to sRGB through a canvas.
+const toRgb = (page: Page, colors: string[]) => page.evaluate((list) => {
+  const ctx = document.createElement("canvas").getContext("2d", { willReadFrequently: true })!;
+  return list.map((c) => { ctx.clearRect(0, 0, 1, 1); ctx.fillStyle = "#000"; ctx.fillStyle = c; ctx.fillRect(0, 0, 1, 1); return Array.from(ctx.getImageData(0, 0, 1, 1).data.slice(0, 3)); });
+}, colors);
+const contrast = async (page: Page, fg: string, bg: string) => { const [f, b] = await toRgb(page, [fg, bg]); return ratio(f, b); };
+
+async function demoRig(page: Page) {
+  const res = await page.request.post("/api/rigs", { data: { name: `Theme e2e ${Date.now()}`, from_demo: true } });
+  expect(res.ok()).toBeTruthy();
+  return (await res.json()).id as string;
+}
+async function goDark(page: Page, url: string) {
+  await page.addInitScript(() => localStorage.setItem("signal-loom-theme", "dark"));
+  await page.goto(url);
+  expect(await theme(page)).toBe("dark");
+}
+
+test("dark accent text meets 4.5:1 on panel/background and white-on-accent buttons stay AA", async ({ page }) => {
+  await goDark(page, "/");
+  const c = await page.evaluate(() => {
+    const probe = (v: string) => { const e = document.createElement("i"); e.style.color = `var(${v})`; document.body.append(e); const r = getComputedStyle(e).color; e.remove(); return r; };
+    return { text: probe("--accent-text"), accent: probe("--accent"), panel: probe("--panel"), bg: probe("--background") };
+  });
+  expect(await contrast(page, c.text, c.panel)).toBeGreaterThanOrEqual(4.5);
+  expect(await contrast(page, c.text, c.bg)).toBeGreaterThanOrEqual(4.5);
+  expect(await contrast(page, "#ffffff", c.accent)).toBeGreaterThanOrEqual(4.5);
+});
+
+test("dark: wiring and board paper canvases keep dark ink on light surfaces", async ({ page }) => {
+  const id = await demoRig(page);
+  try {
+    await goDark(page, `/rigs/${id}`);
+    for (const [tab, svgSel] of [["wiring", 'svg[aria-label="Wiring diagram"]'], ["board", 'svg:has([data-testid="board-surface"])']] as const) {
+      await page.getByRole("tab", { name: tab }).click();
+      const svg = page.locator(svgSel).first();
+      await expect(svg).toBeVisible();
+      const r = await svg.evaluate((el) => {
+        const bgc = getComputedStyle(el).backgroundColor;
+        const t = [...el.querySelectorAll("text")].filter((x) => x.textContent?.trim());
+        return { bg: bgc, fills: t.map((x) => getComputedStyle(x).fill) };
+      });
+      expect(r.fills.length).toBeGreaterThan(0);
+      for (const f of r.fills) expect(await contrast(page, f, r.bg), `${tab} text ${f} on ${r.bg}`).toBeGreaterThanOrEqual(4.5);
+    }
+  } finally {
+    await page.request.delete(`/api/rigs/${id}`);
+  }
+});
+
+test("dark: selected/illuminated MC8 states use dark ink on their light fills", async ({ page }) => {
+  const id = await demoRig(page);
+  try {
+    await goDark(page, `/rigs/${id}`);
+    await page.getByRole("tab", { name: "stage" }).click();
+    const face = page.getByTestId("mc8-face");
+    await expect(face).toBeVisible();
+    const pairs = await face.evaluate((el) => [...el.querySelectorAll(".bg-amber-300, .bg-slate-100")].map((x) => { const s = getComputedStyle(x); return { fg: s.color, bg: s.backgroundColor }; }));
+    expect(pairs.length).toBeGreaterThan(0);
+    for (const p of pairs) expect(await contrast(page, p.fg, p.bg), `MC8 ${p.fg} on ${p.bg}`).toBeGreaterThanOrEqual(4.5);
+  } finally {
+    await page.request.delete(`/api/rigs/${id}`);
+  }
+});
