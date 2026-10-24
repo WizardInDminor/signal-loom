@@ -47,4 +47,4 @@
 
 ---
 
-**Binding requirements:** See [Engineering Handoff Template](../docs/engineering/HANDOFF-TEMPLATE.md) for the full PR handoff and [Agent Collaboration Playbook](../docs/engineering/AGENT-COLLABORATION.md) for review/correction etiquette. Complete that handoff here or link a filled-out version; don't present this short template as a replacement. CI green means software checks passed, *not* physical verification or product acceptance. Do not auto-merge.
+**Binding requirements:** See [Engineering Handoff Template](https://github.com/WizardInDminor/signal-loom/blob/main/docs/engineering/HANDOFF-TEMPLATE.md) for the full PR handoff and [Agent Collaboration Playbook](https://github.com/WizardInDminor/signal-loom/blob/main/docs/engineering/AGENT-COLLABORATION.md) for review/correction etiquette. Complete that handoff here or link a filled-out version; don't present this short template as a replacement. CI green means software checks passed, *not* physical verification or product acceptance. Do not auto-merge.
