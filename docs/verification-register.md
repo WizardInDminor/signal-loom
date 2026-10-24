@@ -155,6 +155,15 @@ Evidence: [bridge design §7](morningstar-bridge.md), [adapter architecture](arc
 
 | F-Q13 | **SW-PASS — owner full-backup restore** | PR #8 added complete photo + PDF bundles; PR #10 fixed fresh-seed profile-ID collisions without modifying existing definitions. Real Windows owner recovery confirms all 9 pedal images visible after importing complete Test Board backup; two profile remap notices are intentional, not missing-file warnings. Export audited for 2 embedded PDFs; import/asset regression suite CI passed. Remaining optional confidence check: open each restored PDF in Device Library. No live hardware was tested |
 
+## Session 10 — Dark Mode and hosted-agent collaboration pilot (software-only)
+
+Evidence: [Issue #20](https://github.com/WizardInDminor/signal-loom/issues/20), [merged PR #21](https://github.com/WizardInDminor/signal-loom/pull/21), [backend/frontend/e2e CI on final PR head `20312fe`](https://github.com/WizardInDminor/signal-loom/actions/runs/40104795519), [34 real-browser Light/Dark screenshots](https://github.com/WizardInDminor/signal-loom/tree/1b0d58130ab22f7ca7e931158782d8878b3580be/docs/screenshots/dark-mode-pr21). Squash merge on `main`: `1b0d581` (2026-10-24). Owner reviewed the screenshot evidence and accepted the visual result. **No hardware interaction or MIDI behavior is claimed.**
+
+| ID | Status | Verification and limitations |
+|---|---|---|
+| S10-S01 | **SW-PASS** | Browser-only Light/Dark preference with accessible header toggle, local persistence across reload/routes, early application, safe blocked-storage fallback and no backend writes. `frontend/e2e/theme.spec.ts`: 9 focused cases, including contrast checks for accent text, fixed-paper board/wiring labels and MC8 illuminated states; full backend/frontend/e2e CI green on PR head `20312fe`. Screenshots cover desktop and 390px mobile in both themes; owner visually accepted the merge. **Not** blanket WCAG certification, exhaustive dynamic-UI/keyboard coverage, or physical-device validation |
+| S10-U01 | **DEFERRED — owner accepted** | Board/Wiring/Jack Editor SVG drawing canvases remain deliberately light within Dark Mode, as do PDF page images. A darker pedalboard canvas is a possible later visual refinement, not a current defect or authorized new sprint. Separately, pre-existing 390px Rigs landing/card horizontal clipping remains outside the Dark Mode scope; any future change requires its own issue and tests |
+
 ## How to update this register
 
 1. **Before work:** reference affected IDs in the next PR/charter; distinguish SW-PASS from pending real-hardware tests.
