@@ -108,7 +108,7 @@ export function ControlsPane({ profile, reference, cite, spawn, onSave, onEditin
         )}
         {!list.length && !editing && (
           <div className="rounded-md border border-dashed border-line p-4 text-sm text-neutral-600 flex flex-col gap-2" data-testid="controls-empty">
-            <p className="font-medium text-neutral-800">No documented controls yet.</p>
+            <p className="font-medium text-foreground">No documented controls yet.</p>
             <p className="text-xs">Find the MIDI implementation chart in the manual on the right, then press <b>+ Control</b> for each row: the number, the name the manual uses, what kind of control it is, and the page you are reading. Nothing you enter is sent to the pedal.</p>
           </div>
         )}

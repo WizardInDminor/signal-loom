@@ -11,6 +11,59 @@
   --expression: #ea580c;
   --power: #dc2626;
   --usb: #64748b;
+  color-scheme: light;
+}
+
+/* Dark theme: semantic tokens plus the Tailwind palette steps this app uses for text, tints and borders.
+   Steps used for intentionally dark surfaces and solid badges (neutral/red/amber 600-900 fills, slate) are left alone. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --background: #0f1115;
+  --foreground: #e6e8ec;
+  --panel: #181b21;
+  --line: #3a414d;
+  --accent: #2563eb;
+  --audio: #4ade80;
+  --midi: #a78bfa;
+  --expression: #fb923c;
+  --power: #f87171;
+  --usb: #94a3b8;
+
+  --color-neutral-50: #1d2129;
+  --color-neutral-100: #262b34;
+  --color-neutral-200: #323843;
+  --color-neutral-300: #4a5260;
+  --color-neutral-400: #9aa3b2;
+  --color-neutral-500: #a6aebb;
+  --color-neutral-600: #b8bfca;
+  --color-neutral-700: #cdd3dc;
+
+  --color-red-50: #2d1517;
+  --color-red-100: #3b1a1d;
+  --color-red-200: #6b2a2f;
+  --color-red-300: #8f3a40;
+  --color-red-700: #fca5a5;
+  --color-red-800: #fecaca;
+  --color-red-900: #fee2e2;
+
+  --color-amber-50: #2b2110;
+  --color-amber-100: #3a2c12;
+  --color-amber-200: #5c4518;
+  --color-amber-700: #fcd34d;
+  --color-amber-800: #fde68a;
+  --color-amber-900: #fef3c7;
+
+  --color-green-50: #11271a;
+  --color-green-100: #153322;
+  --color-green-200: #1f5a38;
+  --color-green-300: #2c7a4d;
+  --color-green-800: #bbf7d0;
+  --color-green-900: #dcfce7;
+
+  --color-blue-50: #12223d;
+  --color-blue-200: #234a85;
+  --color-blue-800: #bfdbfe;
+  --color-blue-900: #dbeafe;
 }
 
 @theme inline {

@@ -75,7 +75,7 @@ export function NotesPane({ notes, docs, reference, cite, spawn, scopeLabel, onS
         {editing && isNew && <NoteForm key={`new-${formKey}`} value={editing} docs={docs} reference={reference} cite={cite} busy={busy} isNew onCancel={() => setEditing(null)} onSave={(n, more) => void commit(n, more)} onDelete={null} onGoToPage={onGoToPage} />}
         {!notes.length && !editing && (
           <div className="rounded-md border border-dashed border-line p-4 text-sm text-neutral-600 flex flex-col gap-1" data-testid="notes-empty">
-            <p className="font-medium text-neutral-800">No notes about {scopeLabel} yet.</p>
+            <p className="font-medium text-foreground">No notes about {scopeLabel} yet.</p>
             <p className="text-xs">Write down the things you would otherwise look up again — pin the ones you need on stage.</p>
           </div>
         )}
@@ -110,7 +110,7 @@ function NoteItem({ n, docs, busy, editing, reference, cite, onEdit, onCancel, o
             })}
           </div>
           {n.body && <p className="text-neutral-700 whitespace-pre-wrap mt-0.5">{n.body}</p>}
-          {n.steps.length > 0 && <ol className="list-decimal pl-5 mt-1 flex flex-col gap-0.5 text-neutral-800" data-testid="note-steps">{n.steps.map((s, i) => <li key={i}>{s}</li>)}</ol>}
+          {n.steps.length > 0 && <ol className="list-decimal pl-5 mt-1 flex flex-col gap-0.5 text-foreground" data-testid="note-steps">{n.steps.map((s, i) => <li key={i}>{s}</li>)}</ol>}
           {n.source_note && <p className="text-[11px] text-neutral-500 mt-0.5">Source: {n.source_note}</p>}
         </div>
         <Button variant="ghost" onClick={onEdit} disabled={busy} aria-label={`Edit ${n.title}`}>Edit</Button>

@@ -30,7 +30,7 @@ export function EvidenceTag({ evidence }: { evidence: Evidence | string }) {
 export function FilePicker({ label, testId, onText, hint }: { label: string; testId: string; onText: (text: string, name: string) => void; hint?: string }) {
   return (
     <label className="flex flex-col gap-1 text-xs text-neutral-600">
-      <span className="font-medium text-neutral-800">{label}</span>
+      <span className="font-medium text-foreground">{label}</span>
       <input
         type="file"
         accept=".json,application/json"

@@ -65,7 +65,7 @@ export function PerformancePanel({ texture, previews, onCreateDemo }: { texture:
             </span>
           )}
           {armed && !performingThis && <Button variant="danger" onClick={() => void start(rig.id, texture.id)} disabled={!canStart} title={startTitle} data-testid="perf-start">▶ Start performance</Button>}
-          {performingThis && <Button variant="primary" className="!bg-white !text-red-700 !border-white font-semibold" onClick={() => void stop()} data-testid="perf-stop">■ Stop</Button>}
+          {performingThis && <Button variant="primary" className="!bg-white !text-[#b91c1c] !border-white font-semibold" onClick={() => void stop()} data-testid="perf-stop">■ Stop</Button>}
           {!performingThis && <Button variant="danger" onClick={() => { void stop(); void stopQueue(); }} data-testid="perf-stop-idle" title="Stop any performance or queued messages now">■ Stop</Button>}
           {armed && !performingThis && <Button onClick={() => void disarm()} data-testid="perf-disarm">Disarm</Button>}
         </div>

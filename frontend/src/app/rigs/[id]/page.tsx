@@ -110,7 +110,7 @@ export default function RigPage() {
         {conflict && <Button onClick={() => window.location.reload()}>Reload</Button>}
         <div className="ml-auto flex flex-wrap gap-2 text-xs">
           {liveStatus?.performance?.state === "performing" && liveStatus.performance.rig_id === rig.id && (
-            <span className="rounded px-2 py-0.5 bg-red-700 text-white font-semibold animate-pulse motion-reduce:animate-none" data-testid="rig-performing-badge" title="A texture is performing: values stream to the rig under the budget. Open the Instrument tab to stop.">PERFORMING</span>
+            <span className="rounded px-2 py-0.5 bg-[#b91c1c] text-white font-semibold animate-pulse motion-reduce:animate-none" data-testid="rig-performing-badge" title="A texture is performing: values stream to the rig under the budget. Open the Instrument tab to stop.">PERFORMING</span>
           )}
           {liveStatus?.armed && liveStatus.connected_rig_id === rig.id && (
             <span className="rounded px-2 py-0.5 bg-red-600 text-white font-semibold" data-testid="rig-armed-badge" title="Live MIDI is armed: auditions and panel controls transmit. Open the Live tab to disarm.">ARMED</span>

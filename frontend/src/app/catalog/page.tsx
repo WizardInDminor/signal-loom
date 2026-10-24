@@ -140,7 +140,7 @@ export default function CatalogPage() {
           <div className="flex gap-1 mb-1">
             <div className="relative flex-1 min-w-0">
               <input ref={searchRef} type="search" aria-label="Search devices" placeholder="Search…" className="w-full pr-7" value={q} onChange={(e) => setFilters({ q: e.target.value })} onKeyDown={(e) => { if (e.key === "Escape" && q) { e.preventDefault(); clearSearch(); } }} />
-              {q && <button type="button" data-testid="library-clear" aria-label="Clear search" title="Clear search (Esc)" className="absolute right-1 top-1/2 -translate-y-1/2 rounded px-1 text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100" onClick={clearSearch}>✕</button>}
+              {q && <button type="button" data-testid="library-clear" aria-label="Clear search" title="Clear search (Esc)" className="absolute right-1 top-1/2 -translate-y-1/2 rounded px-1 text-neutral-500 hover:text-foreground hover:bg-neutral-100" onClick={clearSearch}>✕</button>}
             </div>
             <select aria-label="Category" value={category} onChange={(e) => setFilters({ category: e.target.value })}><option value="">all</option>{CATEGORIES.map((c) => <option key={c}>{c}</option>)}</select>
           </div>
